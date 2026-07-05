@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#166a52" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Lotto Lab" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>開獎分析 App</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="stylesheet" href="/styles.css?v=10" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Lotto Lab</p>
+          <h1>開獎號碼與統計選號</h1>
+        </div>
+        <button id="refreshBtn" class="icon-button" title="重新整理" aria-label="重新整理">↻</button>
+      </header>
+
+      <section class="control-band">
+        <div class="segmented" role="tablist" aria-label="彩種">
+          <button class="segment active" data-game="tw539">今彩 539</button>
+          <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
+        </div>
+        <label class="select-wrap">
+          分析期數
+          <select id="limitSelect">
+            <option value="60">60 期</option>
+            <option value="120">120 期</option>
+            <option value="180" selected>180 期</option>
+            <option value="365">365 期</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="status" id="status">正在讀取資料...</section>
+
+      <section class="dashboard" id="dashboard" hidden>
+        <article class="panel subscription-panel">
+          <div>
+            <p class="label">訂閱方案</p>
+            <h2>Pro 統計分析</h2>
+            <p class="fineprint">免費看最新開獎；訂閱後可解鎖完整分析、歷史趨勢與後續通知功能。</p>
+          </div>
+          <div class="plan-grid" id="planGrid"></div>
+        </article>
+
+        <article class="panel latest-panel">
+          <div class="panel-head">
+            <div>
+              <p class="label">最新一期</p>
+              <h2 id="gameName">-</h2>
+            </div>
+            <a id="sourceLink" class="source-link" href="#" target="_blank" rel="noreferrer">資料源</a>
+          </div>
+          <div class="meta">
+            <span id="period">期別 -</span>
+            <span id="date">日期 -</span>
+          </div>
+          <div class="balls" id="latestBalls"></div>
+        </article>
+
+        <article class="panel pick-panel">
+          <p class="label">統計參考選號</p>
+          <div class="balls accent" id="pickBalls"></div>
+          <p class="fineprint" id="analysisNote"></p>
+        </article>
+
+        <article class="panel saved-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">我的號碼</p>
+              <h2>自動對最新一期</h2>
+            </div>
+            <button id="usePickBtn" class="text-button">套用參考</button>
+          </div>
+          <form class="saved-form" id="savedForm">
+            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 1" />
+            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 2" />
+            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 3" />
+            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 4" />
+            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 5" />
+            <button class="save-button" type="submit">儲存</button>
+          </form>
+          <div class="saved-list" id="savedList"></div>
+        </article>
+
+        <article class="panel model-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">模型設定</p>
+              <h2>調整偏好</h2>
+            </div>
+            <button id="resetModelBtn" class="text-button">重設</button>
+          </div>
+          <div class="model-controls" id="modelControls">
+            <label class="range-row">
+              <span>熱度</span>
+              <input type="range" min="0" max="60" value="30" data-weight="heat" />
+              <strong id="heatWeight">30</strong>
+            </label>
+            <label class="range-row">
+              <span>遺漏</span>
+              <input type="range" min="0" max="60" value="25" data-weight="overdue" />
+              <strong id="overdueWeight">25</strong>
+            </label>
+            <label class="range-row">
+              <span>分散</span>
+              <input type="range" min="0" max="60" value="25" data-weight="spread" />
+              <strong id="spreadWeight">25</strong>
+            </label>
+            <label class="range-row">
+              <span>回測</span>
+              <input type="range" min="0" max="60" value="20" data-weight="backtest" />
+              <strong id="backtestWeight">20</strong>
+            </label>
+          </div>
+          <p class="fineprint" id="modelSummary">目前模型：熱度 30%、遺漏 25%、分散 25%、回測 20%。</p>
+        </article>
+
+        <article class="panel candidate-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">高分組合</p>
+              <h2>候選排序</h2>
+            </div>
+            <button id="generateBtn" class="text-button">重新產生</button>
+          </div>
+          <p class="fineprint">依追蹤分數排序，保留隨機性；這是分析候選，不是中獎保證。</p>
+          <div class="candidate-list" id="candidateList"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head compact">
+            <p class="label">熱號</p>
+            <span id="drawCount">-</span>
+          </div>
+          <div class="rank-list" id="hotList"></div>
+        </article>
+
+        <article class="panel">
+          <p class="label">冷號</p>
+          <div class="rank-list" id="coldList"></div>
+        </article>
+
+        <article class="panel">
+          <p class="label">最久未開</p>
+          <div class="rank-list" id="overdueList"></div>
+        </article>
+
+        <article class="panel wide">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">歷史開獎</p>
+              <h2>紀錄查詢</h2>
+            </div>
+            <span id="historyCount" class="count-pill">-</span>
+          </div>
+          <div class="history-search">
+            <label>
+              起始年
+              <input id="historyFromYear" type="number" min="2007" max="2026" value="2024" />
+            </label>
+            <label>
+              結束年
+              <input id="historyToYear" type="number" min="2007" max="2026" value="2026" />
+            </label>
+            <label>
+              關鍵字
+              <input id="historyKeyword" type="search" placeholder="日期、期別、號碼" />
+            </label>
+            <label>
+              指定號碼
+              <input id="historyNumber" type="number" min="1" max="39" inputmode="numeric" placeholder="1-39" />
+            </label>
+            <button id="crossYearSearch" class="save-button" type="button">跨年查詢</button>
+            <button id="clearHistorySearch" class="text-button">清除</button>
+          </div>
+          <p class="fineprint" id="historyScope">目前顯示本次載入的分析期數。</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>期別</th>
+                  <th>號碼</th>
+                </tr>
+              </thead>
+              <tbody id="historyRows"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+    <script src="/app.js?v=10"></script>
+  </body>
+</html>
