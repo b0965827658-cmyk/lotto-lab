@@ -62,6 +62,11 @@ def cached(key: str, loader):
     return value
 
 
+def cache_key_for_draws(prefix: str, game: str, limit: int, draws: list[dict[str, Any]]) -> str:
+    latest = draws[0] if draws else {}
+    return f"{prefix}-{game}-{limit}-{latest.get('date', '')}-{latest.get('period', '')}"
+
+
 def fetch_text(url: str, timeout: int = 25) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with open_url(req, timeout=timeout) as response:
@@ -618,10 +623,10 @@ def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_cou
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     distribution = {str(n): 0 for n in range(pick_count + 1)}
     rows = []
-    sample_size = min(30, max(0, len(ordered) - 25))
+    sample_size = min(18, max(0, len(ordered) - 25))
     for index in range(sample_size):
         target = ordered[index]
-        training = ordered[index + 1 : index + 121]
+        training = ordered[index + 1 : index + 91]
         if len(training) < 20:
             continue
         pick = model_recommendation(
@@ -761,12 +766,16 @@ def build_payload(game: str, limit: int) -> dict[str, Any]:
         history = taiwan_history(limit)
         if history and not same_draw(history[0], latest):
             history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
-        return {"latest": latest, "history": history[:limit], "analysis": analyze(history[:limit])}
+        draws = history[:limit]
+        analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
+        return {"latest": latest, "history": draws, "analysis": analysis}
     if game == "ca-fantasy5":
         history = california_history(limit)
         if not history:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
-        return {"latest": history[0], "history": history[:limit], "analysis": analyze(history[:limit])}
+        draws = history[:limit]
+        analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
+        return {"latest": history[0], "history": draws, "analysis": analysis}
     raise ValueError("unknown game")
 
 
