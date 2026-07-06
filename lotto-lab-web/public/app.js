@@ -1,10 +1,13 @@
 const state = {
   game: "tw539",
-  limit: 180,
+  limit: 90,
   latest: null,
   analysis: null,
   history: [],
   displayHistory: [],
+  requestId: 0,
+  apiCache: new Map(),
+  candidateCache: new Map(),
   modelWeights: {
     heat: 30,
     overdue: 25,
@@ -168,6 +171,7 @@ function loadModelWeights() {
 
 function saveModelWeights() {
   localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(state.modelWeights));
+  state.candidateCache.clear();
 }
 
 function normalizedWeights() {
@@ -359,10 +363,13 @@ function buildCandidate(pool) {
 }
 
 function generateCandidates() {
+  const cacheKey = `${state.game}-${state.limit}-${state.latest?.date || ""}-${state.latest?.period || ""}-${JSON.stringify(state.modelWeights)}`;
+  const cached = state.candidateCache.get(cacheKey);
+  if (cached) return cached;
   const pool = candidatePool();
   const seen = new Set();
   const candidates = [];
-  for (let i = 0; i < 260; i += 1) {
+  for (let i = 0; i < 120; i += 1) {
     const numbers = buildCandidate(pool);
     const key = numbers.join(",");
     if (seen.has(key)) continue;
@@ -371,9 +378,11 @@ function generateCandidates() {
     const score = scorePick(numbers, backtest);
     candidates.push({ numbers, backtest, score });
   }
-  return candidates
+  const result = candidates
     .sort((a, b) => b.score.total - a.score.total || b.backtest.bestHit - a.backtest.bestHit)
     .slice(0, 5);
+  state.candidateCache.set(cacheKey, result);
+  return result;
 }
 
 function savePick(numbers) {
@@ -643,18 +652,34 @@ async function loadConfig() {
 }
 
 async function load() {
-  setStatus("正在讀取資料...");
+  const cacheKey = `${state.game}-${state.limit}`;
+  const cachedPayload = state.apiCache.get(cacheKey);
+  const requestId = ++state.requestId;
+  if (cachedPayload) {
+    render(cachedPayload);
+    setStatus("已用暫存資料顯示，正在背景確認最新資料...");
+  } else {
+    setStatus("正在讀取資料...");
+  }
   els.refresh.disabled = true;
   try {
     const response = await fetch(`/api/lottery?game=${state.game}&limit=${state.limit}`);
     const payload = await response.json();
     if (!payload.ok) throw new Error(payload.error || "資料讀取失敗");
+    if (requestId !== state.requestId) return;
+    state.apiCache.set(cacheKey, payload);
     render(payload);
   } catch (error) {
+    if (cachedPayload) {
+      setStatus("目前使用暫存資料；背景更新暫時失敗。", true);
+      return;
+    }
     els.dashboard.hidden = true;
     setStatus(error.message, true);
   } finally {
-    els.refresh.disabled = false;
+    if (requestId === state.requestId) {
+      els.refresh.disabled = false;
+    }
   }
 }
 
@@ -715,6 +740,7 @@ document.querySelectorAll(".segment").forEach((button) => {
 
 els.limit.addEventListener("change", () => {
   state.limit = Number(els.limit.value);
+  state.candidateCache.clear();
   load();
 });
 
