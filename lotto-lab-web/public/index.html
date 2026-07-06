@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=11" />
+    <link rel="stylesheet" href="/styles.css?v=12" />
   </head>
   <body>
     <main class="shell">
@@ -96,6 +96,18 @@
           </div>
           <div class="backtest-recent" id="backtestRecent"></div>
           <p class="fineprint" id="backtestMethod"></p>
+        </article>
+
+        <article class="panel pattern-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">版路分析</p>
+              <h2 id="patternModel">-</h2>
+            </div>
+            <span id="patternRepeat" class="count-pill">-</span>
+          </div>
+          <div class="pattern-grid" id="patternGrid"></div>
+          <div class="pattern-lines" id="patternLines"></div>
         </article>
 
         <article class="panel saved-panel">
@@ -224,6 +236,6 @@
         </article>
       </section>
     </main>
-    <script src="/app.js?v=11"></script>
+    <script src="/app.js?v=12"></script>
   </body>
 </html>

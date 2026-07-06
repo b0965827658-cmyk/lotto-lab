@@ -63,6 +63,10 @@ const els = {
   bestHit: $("#bestHit"),
   backtestRecent: $("#backtestRecent"),
   backtestMethod: $("#backtestMethod"),
+  patternModel: $("#patternModel"),
+  patternRepeat: $("#patternRepeat"),
+  patternGrid: $("#patternGrid"),
+  patternLines: $("#patternLines"),
 };
 
 function pad(n) {
@@ -463,6 +467,56 @@ function renderModelBacktest(backtest) {
     .join("");
 }
 
+function renderPatterns(patterns, profiles = []) {
+  if (!patterns) {
+    els.patternModel.textContent = "-";
+    els.patternRepeat.textContent = "-";
+    els.patternGrid.innerHTML = `<div class="empty-state">資料累積後會顯示版路分析。</div>`;
+    els.patternLines.innerHTML = "";
+    return;
+  }
+  els.patternModel.textContent = patterns.selectedLabel || "版路模型";
+  els.patternRepeat.textContent = `重複均值 ${patterns.repeatAverage}`;
+  const zone = patterns.zonePatterns?.[0];
+  const odd = patterns.oddPatterns?.[0];
+  const low = patterns.lowPatterns?.[0];
+  const tails = patterns.tails || [];
+  const sumRange = patterns.sumRange || {};
+  els.patternGrid.innerHTML = `
+    <div>
+      <span>常見區間</span>
+      <strong>${zone ? zone.pattern : "-"}</strong>
+      <em>${zone ? `${zone.count} 次` : ""}</em>
+    </div>
+    <div>
+      <span>奇偶版路</span>
+      <strong>${odd ? `${odd.odd} 奇 ${odd.even} 偶` : "-"}</strong>
+      <em>${odd ? `${odd.count} 次` : ""}</em>
+    </div>
+    <div>
+      <span>大小版路</span>
+      <strong>${low ? `${low.low} 小 ${low.high} 大` : "-"}</strong>
+      <em>${low ? `${low.count} 次` : ""}</em>
+    </div>
+    <div>
+      <span>總和帶</span>
+      <strong>${sumRange.min || "-"}-${sumRange.max || "-"}</strong>
+      <em>中心 ${sumRange.center || "-"}</em>
+    </div>
+  `;
+  const tailText = tails.map((item) => `${item.tail}尾 ${item.count}次`).join("、") || "-";
+  const neighborText = patterns.neighborNumbers?.length ? patterns.neighborNumbers.map(pad).join(" · ") : "-";
+  const profileText = profiles
+    .slice(0, 3)
+    .map((item) => `${item.label}：均中 ${item.averageHit}，最高 ${item.bestHit} 中`)
+    .join(" / ");
+  els.patternLines.innerHTML = `
+    <div><span>近期熱尾</span><strong>${tailText}</strong></div>
+    <div><span>上期鄰近</span><strong>${neighborText}</strong></div>
+    <div><span>模型比較</span><strong>${profileText || "-"}</strong></div>
+  `;
+}
+
 function renderSavedPicks() {
   const picks = loadSavedPicks().filter((pick) => pick.game === state.game);
   const latestNumbers = state.latest?.numbers || [];
@@ -533,6 +587,7 @@ function render(payload) {
   els.pickBalls.innerHTML = balls(analysis.recommendation);
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest);
+  renderPatterns(analysis.patterns, analysis.modelProfiles);
   els.hot.innerHTML = rankRows(analysis.hot, "count");
   els.cold.innerHTML = rankRows(analysis.cold, "count");
   els.overdue.innerHTML = rankRows(analysis.overdue, "gap");
