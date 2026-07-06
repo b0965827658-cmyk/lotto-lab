@@ -6,8 +6,10 @@ import json
 import os
 import random
 import re
+import socket
 import ssl
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -17,7 +19,16 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-ssl._create_default_https_context = ssl._create_unverified_context
+_ORIGINAL_GETADDRINFO = socket.getaddrinfo
+
+
+def ipv4_getaddrinfo(*args, **kwargs):
+    results = _ORIGINAL_GETADDRINFO(*args, **kwargs)
+    ipv4_results = [info for info in results if info[0] == socket.AF_INET]
+    return ipv4_results or results
+
+
+socket.getaddrinfo = ipv4_getaddrinfo
 
 ROOT = Path(__file__).parent
 PUBLIC = ROOT / "public"
@@ -51,7 +62,7 @@ def cached(key: str, loader):
 
 def fetch_text(url: str, timeout: int = 25) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as response:
+    with open_url(req, timeout=timeout) as response:
         raw = response.read()
     for encoding in ("utf-8-sig", "utf-8", "big5", "cp950"):
         try:
@@ -63,8 +74,19 @@ def fetch_text(url: str, timeout: int = 25) -> str:
 
 def fetch_bytes(url: str, timeout: int = 40) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as response:
+    with open_url(req, timeout=timeout) as response:
         return response.read()
+
+
+def open_url(req: urllib.request.Request, timeout: int):
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, ssl.SSLError):
+            context = ssl._create_unverified_context()
+            return urllib.request.urlopen(req, timeout=timeout, context=context)
+        raise
 
 
 def normalize_numbers(nums: list[int]) -> list[int]:
@@ -269,7 +291,7 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
         "overdue": [{"number": n, "gap": gaps[n]} for n in overdue],
         "frequency": [{"number": n, "count": frequency[n], "gap": gaps[n]} for n in frequency],
         "recommendation": recommendation,
-        "note": "這是用頻率與遺漏值做的統計參考，不代表可預測或保證中獎。",
+        "note": "這是用頻率、遺漏值與分散度做的統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
     }
 
 
