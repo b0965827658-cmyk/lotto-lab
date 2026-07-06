@@ -95,6 +95,10 @@ def normalize_numbers(nums: list[int]) -> list[int]:
     return sorted(int(n) for n in nums)
 
 
+def same_draw(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return left.get("date") == right.get("date") and normalize_numbers(left.get("numbers", [])) == normalize_numbers(right.get("numbers", []))
+
+
 def parse_date(value: str) -> str:
     value = value.strip()
     if not value:
@@ -359,8 +363,8 @@ def build_payload(game: str, limit: int) -> dict[str, Any]:
     if game == "tw539":
         latest = taiwan_latest()
         history = taiwan_history(limit)
-        if history and history[0]["period"] != latest["period"]:
-            history = [latest] + [item for item in history if item["period"] != latest["period"]]
+        if history and not same_draw(history[0], latest):
+            history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
         return {"latest": latest, "history": history[:limit], "analysis": analyze(history[:limit])}
     if game == "ca-fantasy5":
         history = california_history(limit)
