@@ -264,6 +264,10 @@ select {
   grid-column: span 2;
 }
 
+.pattern-panel {
+  grid-column: span 2;
+}
+
 .model-panel {
   grid-column: span 1;
 }
@@ -551,6 +555,67 @@ select {
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
+}
+
+.pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pattern-grid div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f9fbf8;
+  padding: 12px;
+}
+
+.pattern-grid span,
+.pattern-grid em {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.pattern-grid strong {
+  display: block;
+  margin: 6px 0;
+  color: var(--green);
+  font-size: 20px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.pattern-lines {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pattern-lines div {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.pattern-lines span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.pattern-lines strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .backtest-recent {
@@ -849,6 +914,7 @@ th {
   .saved-panel,
   .model-panel,
   .backtest-panel,
+  .pattern-panel,
   .candidate-panel {
     display: grid;
     grid-template-columns: 1fr;
@@ -894,6 +960,15 @@ th {
   .metric-grid,
   .backtest-card {
     grid-template-columns: 1fr;
+  }
+
+  .pattern-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pattern-lines div {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 
   .hit-chip {
