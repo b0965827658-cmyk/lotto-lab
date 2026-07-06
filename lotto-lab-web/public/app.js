@@ -57,6 +57,12 @@ const els = {
   historyToYear: $("#historyToYear"),
   crossYearSearch: $("#crossYearSearch"),
   historyScope: $("#historyScope"),
+  backtestBadge: $("#backtestBadge"),
+  avgHit: $("#avgHit"),
+  threePlusRate: $("#threePlusRate"),
+  bestHit: $("#bestHit"),
+  backtestRecent: $("#backtestRecent"),
+  backtestMethod: $("#backtestMethod"),
 };
 
 function pad(n) {
@@ -419,6 +425,44 @@ function renderCandidates() {
   });
 }
 
+function renderModelBacktest(backtest) {
+  if (!backtest || !backtest.testedCount) {
+    els.backtestBadge.textContent = "資料不足";
+    els.avgHit.textContent = "-";
+    els.threePlusRate.textContent = "-";
+    els.bestHit.textContent = "-";
+    els.backtestRecent.innerHTML = `<div class="empty-state">累積更多期數後會顯示模型回測。</div>`;
+    els.backtestMethod.textContent = "";
+    return;
+  }
+  els.backtestBadge.textContent = `${backtest.testedCount} 期`;
+  els.avgHit.textContent = backtest.averageHit;
+  els.threePlusRate.textContent = `${backtest.threePlusRate}%`;
+  els.bestHit.textContent = `${backtest.bestHit} 中`;
+  els.backtestMethod.textContent = backtest.method;
+  els.backtestRecent.innerHTML = backtest.recentRows
+    .map(
+      (row) => `
+        <div class="backtest-card">
+          <div>
+            <strong>${row.date}</strong>
+            <span>期別 ${row.period}</span>
+          </div>
+          <div>
+            <span class="tiny-label">當時推薦</span>
+            <div class="saved-balls">${miniBalls(row.pick, row.actual)}</div>
+          </div>
+          <div>
+            <span class="tiny-label">實際開獎</span>
+            <div class="saved-balls">${miniBalls(row.actual)}</div>
+          </div>
+          <div class="hit-chip">${row.hits} 中</div>
+        </div>
+      `,
+    )
+    .join("");
+}
+
 function renderSavedPicks() {
   const picks = loadSavedPicks().filter((pick) => pick.game === state.game);
   const latestNumbers = state.latest?.numbers || [];
@@ -488,6 +532,7 @@ function render(payload) {
   els.latestBalls.innerHTML = balls(latest.numbers);
   els.pickBalls.innerHTML = balls(analysis.recommendation);
   els.note.textContent = analysis.note;
+  renderModelBacktest(analysis.backtest);
   els.hot.innerHTML = rankRows(analysis.hot, "count");
   els.cold.innerHTML = rankRows(analysis.cold, "count");
   els.overdue.innerHTML = rankRows(analysis.overdue, "gap");

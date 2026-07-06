@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=10" />
+    <link rel="stylesheet" href="/styles.css?v=11" />
   </head>
   <body>
     <main class="shell">
@@ -70,6 +70,32 @@
           <p class="label">統計參考選號</p>
           <div class="balls accent" id="pickBalls"></div>
           <p class="fineprint" id="analysisNote"></p>
+        </article>
+
+        <article class="panel backtest-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">模型回測</p>
+              <h2>最近表現</h2>
+            </div>
+            <span id="backtestBadge" class="count-pill">-</span>
+          </div>
+          <div class="metric-grid">
+            <div>
+              <strong id="avgHit">-</strong>
+              <span>平均命中</span>
+            </div>
+            <div>
+              <strong id="threePlusRate">-</strong>
+              <span>3 中以上</span>
+            </div>
+            <div>
+              <strong id="bestHit">-</strong>
+              <span>最高命中</span>
+            </div>
+          </div>
+          <div class="backtest-recent" id="backtestRecent"></div>
+          <p class="fineprint" id="backtestMethod"></p>
         </article>
 
         <article class="panel saved-panel">
@@ -198,6 +224,6 @@
         </article>
       </section>
     </main>
-    <script src="/app.js?v=10"></script>
+    <script src="/app.js?v=11"></script>
   </body>
 </html>

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
 import os
 import random
 import re
+import socket
 import ssl
 import time
 import urllib.error
@@ -18,12 +20,23 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+_ORIGINAL_GETADDRINFO = socket.getaddrinfo
+
+
+def ipv4_getaddrinfo(*args, **kwargs):
+    results = _ORIGINAL_GETADDRINFO(*args, **kwargs)
+    ipv4_results = [info for info in results if info[0] == socket.AF_INET]
+    return ipv4_results or results
+
+
+socket.getaddrinfo = ipv4_getaddrinfo
 
 ROOT = Path(__file__).parent
 PUBLIC = ROOT / "public"
 
 TAIWAN_LAST_URL = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/LastNumber"
 TAIWAN_DATASET_URL = "https://gaze.nta.gov.tw/dntmb/OpenData/csvDw?ntaCode=D423F"
+PILIO_TAIWAN_URL = "https://www.pilio.idv.tw/lto539/list.asp?indexpage={page}&orderby=new"
 CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
@@ -82,6 +95,10 @@ def normalize_numbers(nums: list[int]) -> list[int]:
     return sorted(int(n) for n in nums)
 
 
+def same_draw(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return left.get("date") == right.get("date") and normalize_numbers(left.get("numbers", [])) == normalize_numbers(right.get("numbers", []))
+
+
 def parse_date(value: str) -> str:
     value = value.strip()
     if not value:
@@ -94,21 +111,76 @@ def parse_date(value: str) -> str:
     return value
 
 
+def parse_pilio_date(value: str) -> str:
+    clean = re.sub(r"<[^>]+>", " ", value)
+    clean = html.unescape(clean)
+    match = re.search(r"(\d{1,2})/(\d{1,2})\s+(\d{2,4})", clean)
+    if not match:
+        return ""
+    month, day, year = match.groups()
+    year_number = int(year)
+    if year_number < 100:
+        year_number += 2000
+    return f"{year_number:04d}-{int(month):02d}-{int(day):02d}"
+
+
+def pilio_taiwan_history(limit: int = 90) -> list[dict[str, Any]]:
+    def load():
+        draws = []
+        page_count = max(1, min(8, (limit + 22) // 23))
+        for page in range(1, page_count + 1):
+            url = PILIO_TAIWAN_URL.format(page=page)
+            text = fetch_text(url, timeout=15)
+            rows = re.findall(
+                r'<td class="date-cell">\s*(.*?)\s*</td>\s*<td class="number-cell">\s*(.*?)\s*</td>',
+                text,
+                re.S,
+            )
+            for date_html, number_html in rows:
+                numbers = [int(n) for n in re.findall(r"\d{1,2}", html.unescape(number_html))]
+                if len(numbers) < 5:
+                    continue
+                date = parse_pilio_date(date_html)
+                if not date:
+                    continue
+                draws.append(
+                    {
+                        "game": "tw539",
+                        "name": "今彩 539",
+                        "period": date.replace("-", ""),
+                        "date": date,
+                        "numbers": normalize_numbers(numbers[:5]),
+                        "source": "樂透彩幸運發財網備援資料",
+                        "sourceUrl": url,
+                    }
+                )
+        draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+        return draws[:limit]
+
+    return cached(f"pilio-taiwan-history-{limit}", load)
+
+
 def taiwan_latest() -> dict[str, Any]:
-    payload = json.loads(fetch_text(TAIWAN_LAST_URL))
-    entries = payload.get("content", {}).get("lastNumberList", [])
-    daily_cash = next((item for item in entries if item.get("gameCode") == 5120), None)
-    if not daily_cash:
-        raise RuntimeError("台灣彩券 API 目前沒有回傳今彩 539 最新資料")
-    return {
-        "game": "tw539",
-        "name": "今彩 539",
-        "period": daily_cash.get("period", ""),
-        "date": parse_date(daily_cash.get("drawDate", "")),
-        "numbers": normalize_numbers(daily_cash.get("lotNumber", [])),
-        "source": "台灣彩券 LastNumber API",
-        "sourceUrl": TAIWAN_LAST_URL,
-    }
+    try:
+        payload = json.loads(fetch_text(TAIWAN_LAST_URL, timeout=10))
+        entries = payload.get("content", {}).get("lastNumberList", [])
+        daily_cash = next((item for item in entries if item.get("gameCode") == 5120), None)
+        if not daily_cash:
+            raise RuntimeError("台灣彩券 API 目前沒有回傳今彩 539 最新資料")
+        return {
+            "game": "tw539",
+            "name": "今彩 539",
+            "period": daily_cash.get("period", ""),
+            "date": parse_date(daily_cash.get("drawDate", "")),
+            "numbers": normalize_numbers(daily_cash.get("lotNumber", [])),
+            "source": "台灣彩券 LastNumber API",
+            "sourceUrl": TAIWAN_LAST_URL,
+        }
+    except Exception:
+        history = pilio_taiwan_history(1)
+        if history:
+            return history[0]
+        raise
 
 
 def taiwan_dataset_rows() -> list[dict[str, str]]:
@@ -167,10 +239,13 @@ def taiwan_year_history(year: int) -> list[dict[str, Any]]:
 
 
 def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
-    rows = taiwan_dataset_rows()
-    latest_row = max(rows, key=lambda row: int(row.get("資料所屬年度", "0") or "0"))
-    latest_year = int(latest_row.get("資料所屬年度", "0") or "0") + 1911
-    return taiwan_year_history(latest_year)[:limit]
+    try:
+        rows = taiwan_dataset_rows()
+        latest_row = max(rows, key=lambda row: int(row.get("資料所屬年度", "0") or "0"))
+        latest_year = int(latest_row.get("資料所屬年度", "0") or "0") + 1911
+        return taiwan_year_history(latest_year)[:limit]
+    except Exception:
+        return pilio_taiwan_history(limit)
 
 
 def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", number: int | None = None, limit: int = 2000) -> dict[str, Any]:
@@ -247,7 +322,7 @@ def california_history(limit: int = 180) -> list[dict[str, Any]]:
     return cached("california-history", load)[:limit]
 
 
-def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+def number_stats(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
     frequency = {n: 0 for n in range(1, max_number + 1)}
     last_seen = {n: None for n in range(1, max_number + 1)}
     ordered = list(draws)
@@ -258,6 +333,109 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
             if last_seen[number] is None:
                 last_seen[number] = index
     gaps = {n: (last_seen[n] if last_seen[n] is not None else len(ordered)) for n in frequency}
+    recent_window = ordered[: min(18, len(ordered))]
+    recent_frequency = {n: 0 for n in range(1, max_number + 1)}
+    for draw in recent_window:
+        for number in draw["numbers"]:
+            recent_frequency[number] += 1
+    return {
+        "ordered": ordered,
+        "frequency": frequency,
+        "recentFrequency": recent_frequency,
+        "gaps": gaps,
+    }
+
+
+def combo_spread_score(numbers: list[int], max_number: int = 39) -> float:
+    sorted_numbers = sorted(numbers)
+    span = sorted_numbers[-1] - sorted_numbers[0]
+    zones = len({(n - 1) // 10 for n in sorted_numbers})
+    odd_count = sum(1 for n in sorted_numbers if n % 2)
+    consecutive_pairs = sum(1 for left, right in zip(sorted_numbers, sorted_numbers[1:]) if right - left == 1)
+    return (
+        (span / (max_number - 1)) * 0.42
+        + (zones / 4) * 0.32
+        + (1 - abs(odd_count - 2.5) / 2.5) * 0.18
+        + max(0, 1 - consecutive_pairs / 3) * 0.08
+    )
+
+
+def model_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5, seed_label: str = "") -> list[int]:
+    stats = number_stats(draws, max_number)
+    frequency = stats["frequency"]
+    recent_frequency = stats["recentFrequency"]
+    gaps = stats["gaps"]
+    max_freq = max(frequency.values()) or 1
+    max_recent = max(recent_frequency.values()) or 1
+    max_gap = max(gaps.values()) or 1
+    number_scores = {}
+    for n in range(1, max_number + 1):
+        heat = frequency[n] / max_freq
+        recent = recent_frequency[n] / max_recent
+        overdue = gaps[n] / max_gap
+        number_scores[n] = heat * 0.45 + recent * 0.18 + overdue * 0.27 + random.Random(f"{seed_label}:{n}").random() * 0.10
+
+    pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(22, max_number)]
+    rng = random.Random(f"lotto-lab:{seed_label}:{','.join(map(str, pool))}")
+    candidates: set[tuple[int, ...]] = set()
+    candidates.add(tuple(sorted(pool[:pick_count])))
+    for _ in range(260):
+        weighted = sorted(pool, key=lambda n: number_scores[n] + rng.random() * 0.34, reverse=True)
+        candidates.add(tuple(sorted(weighted[:pick_count])))
+        if len(pool) >= pick_count:
+            candidates.add(tuple(sorted(rng.sample(pool, pick_count))))
+
+    def score_combo(combo: tuple[int, ...]) -> float:
+        score = sum(number_scores[n] for n in combo) / pick_count
+        return score * 0.72 + combo_spread_score(list(combo), max_number) * 0.28
+
+    best = max(candidates, key=lambda combo: (score_combo(combo), combo_spread_score(list(combo), max_number), combo))
+    return list(best)
+
+
+def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    ordered = list(draws)
+    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    distribution = {str(n): 0 for n in range(pick_count + 1)}
+    rows = []
+    sample_size = min(30, max(0, len(ordered) - 25))
+    for index in range(sample_size):
+        target = ordered[index]
+        training = ordered[index + 1 : index + 121]
+        if len(training) < 20:
+            continue
+        pick = model_recommendation(training, max_number=max_number, pick_count=pick_count, seed_label=f"bt-{target.get('date')}-{target.get('period')}")
+        hits = len(set(pick) & set(target["numbers"]))
+        distribution[str(hits)] += 1
+        rows.append(
+            {
+                "period": target.get("period", ""),
+                "date": target.get("date", ""),
+                "pick": pick,
+                "actual": target["numbers"],
+                "hits": hits,
+            }
+        )
+    tested = len(rows)
+    hit_sum = sum(row["hits"] for row in rows)
+    three_plus = sum(1 for row in rows if row["hits"] >= 3)
+    best_hit = max((row["hits"] for row in rows), default=0)
+    return {
+        "testedCount": tested,
+        "averageHit": round(hit_sum / tested, 2) if tested else 0,
+        "threePlusCount": three_plus,
+        "threePlusRate": round((three_plus / tested) * 100, 1) if tested else 0,
+        "bestHit": best_hit,
+        "distribution": distribution,
+        "recentRows": rows[:10],
+        "method": "每一期只用該期以前的歷史資料產生推薦，再與實際開獎比對。",
+    }
+
+
+def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    stats = number_stats(draws, max_number)
+    frequency = stats["frequency"]
+    gaps = stats["gaps"]
     hot = sorted(frequency, key=lambda n: (-frequency[n], n))[:10]
     cold = sorted(frequency, key=lambda n: (frequency[n], n))[:10]
     overdue = sorted(gaps, key=lambda n: (-gaps[n], n))[:10]
@@ -268,10 +446,9 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
     for n in frequency:
         score = (frequency[n] / max_freq) * 0.58 + (gaps[n] / max_gap) * 0.42
         scored.append((score, n))
-    scored.sort(reverse=True)
-    pool = [n for _, n in scored[:16]]
-    random.seed(datetime.now(timezone.utc).strftime("%Y-%m-%d") + ",".join(map(str, pool)))
-    recommendation = sorted(random.sample(pool, pick_count))
+    seed_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    recommendation = model_recommendation(draws, max_number=max_number, pick_count=pick_count, seed_label=seed_label)
+    backtest = rolling_backtest(draws, max_number=max_number, pick_count=pick_count)
 
     return {
         "drawCount": len(draws),
@@ -280,7 +457,8 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
         "overdue": [{"number": n, "gap": gaps[n]} for n in overdue],
         "frequency": [{"number": n, "count": frequency[n], "gap": gaps[n]} for n in frequency],
         "recommendation": recommendation,
-        "note": "這是用頻率、遺漏值與分散度做的統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
+        "backtest": backtest,
+        "note": "這是用熱度、近期動能、遺漏值、分散度與滾動回測做的統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
     }
 
 
@@ -288,8 +466,8 @@ def build_payload(game: str, limit: int) -> dict[str, Any]:
     if game == "tw539":
         latest = taiwan_latest()
         history = taiwan_history(limit)
-        if history and history[0]["period"] != latest["period"]:
-            history = [latest] + [item for item in history if item["period"] != latest["period"]]
+        if history and not same_draw(history[0], latest):
+            history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
         return {"latest": latest, "history": history[:limit], "analysis": analyze(history[:limit])}
     if game == "ca-fantasy5":
         history = california_history(limit)
