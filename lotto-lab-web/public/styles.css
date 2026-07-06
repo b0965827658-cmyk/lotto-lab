@@ -260,6 +260,10 @@ select {
   grid-column: span 2;
 }
 
+.backtest-panel {
+  grid-column: span 2;
+}
+
 .model-panel {
   grid-column: span 1;
 }
@@ -521,6 +525,83 @@ select {
   font-weight: 800;
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-grid div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f9fbf8;
+  padding: 12px;
+}
+
+.metric-grid strong {
+  display: block;
+  color: var(--green);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.metric-grid span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.backtest-recent {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.backtest-card {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr) minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.backtest-card strong,
+.backtest-card span {
+  display: block;
+}
+
+.backtest-card strong {
+  font-size: 14px;
+}
+
+.backtest-card span,
+.tiny-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tiny-label {
+  margin-bottom: 6px;
+}
+
+.hit-chip {
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+  border-radius: 8px;
+  background: #173f38;
+  color: #fff;
+  font-weight: 900;
+}
+
 .save-candidate {
   min-height: 38px;
   border: 0;
@@ -767,6 +848,7 @@ th {
   .subscription-panel,
   .saved-panel,
   .model-panel,
+  .backtest-panel,
   .candidate-panel {
     display: grid;
     grid-template-columns: 1fr;
@@ -807,6 +889,16 @@ th {
 
   .history-search {
     grid-template-columns: 1fr;
+  }
+
+  .metric-grid,
+  .backtest-card {
+    grid-template-columns: 1fr;
+  }
+
+  .hit-chip {
+    justify-self: start;
+    min-width: 56px;
   }
 
   .ball {
