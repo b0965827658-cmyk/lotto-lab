@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
 import os
@@ -35,6 +36,7 @@ PUBLIC = ROOT / "public"
 
 TAIWAN_LAST_URL = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/LastNumber"
 TAIWAN_DATASET_URL = "https://gaze.nta.gov.tw/dntmb/OpenData/csvDw?ntaCode=D423F"
+PILIO_TAIWAN_URL = "https://www.pilio.idv.tw/lto539/list.asp?indexpage={page}&orderby=new"
 CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
@@ -105,21 +107,76 @@ def parse_date(value: str) -> str:
     return value
 
 
+def parse_pilio_date(value: str) -> str:
+    clean = re.sub(r"<[^>]+>", " ", value)
+    clean = html.unescape(clean)
+    match = re.search(r"(\d{1,2})/(\d{1,2})\s+(\d{2,4})", clean)
+    if not match:
+        return ""
+    month, day, year = match.groups()
+    year_number = int(year)
+    if year_number < 100:
+        year_number += 2000
+    return f"{year_number:04d}-{int(month):02d}-{int(day):02d}"
+
+
+def pilio_taiwan_history(limit: int = 90) -> list[dict[str, Any]]:
+    def load():
+        draws = []
+        page_count = max(1, min(8, (limit + 22) // 23))
+        for page in range(1, page_count + 1):
+            url = PILIO_TAIWAN_URL.format(page=page)
+            text = fetch_text(url, timeout=15)
+            rows = re.findall(
+                r'<td class="date-cell">\s*(.*?)\s*</td>\s*<td class="number-cell">\s*(.*?)\s*</td>',
+                text,
+                re.S,
+            )
+            for date_html, number_html in rows:
+                numbers = [int(n) for n in re.findall(r"\d{1,2}", html.unescape(number_html))]
+                if len(numbers) < 5:
+                    continue
+                date = parse_pilio_date(date_html)
+                if not date:
+                    continue
+                draws.append(
+                    {
+                        "game": "tw539",
+                        "name": "今彩 539",
+                        "period": date.replace("-", ""),
+                        "date": date,
+                        "numbers": normalize_numbers(numbers[:5]),
+                        "source": "樂透彩幸運發財網備援資料",
+                        "sourceUrl": url,
+                    }
+                )
+        draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+        return draws[:limit]
+
+    return cached(f"pilio-taiwan-history-{limit}", load)
+
+
 def taiwan_latest() -> dict[str, Any]:
-    payload = json.loads(fetch_text(TAIWAN_LAST_URL))
-    entries = payload.get("content", {}).get("lastNumberList", [])
-    daily_cash = next((item for item in entries if item.get("gameCode") == 5120), None)
-    if not daily_cash:
-        raise RuntimeError("台灣彩券 API 目前沒有回傳今彩 539 最新資料")
-    return {
-        "game": "tw539",
-        "name": "今彩 539",
-        "period": daily_cash.get("period", ""),
-        "date": parse_date(daily_cash.get("drawDate", "")),
-        "numbers": normalize_numbers(daily_cash.get("lotNumber", [])),
-        "source": "台灣彩券 LastNumber API",
-        "sourceUrl": TAIWAN_LAST_URL,
-    }
+    try:
+        payload = json.loads(fetch_text(TAIWAN_LAST_URL, timeout=10))
+        entries = payload.get("content", {}).get("lastNumberList", [])
+        daily_cash = next((item for item in entries if item.get("gameCode") == 5120), None)
+        if not daily_cash:
+            raise RuntimeError("台灣彩券 API 目前沒有回傳今彩 539 最新資料")
+        return {
+            "game": "tw539",
+            "name": "今彩 539",
+            "period": daily_cash.get("period", ""),
+            "date": parse_date(daily_cash.get("drawDate", "")),
+            "numbers": normalize_numbers(daily_cash.get("lotNumber", [])),
+            "source": "台灣彩券 LastNumber API",
+            "sourceUrl": TAIWAN_LAST_URL,
+        }
+    except Exception:
+        history = pilio_taiwan_history(1)
+        if history:
+            return history[0]
+        raise
 
 
 def taiwan_dataset_rows() -> list[dict[str, str]]:
@@ -178,10 +235,13 @@ def taiwan_year_history(year: int) -> list[dict[str, Any]]:
 
 
 def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
-    rows = taiwan_dataset_rows()
-    latest_row = max(rows, key=lambda row: int(row.get("資料所屬年度", "0") or "0"))
-    latest_year = int(latest_row.get("資料所屬年度", "0") or "0") + 1911
-    return taiwan_year_history(latest_year)[:limit]
+    try:
+        rows = taiwan_dataset_rows()
+        latest_row = max(rows, key=lambda row: int(row.get("資料所屬年度", "0") or "0"))
+        latest_year = int(latest_row.get("資料所屬年度", "0") or "0") + 1911
+        return taiwan_year_history(latest_year)[:limit]
+    except Exception:
+        return pilio_taiwan_history(limit)
 
 
 def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", number: int | None = None, limit: int = 2000) -> dict[str, Any]:
