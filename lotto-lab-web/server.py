@@ -6,6 +6,7 @@ import json
 import os
 import random
 import re
+import ssl
 import time
 import urllib.request
 import zipfile
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+ssl._create_default_https_context = ssl._create_unverified_context
 
 ROOT = Path(__file__).parent
 PUBLIC = ROOT / "public"
