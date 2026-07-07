@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=16" />
+    <link rel="stylesheet" href="/styles.css?v=18" />
   </head>
   <body>
     <main class="shell">
@@ -142,8 +142,10 @@
           <div class="model-controls" id="modelControls">
             <div class="focus-controls" id="focusControls" aria-label="分析重點">
               <button type="button" class="focus-chip active" data-focus="balanced">綜合</button>
+              <button type="button" class="focus-chip" data-focus="classic">熱遺</button>
               <button type="button" class="focus-chip" data-focus="hot">追熱</button>
               <button type="button" class="focus-chip" data-focus="overdue">追冷</button>
+              <button type="button" class="focus-chip" data-focus="interval">區間</button>
               <button type="button" class="focus-chip" data-focus="pattern">版路</button>
               <button type="button" class="focus-chip" data-focus="backtest">回測</button>
             </div>
@@ -245,6 +247,6 @@
         </article>
       </section>
     </main>
-    <script src="/app.js?v=16"></script>
+    <script src="/app.js?v=18"></script>
   </body>
 </html>

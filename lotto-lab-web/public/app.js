@@ -31,6 +31,11 @@ const FOCUS_PRESETS = {
     weights: { heat: 28, overdue: 22, spread: 25, backtest: 25 },
     description: "熱度、遺漏、版型與回測一起看。",
   },
+  classic: {
+    label: "熱遺平衡",
+    weights: { heat: 45, overdue: 27, spread: 18, backtest: 10 },
+    description: "回到曾經 539 回測中 4 的樸素熱度加遺漏邏輯，少做尾數限制。",
+  },
   hot: {
     label: "追熱",
     weights: { heat: 48, overdue: 8, spread: 18, backtest: 26 },
@@ -45,6 +50,11 @@ const FOCUS_PRESETS = {
     label: "版路",
     weights: { heat: 18, overdue: 18, spread: 42, backtest: 22 },
     description: "優先看區間、奇偶、大小與尾數分散。",
+  },
+  interval: {
+    label: "區間",
+    weights: { heat: 16, overdue: 18, spread: 38, backtest: 28 },
+    description: "優先抓近期集中落點區間，再混合熱號、拖牌與回測。",
   },
   backtest: {
     label: "回測",
@@ -357,7 +367,9 @@ function scorePick(numbers, backtest) {
   const pairBonus = hints.pairs.some((pair) => pair.every((number) => numbers.includes(number))) ? 5 : 0;
   const dragBonus = Math.min(4, numbers.filter((number) => hints.dragTargets.includes(number)).length * 2);
   const repeatBonus = Math.min(3, numbers.filter((number) => hints.repeatNumbers.includes(number)).length * 1.5);
-  const patternBonus = pairBonus + dragBonus + repeatBonus;
+  const intervalHits = hints.intervals.map((range) => numbers.filter((number) => number >= range.start && number <= range.end).length);
+  const intervalBonus = Math.min(5, Math.max(0, ...intervalHits) * 1.6);
+  const patternBonus = pairBonus + dragBonus + repeatBonus + intervalBonus;
   const weights = normalizedWeights();
   const total = clamp(
     Math.round(heat * weights.heat + overdue * weights.overdue + spread * weights.spread + backtestScore * weights.backtest + patternBonus),
@@ -365,7 +377,7 @@ function scorePick(numbers, backtest) {
     100,
   );
   const label = total >= 75 ? "高追蹤" : total >= 55 ? "可觀察" : "保守";
-  return { total, heat, overdue, spread, backtest: backtestScore, pattern: Math.round(patternBonus), label };
+  return { total, heat, overdue, spread, backtest: backtestScore, pattern: Math.round(patternBonus), interval: Math.round(intervalBonus), label };
 }
 
 function scoreDetails(score) {
@@ -374,6 +386,7 @@ function scoreDetails(score) {
     ["遺漏", score.overdue],
     ["分散", score.spread],
     ["回測", score.backtest],
+    ["區間", score.interval || 0],
     ["版路", score.pattern || 0],
   ]
     .map(
@@ -397,7 +410,7 @@ function hotTailProfile() {
     });
   });
   const sorted = counts.sort((a, b) => b.count - a.count || a.tail - b.tail);
-  const size = state.analysisFocus === "pattern" ? 6 : 7;
+  const size = state.analysisFocus === "pattern" || state.analysisFocus === "interval" ? 6 : 7;
   const hotTails = sorted.slice(0, size).map((item) => item.tail);
   return {
     hotTails,
@@ -405,10 +418,18 @@ function hotTailProfile() {
   };
 }
 
+function shouldFilterByHotTail() {
+  return ["hot", "pattern", "interval"].includes(state.analysisFocus);
+}
+
 function patternHints() {
   const patterns = state.analysis?.patterns || {};
   const pairs = (patterns.pairCombos || []).map((item) => item.numbers || []).filter((pair) => pair.length === 2);
   const dragTargets = [...new Set((patterns.dragCards || []).map((item) => item.target).filter(Boolean))];
+  const intervals = (patterns.intervals || []).slice(0, 3).filter((item) => item.start && item.end);
+  const intervalNumbers = [
+    ...new Set(intervals.flatMap((item) => Array.from({ length: item.end - item.start + 1 }, (_, index) => item.start + index))),
+  ];
   const repeatNumbers = [
     ...new Set(
       (patterns.repeatCandidates || [])
@@ -417,7 +438,7 @@ function patternHints() {
         .map((item) => item.number),
     ),
   ];
-  return { pairs, dragTargets, repeatNumbers };
+  return { pairs, dragTargets, intervalNumbers, intervals, repeatNumbers };
 }
 
 function candidatePool() {
@@ -425,11 +446,12 @@ function candidatePool() {
   if (!rows.length) return Array.from({ length: 39 }, (_, i) => i + 1);
   const hotSize = state.analysisFocus === "hot" ? 22 : 14;
   const overdueSize = state.analysisFocus === "overdue" ? 22 : 14;
-  const balancedSize = state.analysisFocus === "pattern" ? 28 : 20;
+  const balancedSize = state.analysisFocus === "pattern" || state.analysisFocus === "interval" ? 28 : 20;
   const { hotTails } = hotTailProfile();
   const hotTailSet = new Set(hotTails);
   const tailFilteredUniverse = Array.from({ length: 39 }, (_, i) => i + 1).filter((number) => hotTailSet.has(number % 10));
-  const numberAllowed = (number) => hotTailSet.has(number % 10);
+  const filterByTail = shouldFilterByHotTail();
+  const numberAllowed = (number) => !filterByTail || hotTailSet.has(number % 10);
   const hot = [...rows].sort((a, b) => b.count - a.count || a.number - b.number).slice(0, hotSize).map((row) => row.number);
   const overdue = [...rows].sort((a, b) => b.gap - a.gap || a.number - b.number).slice(0, overdueSize).map((row) => row.number);
   const balanced = [...rows]
@@ -438,9 +460,10 @@ function candidatePool() {
     .slice(0, balancedSize)
     .map((row) => row.number);
   const hints = patternHints();
-  const patternNumbers = [...hints.pairs.flat(), ...hints.dragTargets, ...hints.repeatNumbers];
+  const patternNumbers = [...hints.pairs.flat(), ...hints.dragTargets, ...hints.intervalNumbers, ...hints.repeatNumbers];
   const pool = [...new Set([...hot, ...overdue, ...balanced, ...patternNumbers, ...tailFilteredUniverse])].filter(numberAllowed);
-  return pool.length >= 12 ? pool : tailFilteredUniverse;
+  if (pool.length >= 12) return pool;
+  return filterByTail ? tailFilteredUniverse : Array.from({ length: 39 }, (_, i) => i + 1);
 }
 
 function randomChoice(items) {
@@ -455,7 +478,14 @@ function buildCandidate(pool) {
   const hints = patternHints();
   const pairChoices = hints.pairs.filter((pair) => pair.every((number) => poolSet.has(number)));
   const dragTargets = hints.dragTargets.filter((number) => poolSet.has(number));
+  const intervalNumbers = hints.intervalNumbers.filter((number) => poolSet.has(number));
   const repeatNumbers = hints.repeatNumbers.filter((number) => poolSet.has(number));
+  const classicList = [...frequencyRows]
+    .map((row) => ({ n: row.number, score: row.count * 0.45 + row.gap * 0.27 + Math.random() * 5 }))
+    .filter((item) => poolSet.has(item.n))
+    .sort((a, b) => b.score - a.score || a.n - b.n)
+    .slice(0, 22)
+    .map((item) => item.n);
   const hotList = [...frequencyRows]
     .sort((a, b) => b.count - a.count || a.number - b.number)
     .map((row) => row.number)
@@ -475,19 +505,28 @@ function buildCandidate(pool) {
   ].filter(Boolean);
 
   zones.forEach((zone) => {
-    const chance = focus === "pattern" ? 0.88 : 0.72;
+    const chance = focus === "pattern" || focus === "interval" ? 0.88 : 0.72;
     if (numbers.size < 5 && zone.length && Math.random() < chance) {
       numbers.add(randomChoice(zone));
     }
   });
-  if ((focus === "pattern" || Math.random() < 0.55) && pairChoices.length && numbers.size <= 3) {
+  if ((focus === "pattern" || focus === "interval" || Math.random() < 0.55) && pairChoices.length && numbers.size <= 3) {
     randomChoice(pairChoices).forEach((number) => numbers.add(number));
   }
   if (dragTargets.length && numbers.size < 5 && Math.random() < 0.72) {
     numbers.add(randomChoice(dragTargets));
   }
+  if (intervalNumbers.length && numbers.size < 5 && Math.random() < 0.78) {
+    numbers.add(randomChoice(intervalNumbers));
+  }
+  if ((focus === "pattern" || focus === "interval") && intervalNumbers.length) {
+    while (numbers.size < 3) numbers.add(randomChoice(intervalNumbers));
+  }
   if (repeatNumbers.length && numbers.size < 5 && Math.random() < 0.45) {
     numbers.add(randomChoice(repeatNumbers));
+  }
+  if (focus === "classic" && classicList.length) {
+    while (numbers.size < 4) numbers.add(randomChoice(classicList));
   }
   if (focus === "hot" && hotList.length) {
     while (numbers.size < 3) numbers.add(randomChoice(hotList));
@@ -561,6 +600,7 @@ function renderReferencePick() {
   els.pickBalls.innerHTML = balls(candidate.numbers);
   els.pickMeta.innerHTML = `
     <span>${focus.label}</span>
+    <span>${focus.description}</span>
     <span>熱尾 ${tailProfile.label}</span>
     <span>分數 ${candidate.score.total}</span>
     <span>版路 +${candidate.score.pattern || 0}</span>
@@ -675,6 +715,7 @@ function renderPatterns(patterns, profiles = []) {
   const odd = patterns.oddPatterns?.[0];
   const low = patterns.lowPatterns?.[0];
   const tails = patterns.tails || [];
+  const intervals = patterns.intervals || [];
   const sumRange = patterns.sumRange || {};
   els.patternGrid.innerHTML = `
     <div>
@@ -699,6 +740,8 @@ function renderPatterns(patterns, profiles = []) {
     </div>
   `;
   const tailText = tails.map((item) => `${item.tail}尾 ${item.count}次`).join("、") || "-";
+  const intervalText =
+    intervals.map((item) => `${item.label} 集中${item.focusCount}期/${item.rate}%`).join("、") || "-";
   const neighborText = patterns.neighborNumbers?.length ? patterns.neighborNumbers.map(pad).join(" · ") : "-";
   const pairText =
     patterns.pairCombos?.map((item) => `${pad(item.numbers[0])}-${pad(item.numbers[1])} ${item.count}次`).join("、") || "-";
@@ -712,6 +755,7 @@ function renderPatterns(patterns, profiles = []) {
     .join(" / ");
   els.patternLines.innerHTML = `
     <div><span>近期熱尾</span><strong>${tailText}</strong></div>
+    <div><span>區間號</span><strong>${intervalText}</strong></div>
     <div><span>上期鄰近</span><strong>${neighborText}</strong></div>
     <div><span>哥倆好</span><strong>${pairText}</strong></div>
     <div><span>拖牌</span><strong>${dragText}</strong></div>
