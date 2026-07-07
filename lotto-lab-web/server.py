@@ -166,26 +166,29 @@ def pilio_taiwan_history(limit: int = 90) -> list[dict[str, Any]]:
 
 
 def taiwan_latest() -> dict[str, Any]:
-    try:
-        payload = json.loads(fetch_text(TAIWAN_LAST_URL, timeout=10))
-        entries = payload.get("content", {}).get("lastNumberList", [])
-        daily_cash = next((item for item in entries if item.get("gameCode") == 5120), None)
-        if not daily_cash:
-            raise RuntimeError("台灣彩券 API 目前沒有回傳今彩 539 最新資料")
-        return {
-            "game": "tw539",
-            "name": "今彩 539",
-            "period": daily_cash.get("period", ""),
-            "date": parse_date(daily_cash.get("drawDate", "")),
-            "numbers": normalize_numbers(daily_cash.get("lotNumber", [])),
-            "source": "台灣彩券 LastNumber API",
-            "sourceUrl": TAIWAN_LAST_URL,
-        }
-    except Exception:
-        history = pilio_taiwan_history(1)
-        if history:
-            return history[0]
-        raise
+    def load():
+        try:
+            payload = json.loads(fetch_text(TAIWAN_LAST_URL, timeout=10))
+            entries = payload.get("content", {}).get("lastNumberList", [])
+            daily_cash = next((item for item in entries if item.get("gameCode") == 5120), None)
+            if not daily_cash:
+                raise RuntimeError("台灣彩券 API 目前沒有回傳今彩 539 最新資料")
+            return {
+                "game": "tw539",
+                "name": "今彩 539",
+                "period": daily_cash.get("period", ""),
+                "date": parse_date(daily_cash.get("drawDate", "")),
+                "numbers": normalize_numbers(daily_cash.get("lotNumber", [])),
+                "source": "台灣彩券 LastNumber API",
+                "sourceUrl": TAIWAN_LAST_URL,
+            }
+        except Exception:
+            history = pilio_taiwan_history(1)
+            if history:
+                return history[0]
+            raise
+
+    return cached("taiwan-latest", load)
 
 
 def taiwan_dataset_rows() -> list[dict[str, str]]:
