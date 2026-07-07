@@ -643,6 +643,73 @@ select {
   overflow: auto;
 }
 
+.model-rank-list {
+  display: grid;
+  gap: 8px;
+}
+
+.model-rank {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f9fbf8;
+  padding: 10px;
+}
+
+.model-rank.best {
+  border-color: rgba(22, 106, 82, 0.34);
+  background: #edf5f0;
+}
+
+.model-rank strong,
+.model-rank span,
+.model-rank em {
+  display: block;
+}
+
+.model-rank strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.model-rank span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.model-rank em {
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+  border-radius: 8px;
+  background: #173f38;
+  color: #fff;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.backtest-warning {
+  border: 1px solid rgba(214, 152, 34, 0.36);
+  border-radius: 8px;
+  background: rgba(214, 152, 34, 0.12);
+  color: #60410d;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.backtest-method-line {
+  display: block;
+  margin-top: 6px;
+}
+
 .backtest-card {
   display: grid;
   grid-template-columns: 118px minmax(0, 1fr) minmax(0, 1fr) 56px;
@@ -1004,7 +1071,8 @@ th {
   }
 
   .metric-grid,
-  .backtest-card {
+  .backtest-card,
+  .model-rank {
     grid-template-columns: 1fr;
   }
 
