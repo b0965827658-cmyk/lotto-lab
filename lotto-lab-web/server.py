@@ -360,27 +360,27 @@ def number_stats(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str,
 MODEL_PROFILES = {
     "classic": {
         "label": "熱遺平衡",
-        "number": {"heat": 0.45, "recent": 0.18, "trend": 0.0, "gap": 0.27, "neighbor": 0.0, "tail": 0.0, "pair": 0.0},
+        "number": {"heat": 0.45, "recent": 0.18, "trend": 0.0, "gap": 0.27, "neighbor": 0.0, "tail": 0.0, "pair": 0.0, "drag": 0.0, "repeatSignal": 0.0},
         "combo": {"spread": 1.0, "zone": 0.0, "odd": 0.0, "low": 0.0, "sum": 0.0, "tail": 0.0, "repeat": 0.0},
     },
     "balanced": {
         "label": "綜合版路",
-        "number": {"heat": 0.24, "recent": 0.22, "trend": 0.14, "gap": 0.17, "neighbor": 0.10, "tail": 0.07, "pair": 0.06},
+        "number": {"heat": 0.21, "recent": 0.20, "trend": 0.12, "gap": 0.15, "neighbor": 0.08, "tail": 0.06, "pair": 0.06, "drag": 0.08, "repeatSignal": 0.04},
         "combo": {"spread": 0.18, "zone": 0.20, "odd": 0.14, "low": 0.10, "sum": 0.18, "tail": 0.08, "repeat": 0.12},
     },
     "momentum": {
         "label": "近期動能",
-        "number": {"heat": 0.18, "recent": 0.34, "trend": 0.22, "gap": 0.08, "neighbor": 0.08, "tail": 0.05, "pair": 0.05},
+        "number": {"heat": 0.15, "recent": 0.30, "trend": 0.19, "gap": 0.07, "neighbor": 0.07, "tail": 0.04, "pair": 0.05, "drag": 0.08, "repeatSignal": 0.05},
         "combo": {"spread": 0.14, "zone": 0.18, "odd": 0.12, "low": 0.10, "sum": 0.16, "tail": 0.08, "repeat": 0.22},
     },
     "cycle": {
         "label": "遺漏週期",
-        "number": {"heat": 0.18, "recent": 0.12, "trend": 0.08, "gap": 0.34, "neighbor": 0.10, "tail": 0.08, "pair": 0.10},
+        "number": {"heat": 0.16, "recent": 0.10, "trend": 0.07, "gap": 0.30, "neighbor": 0.09, "tail": 0.07, "pair": 0.09, "drag": 0.07, "repeatSignal": 0.05},
         "combo": {"spread": 0.20, "zone": 0.18, "odd": 0.12, "low": 0.12, "sum": 0.18, "tail": 0.10, "repeat": 0.10},
     },
     "shape": {
         "label": "區間尾數",
-        "number": {"heat": 0.17, "recent": 0.16, "trend": 0.10, "gap": 0.14, "neighbor": 0.08, "tail": 0.18, "pair": 0.17},
+        "number": {"heat": 0.15, "recent": 0.14, "trend": 0.09, "gap": 0.12, "neighbor": 0.07, "tail": 0.17, "pair": 0.18, "drag": 0.06, "repeatSignal": 0.02},
         "combo": {"spread": 0.18, "zone": 0.26, "odd": 0.16, "low": 0.12, "sum": 0.14, "tail": 0.10, "repeat": 0.04},
     },
 }
@@ -465,6 +465,29 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
         transitions.append(len(set(newer["numbers"]) & set(older["numbers"])))
     repeat_target = sum(transitions[:30]) / min(30, len(transitions)) if transitions else 0.65
 
+    drag_counts: dict[tuple[int, int], int] = {}
+    drag_source_totals = {n: 0 for n in range(1, max_number + 1)}
+    drag_number_score = {n: 0 for n in range(1, max_number + 1)}
+    repeat_counts = {n: 0 for n in range(1, max_number + 1)}
+    repeat_source_totals = {n: 0 for n in range(1, max_number + 1)}
+    for newer, older in zip(ordered[:80], ordered[1:81]):
+        newer_numbers = set(newer["numbers"])
+        older_numbers = set(older["numbers"])
+        for source in older_numbers:
+            drag_source_totals[source] += 1
+            repeat_source_totals[source] += 1
+            if source in newer_numbers:
+                repeat_counts[source] += 1
+            for target in newer_numbers:
+                if target == source:
+                    continue
+                drag_counts[(source, target)] = drag_counts.get((source, target), 0) + 1
+                if source in latest_numbers:
+                    drag_number_score[target] += 1
+
+    max_drag_number = max(drag_number_score.values()) or 1
+    max_repeat_number = max(repeat_counts.values()) or 1
+
     zone_counts: dict[tuple[int, int, int, int], int] = {}
     odd_counts: dict[int, int] = {}
     low_counts: dict[int, int] = {}
@@ -495,6 +518,8 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
             "neighbor": 1.0 if n in neighbor_numbers else (0.45 if n in latest_numbers else 0.0),
             "tail": safe_divide(tails[n % 10], max_tail),
             "pair": safe_divide(pair_number_score[n], max_pair_number),
+            "drag": safe_divide(drag_number_score[n], max_drag_number),
+            "repeatSignal": safe_divide(repeat_counts[n], max_repeat_number) if n in latest_numbers else 0.0,
         }
 
     return {
@@ -509,6 +534,11 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
         "repeatTarget": repeat_target,
         "latestNumbers": latest_numbers,
         "tailCounts": tails,
+        "dragCounts": drag_counts,
+        "dragSourceTotals": drag_source_totals,
+        "dragNumberScore": drag_number_score,
+        "repeatCounts": repeat_counts,
+        "repeatSourceTotals": repeat_source_totals,
     }
 
 
@@ -703,10 +733,39 @@ def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profi
     odd_rows = sorted(profile["oddCounts"].items(), key=lambda item: (-item[1], item[0]))[:3]
     low_rows = sorted(profile["lowCounts"].items(), key=lambda item: (-item[1], item[0]))[:3]
     tail_rows = sorted(profile["tailCounts"].items(), key=lambda item: (-item[1], item[0]))[:5]
+    pair_rows = sorted(profile["pairCounts"].items(), key=lambda item: (-item[1], item[0]))[:5]
     transitions = [len(set(newer["numbers"]) & set(older["numbers"])) for newer, older in zip(ordered, ordered[1:])]
     repeat_avg = round(sum(transitions[:30]) / min(30, len(transitions)), 2) if transitions else 0
     latest = ordered[0]["numbers"] if ordered else []
     neighbors = sorted({nearby for number in latest for nearby in (number - 1, number + 1) if 1 <= nearby <= max_number})
+    drag_rows = []
+    for source in latest:
+        source_total = profile["dragSourceTotals"].get(source, 0) or 1
+        source_targets = [
+            {
+                "source": source,
+                "target": target,
+                "count": count,
+                "rate": round((count / source_total) * 100, 1),
+            }
+            for (src, target), count in profile["dragCounts"].items()
+            if src == source
+        ]
+        source_targets.sort(key=lambda item: (-item["count"], -item["rate"], item["target"]))
+        drag_rows.extend(source_targets[:2])
+    drag_rows.sort(key=lambda item: (-item["count"], -item["rate"], item["source"], item["target"]))
+    repeat_rows = []
+    for number in latest:
+        total = profile["repeatSourceTotals"].get(number, 0)
+        count = profile["repeatCounts"].get(number, 0)
+        repeat_rows.append(
+            {
+                "number": number,
+                "count": count,
+                "rate": round((count / total) * 100, 1) if total else 0,
+            }
+        )
+    repeat_rows.sort(key=lambda item: (-item["count"], -item["rate"], item["number"]))
     sums = [sum(draw["numbers"]) for draw in recent]
     span_values = [max(draw["numbers"]) - min(draw["numbers"]) for draw in recent]
     return {
@@ -716,6 +775,9 @@ def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profi
         "oddPatterns": [{"odd": odd, "even": 5 - odd, "count": count} for odd, count in odd_rows],
         "lowPatterns": [{"low": low, "high": 5 - low, "count": count} for low, count in low_rows],
         "tails": [{"tail": tail, "count": count} for tail, count in tail_rows],
+        "pairCombos": [{"numbers": list(pair), "count": count} for pair, count in pair_rows],
+        "dragCards": drag_rows[:6],
+        "repeatCandidates": repeat_rows,
         "repeatAverage": repeat_avg,
         "neighborNumbers": neighbors[:12],
         "sumRange": {

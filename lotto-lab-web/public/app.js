@@ -353,10 +353,19 @@ function scorePick(numbers, backtest) {
     100,
   );
 
+  const hints = patternHints();
+  const pairBonus = hints.pairs.some((pair) => pair.every((number) => numbers.includes(number))) ? 5 : 0;
+  const dragBonus = Math.min(4, numbers.filter((number) => hints.dragTargets.includes(number)).length * 2);
+  const repeatBonus = Math.min(3, numbers.filter((number) => hints.repeatNumbers.includes(number)).length * 1.5);
+  const patternBonus = pairBonus + dragBonus + repeatBonus;
   const weights = normalizedWeights();
-  const total = Math.round(heat * weights.heat + overdue * weights.overdue + spread * weights.spread + backtestScore * weights.backtest);
+  const total = clamp(
+    Math.round(heat * weights.heat + overdue * weights.overdue + spread * weights.spread + backtestScore * weights.backtest + patternBonus),
+    0,
+    100,
+  );
   const label = total >= 75 ? "高追蹤" : total >= 55 ? "可觀察" : "保守";
-  return { total, heat, overdue, spread, backtest: backtestScore, label };
+  return { total, heat, overdue, spread, backtest: backtestScore, pattern: Math.round(patternBonus), label };
 }
 
 function scoreDetails(score) {
@@ -365,6 +374,7 @@ function scoreDetails(score) {
     ["遺漏", score.overdue],
     ["分散", score.spread],
     ["回測", score.backtest],
+    ["版路", score.pattern || 0],
   ]
     .map(
       ([label, value]) => `
@@ -395,6 +405,21 @@ function hotTailProfile() {
   };
 }
 
+function patternHints() {
+  const patterns = state.analysis?.patterns || {};
+  const pairs = (patterns.pairCombos || []).map((item) => item.numbers || []).filter((pair) => pair.length === 2);
+  const dragTargets = [...new Set((patterns.dragCards || []).map((item) => item.target).filter(Boolean))];
+  const repeatNumbers = [
+    ...new Set(
+      (patterns.repeatCandidates || [])
+        .filter((item) => item.count > 0 || item.rate > 0)
+        .slice(0, 3)
+        .map((item) => item.number),
+    ),
+  ];
+  return { pairs, dragTargets, repeatNumbers };
+}
+
 function candidatePool() {
   const rows = state.analysis?.frequency || [];
   if (!rows.length) return Array.from({ length: 39 }, (_, i) => i + 1);
@@ -412,7 +437,9 @@ function candidatePool() {
     .sort((a, b) => b.weight - a.weight || a.number - b.number)
     .slice(0, balancedSize)
     .map((row) => row.number);
-  const pool = [...new Set([...hot, ...overdue, ...balanced, ...tailFilteredUniverse])].filter(numberAllowed);
+  const hints = patternHints();
+  const patternNumbers = [...hints.pairs.flat(), ...hints.dragTargets, ...hints.repeatNumbers];
+  const pool = [...new Set([...hot, ...overdue, ...balanced, ...patternNumbers, ...tailFilteredUniverse])].filter(numberAllowed);
   return pool.length >= 12 ? pool : tailFilteredUniverse;
 }
 
@@ -425,6 +452,10 @@ function buildCandidate(pool) {
   const frequencyRows = state.analysis?.frequency || [];
   const stats = new Map(frequencyRows.map((row) => [row.number, row]));
   const poolSet = new Set(pool);
+  const hints = patternHints();
+  const pairChoices = hints.pairs.filter((pair) => pair.every((number) => poolSet.has(number)));
+  const dragTargets = hints.dragTargets.filter((number) => poolSet.has(number));
+  const repeatNumbers = hints.repeatNumbers.filter((number) => poolSet.has(number));
   const hotList = [...frequencyRows]
     .sort((a, b) => b.count - a.count || a.number - b.number)
     .map((row) => row.number)
@@ -449,6 +480,15 @@ function buildCandidate(pool) {
       numbers.add(randomChoice(zone));
     }
   });
+  if ((focus === "pattern" || Math.random() < 0.55) && pairChoices.length && numbers.size <= 3) {
+    randomChoice(pairChoices).forEach((number) => numbers.add(number));
+  }
+  if (dragTargets.length && numbers.size < 5 && Math.random() < 0.72) {
+    numbers.add(randomChoice(dragTargets));
+  }
+  if (repeatNumbers.length && numbers.size < 5 && Math.random() < 0.45) {
+    numbers.add(randomChoice(repeatNumbers));
+  }
   if (focus === "hot" && hotList.length) {
     while (numbers.size < 3) numbers.add(randomChoice(hotList));
   }
@@ -523,6 +563,7 @@ function renderReferencePick() {
     <span>${focus.label}</span>
     <span>熱尾 ${tailProfile.label}</span>
     <span>分數 ${candidate.score.total}</span>
+    <span>版路 +${candidate.score.pattern || 0}</span>
     <span>最高 ${candidate.backtest.bestHit} 中</span>
     <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
   `;
@@ -563,6 +604,7 @@ function renderCandidates() {
             <div class="saved-balls">${miniBalls(candidate.numbers)}</div>
             <div class="candidate-meta">
               <span>${candidate.score.total} · ${candidate.score.label}</span>
+              <span>版路 +${candidate.score.pattern || 0}</span>
               <span>最高 ${candidate.backtest.bestHit} 中</span>
               <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
             </div>
@@ -658,6 +700,12 @@ function renderPatterns(patterns, profiles = []) {
   `;
   const tailText = tails.map((item) => `${item.tail}尾 ${item.count}次`).join("、") || "-";
   const neighborText = patterns.neighborNumbers?.length ? patterns.neighborNumbers.map(pad).join(" · ") : "-";
+  const pairText =
+    patterns.pairCombos?.map((item) => `${pad(item.numbers[0])}-${pad(item.numbers[1])} ${item.count}次`).join("、") || "-";
+  const dragText =
+    patterns.dragCards?.map((item) => `${pad(item.source)}拖${pad(item.target)} ${item.count}次/${item.rate}%`).join("、") || "-";
+  const repeatText =
+    patterns.repeatCandidates?.map((item) => `${pad(item.number)} ${item.count}次/${item.rate}%`).join("、") || "-";
   const profileText = profiles
     .slice(0, 3)
     .map((item) => `${item.label}：均中 ${item.averageHit}，最高 ${item.bestHit} 中`)
@@ -665,6 +713,9 @@ function renderPatterns(patterns, profiles = []) {
   els.patternLines.innerHTML = `
     <div><span>近期熱尾</span><strong>${tailText}</strong></div>
     <div><span>上期鄰近</span><strong>${neighborText}</strong></div>
+    <div><span>哥倆好</span><strong>${pairText}</strong></div>
+    <div><span>拖牌</span><strong>${dragText}</strong></div>
+    <div><span>可能連莊</span><strong>${repeatText}</strong></div>
     <div><span>模型比較</span><strong>${profileText || "-"}</strong></div>
   `;
 }
