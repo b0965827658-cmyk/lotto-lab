@@ -949,14 +949,10 @@ async function load() {
 }
 
 async function runCrossYearSearch() {
-  if (state.game !== "tw539") {
-    setStatus("目前跨年查詢先支援今彩 539；加州天天樂需要更穩定的跨年資料源。", true);
-    return;
-  }
   const fromYear = Number(els.historyFromYear.value);
   const toYear = Number(els.historyToYear.value);
   if (!Number.isInteger(fromYear) || !Number.isInteger(toYear) || fromYear < 2007 || toYear < 2007) {
-    setStatus("請輸入有效年份，例如 2024 到 2026。", true);
+    setStatus("請輸入有效年份，例如 2024 到今年。", true);
     return;
   }
   const number = els.historyNumber.value;
@@ -985,13 +981,24 @@ async function runCrossYearSearch() {
     els.historyNumber.value = "";
     renderHistory();
     const years = payload.searchedYears?.length ? `${payload.searchedYears[0]}-${payload.searchedYears[payload.searchedYears.length - 1]}` : `${fromYear}-${toYear}`;
-    els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。`;
+    const sourceNote = payload.sourceNote ? ` ${payload.sourceNote}` : "";
+    els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。${sourceNote}`;
     setStatus(`已完成跨年查詢：${payload.total} 筆。`);
   } catch (error) {
     setStatus(error.message, true);
   } finally {
     els.crossYearSearch.disabled = false;
   }
+}
+
+function initHistoryYears() {
+  const currentYear = new Date().getFullYear();
+  const fromYear = Math.max(2007, currentYear - 2);
+  [els.historyFromYear, els.historyToYear].forEach((input) => {
+    input.max = String(currentYear);
+  });
+  els.historyFromYear.value = String(fromYear);
+  els.historyToYear.value = String(currentYear);
 }
 
 document.querySelectorAll(".segment").forEach((button) => {
@@ -1112,6 +1119,7 @@ if ("serviceWorker" in navigator) {
 
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
+initHistoryYears();
 renderModelControls();
 loadConfig();
 load();
