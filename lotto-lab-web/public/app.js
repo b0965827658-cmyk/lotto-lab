@@ -1,6 +1,7 @@
 const state = {
   game: "tw539",
   limit: 90,
+  analysisFocus: "balanced",
   latest: null,
   analysis: null,
   history: [],
@@ -22,6 +23,35 @@ const state = {
 
 const STORAGE_KEY = "lotto-lab-saved-picks";
 const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
+const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
+
+const FOCUS_PRESETS = {
+  balanced: {
+    label: "綜合",
+    weights: { heat: 28, overdue: 22, spread: 25, backtest: 25 },
+    description: "熱度、遺漏、版型與回測一起看。",
+  },
+  hot: {
+    label: "追熱",
+    weights: { heat: 48, overdue: 8, spread: 18, backtest: 26 },
+    description: "偏近期常出與高頻號，再用回測過濾。",
+  },
+  overdue: {
+    label: "追冷",
+    weights: { heat: 12, overdue: 45, spread: 18, backtest: 25 },
+    description: "偏久未開號，避免整組太集中。",
+  },
+  pattern: {
+    label: "版路",
+    weights: { heat: 18, overdue: 18, spread: 42, backtest: 22 },
+    description: "優先看區間、奇偶、大小與尾數分散。",
+  },
+  backtest: {
+    label: "回測",
+    weights: { heat: 16, overdue: 16, spread: 18, backtest: 50 },
+    description: "優先挑過去 90 期回測較能碰到邊的組合。",
+  },
+};
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -36,6 +66,7 @@ const els = {
   date: $("#date"),
   latestBalls: $("#latestBalls"),
   pickBalls: $("#pickBalls"),
+  pickMeta: $("#pickMeta"),
   note: $("#analysisNote"),
   hot: $("#hotList"),
   cold: $("#coldList"),
@@ -50,6 +81,7 @@ const els = {
   generate: $("#generateBtn"),
   candidates: $("#candidateList"),
   modelInputs: Array.from(document.querySelectorAll("[data-weight]")),
+  focusButtons: Array.from(document.querySelectorAll("[data-focus]")),
   modelSummary: $("#modelSummary"),
   resetModel: $("#resetModelBtn"),
   historyKeyword: $("#historyKeyword"),
@@ -169,8 +201,18 @@ function loadModelWeights() {
   }
 }
 
+function loadAnalysisFocus() {
+  const saved = localStorage.getItem(FOCUS_STORAGE_KEY);
+  return FOCUS_PRESETS[saved] ? saved : "balanced";
+}
+
 function saveModelWeights() {
   localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(state.modelWeights));
+  state.candidateCache.clear();
+}
+
+function saveAnalysisFocus() {
+  localStorage.setItem(FOCUS_STORAGE_KEY, state.analysisFocus);
   state.candidateCache.clear();
 }
 
@@ -186,6 +228,9 @@ function normalizedWeights() {
 }
 
 function renderModelControls() {
+  els.focusButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.focus === state.analysisFocus);
+  });
   els.modelInputs.forEach((input) => {
     const key = input.dataset.weight;
     input.value = state.modelWeights[key];
@@ -193,7 +238,8 @@ function renderModelControls() {
     if (valueEl) valueEl.textContent = state.modelWeights[key];
   });
   const weights = normalizedWeights();
-  els.modelSummary.textContent = `目前模型：熱度 ${Math.round(weights.heat * 100)}%、遺漏 ${Math.round(weights.overdue * 100)}%、分散 ${Math.round(weights.spread * 100)}%、回測 ${Math.round(weights.backtest * 100)}%。`;
+  const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
+  els.modelSummary.textContent = `${focus.label}：${focus.description} 權重為熱度 ${Math.round(weights.heat * 100)}%、遺漏 ${Math.round(weights.overdue * 100)}%、分散 ${Math.round(weights.spread * 100)}%、回測 ${Math.round(weights.backtest * 100)}%。`;
 }
 
 function gameLabel(game) {
@@ -288,8 +334,15 @@ function scorePick(numbers, backtest) {
   const span = sorted[sorted.length - 1] - sorted[0];
   const oddCount = numbers.filter((n) => n % 2 === 1).length;
   const zones = new Set(numbers.map((n) => Math.floor((n - 1) / 10))).size;
-  const balancePenalty = Math.abs(oddCount - 2.5) * 8;
-  const spread = clamp(Math.round((span / 38) * 58 + (zones / 4) * 34 + (100 - balancePenalty) * 0.08), 0, 100);
+  const tailCount = new Set(numbers.map((n) => n % 10)).size;
+  const repeatCount = state.latest?.numbers ? matchCount(numbers, state.latest.numbers) : 0;
+  const balancePenalty = Math.abs(oddCount - 2.5) * 7;
+  const repeatPenalty = repeatCount > 2 ? 12 : 0;
+  const spread = clamp(
+    Math.round((span / 38) * 46 + (zones / 4) * 28 + (tailCount / 5) * 20 + (100 - balancePenalty - repeatPenalty) * 0.06),
+    0,
+    100,
+  );
 
   const tested = backtest.testedCount || 1;
   const twoPlus = backtest.distribution[2] + backtest.distribution[3] + backtest.distribution[4] + backtest.distribution[5];
@@ -328,12 +381,15 @@ function scoreDetails(score) {
 function candidatePool() {
   const rows = state.analysis?.frequency || [];
   if (!rows.length) return Array.from({ length: 39 }, (_, i) => i + 1);
-  const hot = [...rows].sort((a, b) => b.count - a.count || a.number - b.number).slice(0, 14).map((row) => row.number);
-  const overdue = [...rows].sort((a, b) => b.gap - a.gap || a.number - b.number).slice(0, 14).map((row) => row.number);
+  const hotSize = state.analysisFocus === "hot" ? 22 : 14;
+  const overdueSize = state.analysisFocus === "overdue" ? 22 : 14;
+  const balancedSize = state.analysisFocus === "pattern" ? 28 : 20;
+  const hot = [...rows].sort((a, b) => b.count - a.count || a.number - b.number).slice(0, hotSize).map((row) => row.number);
+  const overdue = [...rows].sort((a, b) => b.gap - a.gap || a.number - b.number).slice(0, overdueSize).map((row) => row.number);
   const balanced = [...rows]
     .map((row) => ({ ...row, weight: row.count * 0.55 + row.gap * 0.45 }))
     .sort((a, b) => b.weight - a.weight || a.number - b.number)
-    .slice(0, 20)
+    .slice(0, balancedSize)
     .map((row) => row.number);
   return [...new Set([...hot, ...overdue, ...balanced, ...Array.from({ length: 39 }, (_, i) => i + 1)])];
 }
@@ -344,6 +400,11 @@ function randomChoice(items) {
 
 function buildCandidate(pool) {
   const numbers = new Set();
+  const frequencyRows = state.analysis?.frequency || [];
+  const stats = new Map(frequencyRows.map((row) => [row.number, row]));
+  const hotList = [...frequencyRows].sort((a, b) => b.count - a.count || a.number - b.number).slice(0, 18).map((row) => row.number);
+  const overdueList = [...frequencyRows].sort((a, b) => b.gap - a.gap || a.number - b.number).slice(0, 18).map((row) => row.number);
+  const focus = state.analysisFocus;
   const zones = [
     pool.filter((n) => n <= 10),
     pool.filter((n) => n >= 11 && n <= 20),
@@ -352,10 +413,28 @@ function buildCandidate(pool) {
   ].filter(Boolean);
 
   zones.forEach((zone) => {
-    if (numbers.size < 5 && zone.length && Math.random() < 0.72) {
+    const chance = focus === "pattern" ? 0.88 : 0.72;
+    if (numbers.size < 5 && zone.length && Math.random() < chance) {
       numbers.add(randomChoice(zone));
     }
   });
+  if (focus === "hot" && hotList.length) {
+    while (numbers.size < 3) numbers.add(randomChoice(hotList));
+  }
+  if (focus === "overdue" && overdueList.length) {
+    while (numbers.size < 3) numbers.add(randomChoice(overdueList));
+  }
+  if (focus === "backtest") {
+    const top = [...pool]
+      .map((n) => {
+        const row = stats.get(n) || { count: 0, gap: 0 };
+        return { n, score: row.count * 0.35 + row.gap * 0.25 + Math.random() * 8 };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 20)
+      .map((item) => item.n);
+    while (numbers.size < 4 && top.length) numbers.add(randomChoice(top));
+  }
   while (numbers.size < 5) {
     numbers.add(randomChoice(pool));
   }
@@ -363,13 +442,14 @@ function buildCandidate(pool) {
 }
 
 function generateCandidates() {
-  const cacheKey = `${state.game}-${state.limit}-${state.latest?.date || ""}-${state.latest?.period || ""}-${JSON.stringify(state.modelWeights)}`;
+  const cacheKey = `${state.game}-${state.limit}-${state.latest?.date || ""}-${state.latest?.period || ""}-${state.analysisFocus}-${JSON.stringify(state.modelWeights)}`;
   const cached = state.candidateCache.get(cacheKey);
   if (cached) return cached;
   const pool = candidatePool();
   const seen = new Set();
   const candidates = [];
-  for (let i = 0; i < 120; i += 1) {
+  const attempts = state.analysisFocus === "backtest" ? 260 : 200;
+  for (let i = 0; i < attempts; i += 1) {
     const numbers = buildCandidate(pool);
     const key = numbers.join(",");
     if (seen.has(key)) continue;
@@ -383,6 +463,36 @@ function generateCandidates() {
     .slice(0, 5);
   state.candidateCache.set(cacheKey, result);
   return result;
+}
+
+function referenceCandidate() {
+  const candidates = generateCandidates();
+  if (candidates.length) return candidates[0];
+  const numbers = state.analysis?.recommendation || [];
+  if (numbers.length !== 5) return null;
+  const backtest = backtestPick(numbers);
+  return { numbers, backtest, score: scorePick(numbers, backtest) };
+}
+
+function currentReferenceNumbers() {
+  return referenceCandidate()?.numbers || [];
+}
+
+function renderReferencePick() {
+  const candidate = referenceCandidate();
+  if (!candidate) {
+    els.pickBalls.innerHTML = "";
+    els.pickMeta.innerHTML = "";
+    return;
+  }
+  const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
+  els.pickBalls.innerHTML = balls(candidate.numbers);
+  els.pickMeta.innerHTML = `
+    <span>${focus.label}</span>
+    <span>分數 ${candidate.score.total}</span>
+    <span>最高 ${candidate.backtest.bestHit} 中</span>
+    <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
+  `;
 }
 
 function savePick(numbers) {
@@ -593,7 +703,6 @@ function render(payload) {
   els.period.textContent = `期別 ${latest.period || "-"}`;
   els.date.textContent = `日期 ${latest.date || "-"}`;
   els.latestBalls.innerHTML = balls(latest.numbers);
-  els.pickBalls.innerHTML = balls(analysis.recommendation);
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest);
   renderPatterns(analysis.patterns, analysis.modelProfiles);
@@ -603,6 +712,7 @@ function render(payload) {
   renderHistory();
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderSavedPicks();
+  renderReferencePick();
   renderCandidates();
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
 }
@@ -758,7 +868,7 @@ els.savedForm.addEventListener("submit", (event) => {
 });
 
 els.usePick.addEventListener("click", () => {
-  const numbers = state.analysis?.recommendation || [];
+  const numbers = currentReferenceNumbers();
   if (numbers.length !== 5) {
     setStatus("目前還沒有可套用的參考選號。", true);
     return;
@@ -768,8 +878,26 @@ els.usePick.addEventListener("click", () => {
 });
 
 els.generate.addEventListener("click", () => {
+  state.candidateCache.clear();
+  renderReferencePick();
   renderCandidates();
   setStatus("已重新產生高分候選組合。");
+});
+
+els.focusButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const preset = FOCUS_PRESETS[button.dataset.focus];
+    if (!preset) return;
+    state.analysisFocus = button.dataset.focus;
+    state.modelWeights = { ...preset.weights };
+    saveAnalysisFocus();
+    saveModelWeights();
+    renderModelControls();
+    renderSavedPicks();
+    renderReferencePick();
+    renderCandidates();
+    setStatus(`分析重點已切換：${preset.label}。`);
+  });
 });
 
 els.modelInputs.forEach((input) => {
@@ -778,16 +906,20 @@ els.modelInputs.forEach((input) => {
     saveModelWeights();
     renderModelControls();
     renderSavedPicks();
+    renderReferencePick();
     renderCandidates();
     setStatus("模型設定已更新。");
   });
 });
 
 els.resetModel.addEventListener("click", () => {
-  state.modelWeights = { heat: 30, overdue: 25, spread: 25, backtest: 20 };
+  state.analysisFocus = "balanced";
+  state.modelWeights = { ...FOCUS_PRESETS.balanced.weights };
+  saveAnalysisFocus();
   saveModelWeights();
   renderModelControls();
   renderSavedPicks();
+  renderReferencePick();
   renderCandidates();
   setStatus("模型設定已重設。");
 });
@@ -823,6 +955,7 @@ if ("serviceWorker" in navigator) {
   });
 }
 
+state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 renderModelControls();
 loadConfig();
