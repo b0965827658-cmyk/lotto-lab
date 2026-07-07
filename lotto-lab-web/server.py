@@ -33,6 +33,8 @@ socket.getaddrinfo = ipv4_getaddrinfo
 
 ROOT = Path(__file__).parent
 PUBLIC = ROOT / "public"
+DATA_DIR = ROOT / "data"
+BUNDLED_TAIWAN_HISTORY = DATA_DIR / "taiwan_539_history.json"
 
 TAIWAN_LAST_URL = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/LastNumber"
 TAIWAN_DATASET_URL = "https://gaze.nta.gov.tw/dntmb/OpenData/csvDw?ntaCode=D423F"
@@ -257,10 +259,28 @@ def taiwan_year_history(year: int) -> list[dict[str, Any]]:
     return cached(f"taiwan-year-history-{year}", load)
 
 
+def bundled_taiwan_history() -> list[dict[str, Any]]:
+    def load():
+        if not BUNDLED_TAIWAN_HISTORY.exists():
+            return []
+        with BUNDLED_TAIWAN_HISTORY.open("r", encoding="utf-8") as file:
+            rows = json.load(file)
+        rows.sort(key=lambda item: (item.get("date", ""), item.get("period", "")), reverse=True)
+        return rows
+
+    return cached("bundled-taiwan-539-history", load)
+
+
 def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
     fast_history = pilio_taiwan_history(limit)
     if len(fast_history) >= min(limit, 20):
         return fast_history[:limit]
+    bundled = bundled_taiwan_history()
+    if bundled:
+        latest = taiwan_latest()
+        if latest and all(draw.get("period") != latest.get("period") for draw in bundled):
+            bundled = [latest, *bundled]
+        return bundled[:limit]
     try:
         rows = taiwan_dataset_rows()
         latest_row = max(rows, key=lambda row: int(row.get("資料所屬年度", "0") or "0"))
@@ -271,20 +291,34 @@ def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
 
 
 def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", number: int | None = None, limit: int = 2000) -> dict[str, Any]:
-    rows = taiwan_dataset_rows()
-    available_years = sorted(int(row.get("資料所屬年度", "0") or "0") + 1911 for row in rows)
+    bundled = bundled_taiwan_history()
+    if bundled:
+        available_years = sorted({int(draw["date"][:4]) for draw in bundled if draw.get("date")})
+    else:
+        rows = taiwan_dataset_rows()
+        available_years = sorted(int(row.get("資料所屬年度", "0") or "0") + 1911 for row in rows)
     if not available_years:
         return {"history": [], "availableYears": [], "searchedYears": []}
     start = max(min(from_year, to_year), available_years[0])
     end = min(max(from_year, to_year), available_years[-1])
     searched_years = list(range(start, end + 1))
-    draws = []
-    for year in searched_years:
-        draws.extend(taiwan_year_history(year))
-    latest = taiwan_latest()
-    latest_year = int(latest["date"][:4]) if latest.get("date") else None
-    if latest_year in searched_years and all(draw.get("period") != latest.get("period") for draw in draws):
-        draws.append(latest)
+    if bundled:
+        draws = [draw for draw in bundled if draw.get("date") and start <= int(draw["date"][:4]) <= end]
+        try:
+            latest = taiwan_latest()
+            latest_year = int(latest["date"][:4]) if latest.get("date") else None
+            if latest_year in searched_years and all(draw.get("period") != latest.get("period") for draw in draws):
+                draws.append(latest)
+        except Exception:
+            pass
+    else:
+        draws = []
+        for year in searched_years:
+            draws.extend(taiwan_year_history(year))
+        latest = taiwan_latest()
+        latest_year = int(latest["date"][:4]) if latest.get("date") else None
+        if latest_year in searched_years and all(draw.get("period") != latest.get("period") for draw in draws):
+            draws.append(latest)
     query = keyword.strip().lower()
     if query or number:
         draws = filter_history_rows(draws, query, number)
