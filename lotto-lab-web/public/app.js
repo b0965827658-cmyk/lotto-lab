@@ -378,12 +378,33 @@ function scoreDetails(score) {
     .join("");
 }
 
+function hotTailProfile() {
+  const recentDraws = state.history.slice(0, Math.min(state.history.length, 30));
+  const counts = Array.from({ length: 10 }, (_, tail) => ({ tail, count: 0 }));
+  recentDraws.forEach((draw) => {
+    draw.numbers.forEach((number) => {
+      counts[number % 10].count += 1;
+    });
+  });
+  const sorted = counts.sort((a, b) => b.count - a.count || a.tail - b.tail);
+  const size = state.analysisFocus === "pattern" ? 6 : 7;
+  const hotTails = sorted.slice(0, size).map((item) => item.tail);
+  return {
+    hotTails,
+    label: hotTails.map((tail) => `${tail}尾`).join("、"),
+  };
+}
+
 function candidatePool() {
   const rows = state.analysis?.frequency || [];
   if (!rows.length) return Array.from({ length: 39 }, (_, i) => i + 1);
   const hotSize = state.analysisFocus === "hot" ? 22 : 14;
   const overdueSize = state.analysisFocus === "overdue" ? 22 : 14;
   const balancedSize = state.analysisFocus === "pattern" ? 28 : 20;
+  const { hotTails } = hotTailProfile();
+  const hotTailSet = new Set(hotTails);
+  const tailFilteredUniverse = Array.from({ length: 39 }, (_, i) => i + 1).filter((number) => hotTailSet.has(number % 10));
+  const numberAllowed = (number) => hotTailSet.has(number % 10);
   const hot = [...rows].sort((a, b) => b.count - a.count || a.number - b.number).slice(0, hotSize).map((row) => row.number);
   const overdue = [...rows].sort((a, b) => b.gap - a.gap || a.number - b.number).slice(0, overdueSize).map((row) => row.number);
   const balanced = [...rows]
@@ -391,7 +412,8 @@ function candidatePool() {
     .sort((a, b) => b.weight - a.weight || a.number - b.number)
     .slice(0, balancedSize)
     .map((row) => row.number);
-  return [...new Set([...hot, ...overdue, ...balanced, ...Array.from({ length: 39 }, (_, i) => i + 1)])];
+  const pool = [...new Set([...hot, ...overdue, ...balanced, ...tailFilteredUniverse])].filter(numberAllowed);
+  return pool.length >= 12 ? pool : tailFilteredUniverse;
 }
 
 function randomChoice(items) {
@@ -402,8 +424,17 @@ function buildCandidate(pool) {
   const numbers = new Set();
   const frequencyRows = state.analysis?.frequency || [];
   const stats = new Map(frequencyRows.map((row) => [row.number, row]));
-  const hotList = [...frequencyRows].sort((a, b) => b.count - a.count || a.number - b.number).slice(0, 18).map((row) => row.number);
-  const overdueList = [...frequencyRows].sort((a, b) => b.gap - a.gap || a.number - b.number).slice(0, 18).map((row) => row.number);
+  const poolSet = new Set(pool);
+  const hotList = [...frequencyRows]
+    .sort((a, b) => b.count - a.count || a.number - b.number)
+    .map((row) => row.number)
+    .filter((number) => poolSet.has(number))
+    .slice(0, 18);
+  const overdueList = [...frequencyRows]
+    .sort((a, b) => b.gap - a.gap || a.number - b.number)
+    .map((row) => row.number)
+    .filter((number) => poolSet.has(number))
+    .slice(0, 18);
   const focus = state.analysisFocus;
   const zones = [
     pool.filter((n) => n <= 10),
@@ -486,9 +517,11 @@ function renderReferencePick() {
     return;
   }
   const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
+  const tailProfile = hotTailProfile();
   els.pickBalls.innerHTML = balls(candidate.numbers);
   els.pickMeta.innerHTML = `
     <span>${focus.label}</span>
+    <span>熱尾 ${tailProfile.label}</span>
     <span>分數 ${candidate.score.total}</span>
     <span>最高 ${candidate.backtest.bestHit} 中</span>
     <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
