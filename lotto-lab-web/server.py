@@ -360,28 +360,28 @@ def number_stats(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str,
 MODEL_PROFILES = {
     "classic": {
         "label": "熱遺平衡",
-        "number": {"heat": 0.45, "recent": 0.18, "trend": 0.0, "gap": 0.27, "neighbor": 0.0, "tail": 0.0, "pair": 0.0, "drag": 0.0, "repeatSignal": 0.0},
-        "combo": {"spread": 1.0, "zone": 0.0, "odd": 0.0, "low": 0.0, "sum": 0.0, "tail": 0.0, "repeat": 0.0},
+        "number": {"heat": 0.45, "recent": 0.18, "trend": 0.0, "gap": 0.27, "neighbor": 0.0, "tail": 0.0, "pair": 0.0, "drag": 0.0, "repeatSignal": 0.0, "interval": 0.0},
+        "combo": {"spread": 1.0, "zone": 0.0, "odd": 0.0, "low": 0.0, "sum": 0.0, "tail": 0.0, "repeat": 0.0, "interval": 0.0},
     },
     "balanced": {
         "label": "綜合版路",
-        "number": {"heat": 0.21, "recent": 0.20, "trend": 0.12, "gap": 0.15, "neighbor": 0.08, "tail": 0.06, "pair": 0.06, "drag": 0.08, "repeatSignal": 0.04},
-        "combo": {"spread": 0.18, "zone": 0.20, "odd": 0.14, "low": 0.10, "sum": 0.18, "tail": 0.08, "repeat": 0.12},
+        "number": {"heat": 0.19, "recent": 0.18, "trend": 0.11, "gap": 0.14, "neighbor": 0.07, "tail": 0.06, "pair": 0.06, "drag": 0.08, "repeatSignal": 0.04, "interval": 0.07},
+        "combo": {"spread": 0.16, "zone": 0.17, "odd": 0.13, "low": 0.09, "sum": 0.16, "tail": 0.08, "repeat": 0.11, "interval": 0.10},
     },
     "momentum": {
         "label": "近期動能",
-        "number": {"heat": 0.15, "recent": 0.30, "trend": 0.19, "gap": 0.07, "neighbor": 0.07, "tail": 0.04, "pair": 0.05, "drag": 0.08, "repeatSignal": 0.05},
-        "combo": {"spread": 0.14, "zone": 0.18, "odd": 0.12, "low": 0.10, "sum": 0.16, "tail": 0.08, "repeat": 0.22},
+        "number": {"heat": 0.14, "recent": 0.27, "trend": 0.17, "gap": 0.06, "neighbor": 0.06, "tail": 0.04, "pair": 0.05, "drag": 0.08, "repeatSignal": 0.05, "interval": 0.08},
+        "combo": {"spread": 0.13, "zone": 0.15, "odd": 0.11, "low": 0.09, "sum": 0.14, "tail": 0.08, "repeat": 0.20, "interval": 0.10},
     },
     "cycle": {
         "label": "遺漏週期",
-        "number": {"heat": 0.16, "recent": 0.10, "trend": 0.07, "gap": 0.30, "neighbor": 0.09, "tail": 0.07, "pair": 0.09, "drag": 0.07, "repeatSignal": 0.05},
-        "combo": {"spread": 0.20, "zone": 0.18, "odd": 0.12, "low": 0.12, "sum": 0.18, "tail": 0.10, "repeat": 0.10},
+        "number": {"heat": 0.15, "recent": 0.09, "trend": 0.06, "gap": 0.28, "neighbor": 0.08, "tail": 0.06, "pair": 0.08, "drag": 0.07, "repeatSignal": 0.05, "interval": 0.08},
+        "combo": {"spread": 0.18, "zone": 0.16, "odd": 0.11, "low": 0.11, "sum": 0.16, "tail": 0.09, "repeat": 0.09, "interval": 0.10},
     },
     "shape": {
         "label": "區間尾數",
-        "number": {"heat": 0.15, "recent": 0.14, "trend": 0.09, "gap": 0.12, "neighbor": 0.07, "tail": 0.17, "pair": 0.18, "drag": 0.06, "repeatSignal": 0.02},
-        "combo": {"spread": 0.18, "zone": 0.26, "odd": 0.16, "low": 0.12, "sum": 0.14, "tail": 0.10, "repeat": 0.04},
+        "number": {"heat": 0.13, "recent": 0.12, "trend": 0.08, "gap": 0.10, "neighbor": 0.06, "tail": 0.15, "pair": 0.15, "drag": 0.05, "repeatSignal": 0.02, "interval": 0.14},
+        "combo": {"spread": 0.15, "zone": 0.22, "odd": 0.14, "low": 0.10, "sum": 0.12, "tail": 0.09, "repeat": 0.04, "interval": 0.14},
     },
 }
 
@@ -401,6 +401,11 @@ def zone_signature(numbers: list[int]) -> tuple[int, int, int, int]:
     for number in numbers:
         zones[min(3, (number - 1) // 10)] += 1
     return tuple(zones)
+
+
+def interval_windows(max_number: int) -> list[tuple[int, int]]:
+    windows = [(1, 15), (10, 20), (15, 25), (20, 30), (25, 35), (30, max_number)]
+    return [(start, min(end, max_number)) for start, end in windows if start <= max_number]
 
 
 def signature_score(value: Any, counts: dict[Any, int]) -> float:
@@ -488,6 +493,26 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
     max_drag_number = max(drag_number_score.values()) or 1
     max_repeat_number = max(repeat_counts.values()) or 1
 
+    intervals = interval_windows(max_number)
+    interval_hit_counts = {window: 0 for window in intervals}
+    interval_focus_counts = {window: 0 for window in intervals}
+    interval_number_score = {n: 0 for n in range(1, max_number + 1)}
+    for draw in recent60:
+        numbers = draw["numbers"]
+        recency_weight = 1.35 if draw in recent12 else 1.0
+        for window in intervals:
+            start, end = window
+            hits = sum(1 for number in numbers if start <= number <= end)
+            interval_hit_counts[window] += hits
+            if hits >= 3:
+                interval_focus_counts[window] += 1
+                for number in range(start, end + 1):
+                    interval_number_score[number] += recency_weight * hits
+            elif hits == 2:
+                for number in range(start, end + 1):
+                    interval_number_score[number] += recency_weight * 0.45
+    max_interval_number = max(interval_number_score.values()) or 1
+
     zone_counts: dict[tuple[int, int, int, int], int] = {}
     odd_counts: dict[int, int] = {}
     low_counts: dict[int, int] = {}
@@ -520,6 +545,7 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
             "pair": safe_divide(pair_number_score[n], max_pair_number),
             "drag": safe_divide(drag_number_score[n], max_drag_number),
             "repeatSignal": safe_divide(repeat_counts[n], max_repeat_number) if n in latest_numbers else 0.0,
+            "interval": safe_divide(interval_number_score[n], max_interval_number),
         }
 
     return {
@@ -539,6 +565,8 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
         "dragNumberScore": drag_number_score,
         "repeatCounts": repeat_counts,
         "repeatSourceTotals": repeat_source_totals,
+        "intervalHitCounts": interval_hit_counts,
+        "intervalFocusCounts": interval_focus_counts,
     }
 
 
@@ -577,6 +605,14 @@ def combo_pattern_score(numbers: list[int], profile: dict[str, Any], model: dict
         "sum": closeness(sum(sorted_numbers), profile["centerSum"], profile["sumWidth"]),
         "tail": tail_diversity,
         "repeat": closeness(repeat, profile["repeatTarget"], 1.6),
+        "interval": max(
+            (
+                (sum(1 for n in sorted_numbers if start <= n <= end) / 5)
+                * safe_divide(profile["intervalFocusCounts"].get((start, end), 0), max(profile["intervalFocusCounts"].values()) or 1)
+                for start, end in interval_windows(max_number)
+            ),
+            default=0,
+        ),
     }
     base = sum(scores[key] * combo_weights.get(key, 0) for key in scores)
     return base * 0.86 + pair_score * 0.14
@@ -734,6 +770,14 @@ def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profi
     low_rows = sorted(profile["lowCounts"].items(), key=lambda item: (-item[1], item[0]))[:3]
     tail_rows = sorted(profile["tailCounts"].items(), key=lambda item: (-item[1], item[0]))[:5]
     pair_rows = sorted(profile["pairCounts"].items(), key=lambda item: (-item[1], item[0]))[:5]
+    interval_rows = sorted(
+        interval_windows(max_number),
+        key=lambda window: (
+            -profile["intervalFocusCounts"].get(window, 0),
+            -profile["intervalHitCounts"].get(window, 0),
+            window[0],
+        ),
+    )[:5]
     transitions = [len(set(newer["numbers"]) & set(older["numbers"])) for newer, older in zip(ordered, ordered[1:])]
     repeat_avg = round(sum(transitions[:30]) / min(30, len(transitions)), 2) if transitions else 0
     latest = ordered[0]["numbers"] if ordered else []
@@ -775,6 +819,17 @@ def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profi
         "oddPatterns": [{"odd": odd, "even": 5 - odd, "count": count} for odd, count in odd_rows],
         "lowPatterns": [{"low": low, "high": 5 - low, "count": count} for low, count in low_rows],
         "tails": [{"tail": tail, "count": count} for tail, count in tail_rows],
+        "intervals": [
+            {
+                "start": start,
+                "end": end,
+                "label": f"{start:02d}-{end:02d}",
+                "hits": profile["intervalHitCounts"].get((start, end), 0),
+                "focusCount": profile["intervalFocusCounts"].get((start, end), 0),
+                "rate": round((profile["intervalFocusCounts"].get((start, end), 0) / len(recent)) * 100, 1) if recent else 0,
+            }
+            for start, end in interval_rows
+        ],
         "pairCombos": [{"numbers": list(pair), "count": count} for pair, count in pair_rows],
         "dragCards": drag_rows[:6],
         "repeatCandidates": repeat_rows,
