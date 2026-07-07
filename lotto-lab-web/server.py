@@ -202,8 +202,19 @@ def taiwan_dataset_rows() -> list[dict[str, str]]:
 def parse_taiwan_zip(zip_url: str) -> list[dict[str, Any]]:
     data = fetch_bytes(zip_url)
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        name = next(name for name in zf.namelist() if "今彩539" in name)
-        text = zf.read(name).decode("utf-8-sig")
+        names = [name for name in zf.namelist() if not name.endswith("/")]
+        name = next((name for name in names if "今彩539" in name or "539" in name), "")
+        if not name:
+            raise ValueError(f"找不到今彩539年度資料檔：{zip_url}")
+        raw = zf.read(name)
+        for encoding in ("utf-8-sig", "cp950", "big5"):
+            try:
+                text = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            text = raw.decode("utf-8-sig", errors="ignore")
     reader = csv.DictReader(io.StringIO(text))
     parsed = []
     for row in reader:
@@ -276,12 +287,7 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
         draws.append(latest)
     query = keyword.strip().lower()
     if query or number:
-        draws = [
-            draw
-            for draw in draws
-            if (not query or query in f"{draw['date']} {draw['period']} {' '.join(map(lambda n: str(n).zfill(2), draw['numbers']))}".lower())
-            and (not number or number in draw["numbers"])
-        ]
+        draws = filter_history_rows(draws, query, number)
     draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     return {
         "history": draws[:limit],
@@ -290,6 +296,16 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
         "searchedYears": searched_years,
         "limited": len(draws) > limit,
     }
+
+
+def filter_history_rows(draws: list[dict[str, Any]], query: str = "", number: int | None = None) -> list[dict[str, Any]]:
+    query = query.strip().lower()
+    return [
+        draw
+        for draw in draws
+        if (not query or query in f"{draw.get('date', '')} {draw.get('period', '')} {' '.join(str(n).zfill(2) for n in draw.get('numbers', []))}".lower())
+        and (not number or number in draw.get("numbers", []))
+    ]
 
 
 def california_history(limit: int = 180) -> list[dict[str, Any]]:
@@ -331,6 +347,28 @@ def california_history(limit: int = 180) -> list[dict[str, Any]]:
         return values
 
     return cached("california-history", load)[:limit]
+
+
+def search_california_history(from_year: int, to_year: int, keyword: str = "", number: int | None = None, limit: int = 2000) -> dict[str, Any]:
+    draws = california_history(5000)
+    available_years = sorted({int(draw["date"][:4]) for draw in draws if draw.get("date")})
+    if not available_years:
+        return {"history": [], "total": 0, "availableYears": [], "searchedYears": [], "limited": False}
+    start = max(min(from_year, to_year), available_years[0])
+    end = min(max(from_year, to_year), available_years[-1])
+    searched_years = list(range(start, end + 1))
+    rows = [draw for draw in draws if draw.get("date") and start <= int(draw["date"][:4]) <= end]
+    rows = filter_history_rows(rows, keyword, number)
+    rows.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    return {
+        "history": rows[:limit],
+        "total": len(rows),
+        "availableYears": available_years,
+        "searchedYears": searched_years,
+        "limited": len(rows) > limit,
+        "sourceNote": "加州天天樂目前依資料源可取得的歷史範圍查詢；若來源只提供近期資料，跨年結果會較少。",
+    }
+
 
 
 def number_stats(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
@@ -964,15 +1002,6 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/history-search":
             params = parse_qs(parsed.query)
             game = params.get("game", ["tw539"])[0]
-            if game != "tw539":
-                self.send_json(
-                    {
-                        "ok": False,
-                        "error": "目前跨年查詢先支援今彩 539；加州天天樂需要更穩定的跨年資料源。",
-                    },
-                    status=400,
-                )
-                return
             current_year = datetime.now().year
             from_year = int(params.get("fromYear", [str(current_year - 2)])[0])
             to_year = int(params.get("toYear", [str(current_year)])[0])
@@ -981,7 +1010,12 @@ class Handler(SimpleHTTPRequestHandler):
             number = int(number_value) if number_value else None
             limit = max(50, min(5000, int(params.get("limit", ["2000"])[0])))
             try:
-                payload = search_taiwan_history(from_year, to_year, keyword=keyword, number=number, limit=limit)
+                if game == "tw539":
+                    payload = search_taiwan_history(from_year, to_year, keyword=keyword, number=number, limit=limit)
+                elif game == "ca-fantasy5":
+                    payload = search_california_history(from_year, to_year, keyword=keyword, number=number, limit=limit)
+                else:
+                    raise ValueError("不支援的遊戲種類")
                 self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=502)
