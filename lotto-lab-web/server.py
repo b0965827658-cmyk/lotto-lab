@@ -721,11 +721,17 @@ def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_cou
         )
     tested = len(rows)
     hit_sum = sum(row["hits"] for row in rows)
+    one_plus = sum(1 for row in rows if row["hits"] >= 1)
+    two_plus = sum(1 for row in rows if row["hits"] >= 2)
     three_plus = sum(1 for row in rows if row["hits"] >= 3)
     best_hit = max((row["hits"] for row in rows), default=0)
     return {
         "testedCount": tested,
         "averageHit": round(hit_sum / tested, 2) if tested else 0,
+        "onePlusCount": one_plus,
+        "onePlusRate": round((one_plus / tested) * 100, 1) if tested else 0,
+        "twoPlusCount": two_plus,
+        "twoPlusRate": round((two_plus / tested) * 100, 1) if tested else 0,
         "threePlusCount": three_plus,
         "threePlusRate": round((three_plus / tested) * 100, 1) if tested else 0,
         "bestHit": best_hit,
@@ -741,9 +747,11 @@ def choose_model_profile(draws: list[dict[str, Any]], max_number: int = 39, pick
         backtest = rolling_backtest(draws, max_number=max_number, pick_count=pick_count, profile_name=profile_name)
         quality = (
             backtest["averageHit"] * 100
+            + backtest["onePlusRate"] * 0.55
+            + backtest["twoPlusRate"] * 1.35
             + backtest["threePlusRate"] * 2.6
             + backtest["bestHit"] * 14
-            + backtest["distribution"].get("2", 0) * 0.9
+            + backtest["distribution"].get("2", 0) * 2.1
         )
         results.append(
             {
@@ -751,6 +759,8 @@ def choose_model_profile(draws: list[dict[str, Any]], max_number: int = 39, pick
                 "label": config["label"],
                 "quality": round(quality, 2),
                 "averageHit": backtest["averageHit"],
+                "onePlusRate": backtest["onePlusRate"],
+                "twoPlusRate": backtest["twoPlusRate"],
                 "threePlusRate": backtest["threePlusRate"],
                 "bestHit": backtest["bestHit"],
                 "testedCount": backtest["testedCount"],
