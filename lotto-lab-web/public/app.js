@@ -31,6 +31,11 @@ const FOCUS_PRESETS = {
     weights: { heat: 28, overdue: 22, spread: 25, backtest: 25 },
     description: "熱度、遺漏、版型與回測一起看。",
   },
+  classic: {
+    label: "熱遺平衡",
+    weights: { heat: 45, overdue: 27, spread: 18, backtest: 10 },
+    description: "回到曾經 539 回測中 4 的樸素熱度加遺漏邏輯，少做尾數限制。",
+  },
   hot: {
     label: "追熱",
     weights: { heat: 48, overdue: 8, spread: 18, backtest: 26 },
@@ -45,6 +50,11 @@ const FOCUS_PRESETS = {
     label: "版路",
     weights: { heat: 18, overdue: 18, spread: 42, backtest: 22 },
     description: "優先看區間、奇偶、大小與尾數分散。",
+  },
+  interval: {
+    label: "區間",
+    weights: { heat: 16, overdue: 18, spread: 38, backtest: 28 },
+    description: "優先抓近期集中落點區間，再混合熱號、拖牌與回測。",
   },
   backtest: {
     label: "回測",
@@ -400,12 +410,16 @@ function hotTailProfile() {
     });
   });
   const sorted = counts.sort((a, b) => b.count - a.count || a.tail - b.tail);
-  const size = state.analysisFocus === "pattern" ? 6 : 7;
+  const size = state.analysisFocus === "pattern" || state.analysisFocus === "interval" ? 6 : 7;
   const hotTails = sorted.slice(0, size).map((item) => item.tail);
   return {
     hotTails,
     label: hotTails.map((tail) => `${tail}尾`).join("、"),
   };
+}
+
+function shouldFilterByHotTail() {
+  return ["hot", "pattern", "interval"].includes(state.analysisFocus);
 }
 
 function patternHints() {
@@ -421,7 +435,7 @@ function patternHints() {
       (patterns.repeatCandidates || [])
         .filter((item) => item.count > 0 || item.rate > 0)
         .slice(0, 3)
-      .map((item) => item.number),
+        .map((item) => item.number),
     ),
   ];
   return { pairs, dragTargets, intervalNumbers, intervals, repeatNumbers };
@@ -432,11 +446,12 @@ function candidatePool() {
   if (!rows.length) return Array.from({ length: 39 }, (_, i) => i + 1);
   const hotSize = state.analysisFocus === "hot" ? 22 : 14;
   const overdueSize = state.analysisFocus === "overdue" ? 22 : 14;
-  const balancedSize = state.analysisFocus === "pattern" ? 28 : 20;
+  const balancedSize = state.analysisFocus === "pattern" || state.analysisFocus === "interval" ? 28 : 20;
   const { hotTails } = hotTailProfile();
   const hotTailSet = new Set(hotTails);
   const tailFilteredUniverse = Array.from({ length: 39 }, (_, i) => i + 1).filter((number) => hotTailSet.has(number % 10));
-  const numberAllowed = (number) => hotTailSet.has(number % 10);
+  const filterByTail = shouldFilterByHotTail();
+  const numberAllowed = (number) => !filterByTail || hotTailSet.has(number % 10);
   const hot = [...rows].sort((a, b) => b.count - a.count || a.number - b.number).slice(0, hotSize).map((row) => row.number);
   const overdue = [...rows].sort((a, b) => b.gap - a.gap || a.number - b.number).slice(0, overdueSize).map((row) => row.number);
   const balanced = [...rows]
@@ -447,7 +462,8 @@ function candidatePool() {
   const hints = patternHints();
   const patternNumbers = [...hints.pairs.flat(), ...hints.dragTargets, ...hints.intervalNumbers, ...hints.repeatNumbers];
   const pool = [...new Set([...hot, ...overdue, ...balanced, ...patternNumbers, ...tailFilteredUniverse])].filter(numberAllowed);
-  return pool.length >= 12 ? pool : tailFilteredUniverse;
+  if (pool.length >= 12) return pool;
+  return filterByTail ? tailFilteredUniverse : Array.from({ length: 39 }, (_, i) => i + 1);
 }
 
 function randomChoice(items) {
@@ -464,6 +480,12 @@ function buildCandidate(pool) {
   const dragTargets = hints.dragTargets.filter((number) => poolSet.has(number));
   const intervalNumbers = hints.intervalNumbers.filter((number) => poolSet.has(number));
   const repeatNumbers = hints.repeatNumbers.filter((number) => poolSet.has(number));
+  const classicList = [...frequencyRows]
+    .map((row) => ({ n: row.number, score: row.count * 0.45 + row.gap * 0.27 + Math.random() * 5 }))
+    .filter((item) => poolSet.has(item.n))
+    .sort((a, b) => b.score - a.score || a.n - b.n)
+    .slice(0, 22)
+    .map((item) => item.n);
   const hotList = [...frequencyRows]
     .sort((a, b) => b.count - a.count || a.number - b.number)
     .map((row) => row.number)
@@ -483,12 +505,12 @@ function buildCandidate(pool) {
   ].filter(Boolean);
 
   zones.forEach((zone) => {
-    const chance = focus === "pattern" ? 0.88 : 0.72;
+    const chance = focus === "pattern" || focus === "interval" ? 0.88 : 0.72;
     if (numbers.size < 5 && zone.length && Math.random() < chance) {
       numbers.add(randomChoice(zone));
     }
   });
-  if ((focus === "pattern" || Math.random() < 0.55) && pairChoices.length && numbers.size <= 3) {
+  if ((focus === "pattern" || focus === "interval" || Math.random() < 0.55) && pairChoices.length && numbers.size <= 3) {
     randomChoice(pairChoices).forEach((number) => numbers.add(number));
   }
   if (dragTargets.length && numbers.size < 5 && Math.random() < 0.72) {
@@ -497,11 +519,14 @@ function buildCandidate(pool) {
   if (intervalNumbers.length && numbers.size < 5 && Math.random() < 0.78) {
     numbers.add(randomChoice(intervalNumbers));
   }
-  if (focus === "pattern" && intervalNumbers.length) {
+  if ((focus === "pattern" || focus === "interval") && intervalNumbers.length) {
     while (numbers.size < 3) numbers.add(randomChoice(intervalNumbers));
   }
   if (repeatNumbers.length && numbers.size < 5 && Math.random() < 0.45) {
     numbers.add(randomChoice(repeatNumbers));
+  }
+  if (focus === "classic" && classicList.length) {
+    while (numbers.size < 4) numbers.add(randomChoice(classicList));
   }
   if (focus === "hot" && hotList.length) {
     while (numbers.size < 3) numbers.add(randomChoice(hotList));
@@ -575,6 +600,7 @@ function renderReferencePick() {
   els.pickBalls.innerHTML = balls(candidate.numbers);
   els.pickMeta.innerHTML = `
     <span>${focus.label}</span>
+    <span>${focus.description}</span>
     <span>熱尾 ${tailProfile.label}</span>
     <span>分數 ${candidate.score.total}</span>
     <span>版路 +${candidate.score.pattern || 0}</span>
