@@ -663,7 +663,7 @@ function renderCandidates() {
   });
 }
 
-function renderModelBacktest(backtest) {
+function renderModelBacktest(backtest, profiles = []) {
   if (!backtest || !backtest.testedCount) {
     els.backtestBadge.textContent = "資料不足";
     els.avgHit.textContent = "-";
@@ -675,9 +675,33 @@ function renderModelBacktest(backtest) {
   }
   els.backtestBadge.textContent = `${backtest.testedCount} 期`;
   els.avgHit.textContent = backtest.averageHit;
-  els.threePlusRate.textContent = `${backtest.threePlusRate}%`;
+  els.threePlusRate.textContent = `${backtest.onePlusRate ?? 0}%`;
   els.bestHit.textContent = `${backtest.bestHit} 中`;
-  els.backtestMethod.textContent = backtest.method;
+  const ranking = profiles
+    .slice(0, 5)
+    .map(
+      (profile, index) => `
+        <div class="model-rank ${index === 0 ? "best" : ""}">
+          <div>
+            <strong>${index + 1}. ${profile.label}</strong>
+            <span>均中 ${profile.averageHit} · 摸邊 ${profile.onePlusRate ?? 0}% · 2中+ ${profile.twoPlusRate ?? 0}%</span>
+          </div>
+          <em>${profile.bestHit} 中</em>
+        </div>
+      `,
+    )
+    .join("");
+  const distribution = backtest.distribution || {};
+  const twoPlusText = `${backtest.twoPlusRate ?? 0}%`;
+  const threePlusText = `${backtest.threePlusRate ?? 0}%`;
+  const warning =
+    (backtest.threePlusRate ?? 0) === 0
+      ? `<div class="backtest-warning">最近 ${backtest.testedCount} 期沒有 3 中以上，這時候先看摸邊率和 2 中以上，比只盯 3 中更準。</div>`
+      : "";
+  els.backtestMethod.innerHTML = `
+    ${backtest.method}
+    <span class="backtest-method-line">命中分布：0中 ${distribution[0] || 0}、1中 ${distribution[1] || 0}、2中 ${distribution[2] || 0}、3中以上 ${backtest.threePlusCount || 0}。2中以上 ${twoPlusText}，3中以上 ${threePlusText}。</span>
+  `;
   els.backtestRecent.innerHTML = backtest.recentRows
     .map(
       (row) => `
@@ -699,6 +723,9 @@ function renderModelBacktest(backtest) {
       `,
     )
     .join("");
+  if (ranking || warning) {
+    els.backtestRecent.insertAdjacentHTML("afterbegin", `${warning}<div class="model-rank-list">${ranking}</div>`);
+  }
 }
 
 function renderPatterns(patterns, profiles = []) {
@@ -832,7 +859,7 @@ function render(payload) {
   els.date.textContent = `日期 ${latest.date || "-"}`;
   els.latestBalls.innerHTML = balls(latest.numbers);
   els.note.textContent = analysis.note;
-  renderModelBacktest(analysis.backtest);
+  renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles);
   els.hot.innerHTML = rankRows(analysis.hot, "count");
   els.cold.innerHTML = rankRows(analysis.cold, "count");
