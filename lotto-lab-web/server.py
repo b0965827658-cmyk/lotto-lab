@@ -247,6 +247,9 @@ def taiwan_year_history(year: int) -> list[dict[str, Any]]:
 
 
 def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
+    fast_history = pilio_taiwan_history(limit)
+    if len(fast_history) >= min(limit, 20):
+        return fast_history[:limit]
     try:
         rows = taiwan_dataset_rows()
         latest_row = max(rows, key=lambda row: int(row.get("資料所屬年度", "0") or "0"))
