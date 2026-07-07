@@ -744,6 +744,8 @@ function renderPatterns(patterns, profiles = []) {
   const tails = patterns.tails || [];
   const intervals = patterns.intervals || [];
   const sumRange = patterns.sumRange || {};
+  const chip = (text, tone = "") => `<span class="pattern-chip ${tone}">${text}</span>`;
+  const empty = `<span class="pattern-note">資料不足</span>`;
   els.patternGrid.innerHTML = `
     <div>
       <span>常見區間</span>
@@ -766,28 +768,68 @@ function renderPatterns(patterns, profiles = []) {
       <em>中心 ${sumRange.center || "-"}</em>
     </div>
   `;
-  const tailText = tails.map((item) => `${item.tail}尾 ${item.count}次`).join("、") || "-";
-  const intervalText =
-    intervals.map((item) => `${item.label} 集中${item.focusCount}期/${item.rate}%`).join("、") || "-";
-  const neighborText = patterns.neighborNumbers?.length ? patterns.neighborNumbers.map(pad).join(" · ") : "-";
-  const pairText =
-    patterns.pairCombos?.map((item) => `${pad(item.numbers[0])}-${pad(item.numbers[1])} ${item.count}次`).join("、") || "-";
-  const dragText =
-    patterns.dragCards?.map((item) => `${pad(item.source)}拖${pad(item.target)} ${item.count}次/${item.rate}%`).join("、") || "-";
-  const repeatText =
-    patterns.repeatCandidates?.map((item) => `${pad(item.number)} ${item.count}次/${item.rate}%`).join("、") || "-";
+  const tailText = tails.length
+    ? tails.slice(0, 5).map((item, index) => chip(`${item.tail}尾 ${item.count}次`, index < 2 ? "gold" : "")).join("")
+    : empty;
+  const intervalText = intervals.length
+    ? intervals.slice(0, 4).map((item, index) => chip(`${item.label} ${item.rate}%`, index < 2 ? "gold" : "")).join("")
+    : empty;
+  const neighborText = patterns.neighborNumbers?.length
+    ? patterns.neighborNumbers.slice(0, 12).map((number) => chip(pad(number))).join("")
+    : empty;
+  const pairText = patterns.pairCombos?.length
+    ? patterns.pairCombos
+        .slice(0, 5)
+        .map((item, index) => chip(`${pad(item.numbers[0])}-${pad(item.numbers[1])} ${item.count}次`, index < 2 ? "gold" : ""))
+        .join("")
+    : empty;
+  const dragText = patterns.dragCards?.length
+    ? patterns.dragCards
+        .slice(0, 5)
+        .map((item, index) => chip(`${pad(item.source)}拖${pad(item.target)} ${item.rate}%`, index < 2 ? "gold" : ""))
+        .join("")
+    : empty;
+  const repeatText = patterns.repeatCandidates?.length
+    ? patterns.repeatCandidates
+        .slice(0, 5)
+        .map((item, index) => chip(`${pad(item.number)} ${item.rate}%`, index < 2 ? "gold" : ""))
+        .join("")
+    : empty;
   const profileText = profiles
     .slice(0, 3)
-    .map((item) => `${item.label}：均中 ${item.averageHit}，最高 ${item.bestHit} 中`)
-    .join(" / ");
+    .map((item, index) => chip(`${item.label} 均${item.averageHit} / 高${item.bestHit}`, index === 0 ? "gold" : ""))
+    .join("");
   els.patternLines.innerHTML = `
-    <div><span>近期熱尾</span><strong>${tailText}</strong></div>
-    <div><span>區間號</span><strong>${intervalText}</strong></div>
-    <div><span>上期鄰近</span><strong>${neighborText}</strong></div>
-    <div><span>哥倆好</span><strong>${pairText}</strong></div>
-    <div><span>拖牌</span><strong>${dragText}</strong></div>
-    <div><span>可能連莊</span><strong>${repeatText}</strong></div>
-    <div><span>模型比較</span><strong>${profileText || "-"}</strong></div>
+    <div class="pattern-soft">
+      <span>近期熱門尾數</span>
+      <strong class="pattern-line-main">${tailText}</strong>
+      <em class="pattern-note">優先保留近期有熱度的尾數，過冷尾數降低權重。</em>
+    </div>
+    <div class="pattern-soft">
+      <span>集中區間</span>
+      <strong class="pattern-line-main">${intervalText}</strong>
+      <em class="pattern-note">看近期開獎是否集中在你設定的區間帶。</em>
+    </div>
+    <div>
+      <span>哥倆好</span>
+      <strong class="pattern-line-main">${pairText}</strong>
+    </div>
+    <div>
+      <span>拖牌</span>
+      <strong class="pattern-line-main">${dragText}</strong>
+    </div>
+    <div>
+      <span>可能連莊</span>
+      <strong class="pattern-line-main">${repeatText}</strong>
+    </div>
+    <div>
+      <span>上期鄰近</span>
+      <strong class="pattern-line-main">${neighborText}</strong>
+    </div>
+    <div class="pattern-wide">
+      <span>模型比較</span>
+      <strong class="pattern-line-main">${profileText || empty}</strong>
+    </div>
   `;
 }
 
