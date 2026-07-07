@@ -33,8 +33,7 @@ socket.getaddrinfo = ipv4_getaddrinfo
 
 ROOT = Path(__file__).parent
 PUBLIC = ROOT / "public"
-DATA_DIR = ROOT / "data"
-BUNDLED_TAIWAN_HISTORY = DATA_DIR / "taiwan_539_history.json"
+BUNDLED_TAIWAN_HISTORY = PUBLIC / "taiwan_539_history.json"
 
 TAIWAN_LAST_URL = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/LastNumber"
 TAIWAN_DATASET_URL = "https://gaze.nta.gov.tw/dntmb/OpenData/csvDw?ntaCode=D423F"
