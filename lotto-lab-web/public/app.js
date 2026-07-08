@@ -1,6 +1,8 @@
 const state = {
   game: "tw539",
   limit: 90,
+  plan: "free",
+  subscription: null,
   analysisFocus: "balanced",
   latest: null,
   analysis: null,
@@ -31,6 +33,7 @@ const state = {
 const STORAGE_KEY = "lotto-lab-saved-picks";
 const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
+const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 
 const FOCUS_PRESETS = {
   balanced: {
@@ -123,6 +126,7 @@ const els = {
   notifyText: $("#notifyText"),
   notifyToggle: $("#notifyToggleBtn"),
   notifyTest: $("#notifyTestBtn"),
+  proPanels: Array.from(document.querySelectorAll('[data-tier="pro"]')),
 };
 
 function pad(n) {
@@ -199,6 +203,51 @@ function renderHistory() {
 function setStatus(message, isError = false) {
   els.status.textContent = message;
   els.status.classList.toggle("error", isError);
+}
+
+function isProPlan() {
+  return state.plan === "pro";
+}
+
+function requirePro(feature) {
+  if (isProPlan()) return true;
+  setStatus(`${feature} 是 Pro 訂閱版功能。可以先按「預覽 Pro」查看完整介面。`, true);
+  return false;
+}
+
+function loadPlanPreview() {
+  return localStorage.getItem(PLAN_STORAGE_KEY) === "pro" ? "pro" : "free";
+}
+
+function savePlanPreview() {
+  localStorage.setItem(PLAN_STORAGE_KEY, state.plan);
+}
+
+function applyPlanAccess() {
+  document.body.dataset.plan = state.plan;
+  const pro = isProPlan();
+  els.proPanels.forEach((panel) => {
+    panel.classList.toggle("locked", !pro);
+    panel.setAttribute("aria-disabled", String(!pro));
+  });
+  Array.from(els.limit.options).forEach((option) => {
+    option.disabled = !pro && Number(option.value) > 90;
+  });
+  if (!pro && state.limit > 90) {
+    state.limit = 90;
+    els.limit.value = "90";
+  }
+  els.focusButtons.forEach((button) => {
+    button.disabled = !pro;
+  });
+  els.modelInputs.forEach((input) => {
+    input.disabled = !pro;
+  });
+  els.resetModel.disabled = !pro;
+  els.generate.disabled = !pro;
+  els.crossYearSearch.classList.toggle("pro-required", !pro);
+  updateNotificationUi();
+  if (state.analysis) renderCandidates();
 }
 
 function loadSavedPicks() {
@@ -714,6 +763,10 @@ function savePick(numbers) {
 }
 
 function renderCandidates() {
+  if (!isProPlan()) {
+    els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；免費版會保留上方一組統計參考選號。</div>`;
+    return;
+  }
   if (!state.analysis || !state.history.length) {
     els.candidates.innerHTML = `<div class="empty-state">資料讀取後會產生候選組合。</div>`;
     return;
@@ -1018,18 +1071,23 @@ function render(payload) {
 
 function renderPlans(subscription) {
   if (!subscription?.plans?.length) return;
+  state.subscription = subscription;
   els.plans.innerHTML = subscription.plans
     .map((plan) => {
       const isPro = plan.id === "pro";
-      const action = isPro ? "訂閱 Pro" : "目前方案";
+      const active = state.plan === plan.id;
+      const action = active ? "目前使用" : isPro ? (subscription.enabled ? "訂閱 Pro" : "預覽 Pro") : "切回免費";
       return `
-        <div class="plan ${isPro ? "pro" : ""}">
-          <h3>${plan.name}</h3>
+        <div class="plan ${isPro ? "pro" : ""} ${active ? "active" : ""}">
+          <div class="plan-title">
+            <h3>${plan.name}</h3>
+            <span>${active ? "使用中" : isPro ? "升級" : "基本"}</span>
+          </div>
           <div class="price">${plan.price}</div>
           <ul class="features">
             ${plan.features.map((feature) => `<li>${feature}</li>`).join("")}
           </ul>
-          <button class="plan-action ${isPro ? "" : "secondary"}" data-plan="${plan.id}">${action}</button>
+          <button class="plan-action ${isPro ? "" : "secondary"}" data-plan="${plan.id}" ${active ? "disabled" : ""}>${action}</button>
         </div>
       `;
     })
@@ -1038,16 +1096,25 @@ function renderPlans(subscription) {
   els.plans.querySelectorAll("[data-plan]").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.plan !== "pro") {
-        setStatus("你目前正在使用免費版。");
+        state.plan = "free";
+        savePlanPreview();
+        renderPlans(subscription);
+        applyPlanAccess();
+        setStatus("已切回免費版：保留最新開獎、基本統計與本次載入歷史。");
         return;
       }
       if (subscription.enabled && subscription.paymentLink) {
         window.open(subscription.paymentLink, "_blank", "noopener,noreferrer");
         return;
       }
-      setStatus("尚未設定 Stripe 付款連結。設定 LOTTO_STRIPE_PAYMENT_LINK 後，這個按鈕就會帶使用者去訂閱。", true);
+      state.plan = "pro";
+      savePlanPreview();
+      renderPlans(subscription);
+      applyPlanAccess();
+      setStatus("已切到 Pro 預覽：進階回測、版路、跨年查詢、通知與高分組合已解鎖。");
     });
   });
+  applyPlanAccess();
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -1067,6 +1134,14 @@ function pushSupported() {
 
 function updateNotificationUi() {
   if (!els.notifyToggle) return;
+  if (!isProPlan()) {
+    els.notifyBadge.textContent = "Pro";
+    els.notifyText.textContent = "開獎通知屬於 Pro 訂閱版；升級後可讓手機接收新一期提醒。";
+    els.notifyToggle.textContent = "Pro 解鎖";
+    els.notifyToggle.disabled = false;
+    els.notifyTest.disabled = true;
+    return;
+  }
   if (!notificationSupported()) {
     els.notifyBadge.textContent = "不支援";
     els.notifyText.textContent = "這個瀏覽器目前不支援網站通知。iPhone 請先用 Safari 加入主畫面後再試。";
@@ -1163,6 +1238,7 @@ async function disableNotifications() {
 }
 
 async function toggleNotifications() {
+  if (!requirePro("開獎通知")) return;
   try {
     if (state.pushSubscription) {
       await disableNotifications();
@@ -1214,7 +1290,10 @@ async function loadConfig() {
   try {
     const response = await fetch("/api/config");
     const payload = await response.json();
-    if (payload.ok) renderPlans(payload.subscription);
+    if (payload.ok) {
+      state.plan = loadPlanPreview();
+      renderPlans(payload.subscription);
+    }
     if (payload.ok) await initNotifications(payload.notifications);
   } catch (error) {
     setStatus("訂閱設定讀取失敗，但開獎資料仍可使用。", true);
@@ -1222,6 +1301,10 @@ async function loadConfig() {
 }
 
 async function load() {
+  if (!isProPlan() && state.limit > 90) {
+    state.limit = 90;
+    els.limit.value = "90";
+  }
   const cacheKey = `${state.game}-${state.limit}`;
   const cachedPayload = state.apiCache.get(cacheKey);
   const requestId = ++state.requestId;
@@ -1254,6 +1337,7 @@ async function load() {
 }
 
 async function runCrossYearSearch() {
+  if (!requirePro("跨年歷史查詢")) return;
   const fromYear = Number(els.historyFromYear.value);
   const toYear = Number(els.historyToYear.value);
   if (!Number.isInteger(fromYear) || !Number.isInteger(toYear) || fromYear < 2007 || toYear < 2007) {
@@ -1316,6 +1400,12 @@ document.querySelectorAll(".segment").forEach((button) => {
 });
 
 els.limit.addEventListener("change", () => {
+  if (!isProPlan() && Number(els.limit.value) > 90) {
+    els.limit.value = "90";
+    state.limit = 90;
+    setStatus("免費版最多分析 90 期；Pro 可使用 120、180、365 期。", true);
+    return;
+  }
   state.limit = Number(els.limit.value);
   state.candidateCache.clear();
   load();
@@ -1345,6 +1435,7 @@ els.usePick.addEventListener("click", () => {
 });
 
 els.generate.addEventListener("click", () => {
+  if (!requirePro("高分組合")) return;
   state.candidateCache.clear();
   renderReferencePick();
   renderCandidates();
@@ -1353,6 +1444,7 @@ els.generate.addEventListener("click", () => {
 
 els.focusButtons.forEach((button) => {
   button.addEventListener("click", () => {
+    if (!requirePro("模型模式切換")) return;
     const preset = FOCUS_PRESETS[button.dataset.focus];
     if (!preset) return;
     state.analysisFocus = button.dataset.focus;
@@ -1369,6 +1461,7 @@ els.focusButtons.forEach((button) => {
 
 els.modelInputs.forEach((input) => {
   input.addEventListener("input", () => {
+    if (!requirePro("模型權重調整")) return;
     state.modelWeights[input.dataset.weight] = Number(input.value);
     saveModelWeights();
     renderModelControls();
@@ -1380,6 +1473,7 @@ els.modelInputs.forEach((input) => {
 });
 
 els.resetModel.addEventListener("click", () => {
+  if (!requirePro("模型設定重設")) return;
   state.analysisFocus = "balanced";
   state.modelWeights = { ...FOCUS_PRESETS.balanced.weights };
   saveAnalysisFocus();
@@ -1433,10 +1527,12 @@ window.addEventListener("load", () => {
   getServiceWorkerRegistration().catch(() => {});
 });
 
+state.plan = loadPlanPreview();
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 initHistoryYears();
 renderModelControls();
+applyPlanAccess();
 updateNotificationUi();
 loadConfig();
 load();
