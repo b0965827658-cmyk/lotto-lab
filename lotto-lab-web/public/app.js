@@ -81,7 +81,6 @@ const els = {
   refresh: $("#refreshBtn"),
   limit: $("#limitSelect"),
   gameName: $("#gameName"),
-  sourceLink: $("#sourceLink"),
   period: $("#period"),
   date: $("#date"),
   latestBalls: $("#latestBalls"),
@@ -127,6 +126,8 @@ const els = {
   notifyToggle: $("#notifyToggleBtn"),
   notifyTest: $("#notifyTestBtn"),
   proPanels: Array.from(document.querySelectorAll('[data-tier="pro"]')),
+  tabButtons: Array.from(document.querySelectorAll("[data-tab]")),
+  tabPanels: Array.from(document.querySelectorAll("[data-tab-panel]")),
 };
 
 function pad(n) {
@@ -212,7 +213,19 @@ function isProPlan() {
 function requirePro(feature) {
   if (isProPlan()) return true;
   setStatus(`${feature} 是 Pro 訂閱版功能。可以先按「預覽 Pro」查看完整介面。`, true);
+  activateTab("subscription");
   return false;
+}
+
+function activateTab(tabName) {
+  els.tabButtons.forEach((button) => {
+    const active = button.dataset.tab === tabName;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  els.tabPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
+  });
 }
 
 function loadPlanPreview() {
@@ -536,7 +549,7 @@ function shortCycleProfile() {
 function patternHints() {
   const patterns = state.analysis?.patterns || {};
   const pairs = (patterns.pairCombos || []).map((item) => item.numbers || []).filter((pair) => pair.length === 2);
-  const dragTargets = [...new Set((patterns.dragCards || []).map((item) => item.target).filter(Boolean))];
+  const dragTargets = [...new Set((patterns.dragCards || []).map((item) => item.follow).filter(Boolean))];
   const intervals = (patterns.intervals || []).slice(0, 3).filter((item) => item.start && item.end);
   const intervalNumbers = [
     ...new Set(intervals.flatMap((item) => Array.from({ length: item.end - item.start + 1 }, (_, index) => item.start + index))),
@@ -764,7 +777,7 @@ function savePick(numbers) {
 
 function renderCandidates() {
   if (!isProPlan()) {
-    els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；免費版會保留上方一組統計參考選號。</div>`;
+    els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；目前會保留上方一組統計參考選號。</div>`;
     return;
   }
   if (!state.analysis || !state.history.length) {
@@ -932,7 +945,7 @@ function renderPatterns(patterns, profiles = []) {
   const dragText = patterns.dragCards?.length
     ? patterns.dragCards
         .slice(0, 5)
-        .map((item, index) => chip(`${pad(item.source)}拖${pad(item.target)} ${item.rate}%`, index < 2 ? "gold" : ""))
+        .map((item, index) => chip(`${pad(item.base)}拖${pad(item.follow)} ${item.rate}%`, index < 2 ? "gold" : ""))
         .join("")
     : empty;
   const repeatText = patterns.repeatCandidates?.length
@@ -1050,8 +1063,6 @@ function render(payload) {
   els.historyScope.textContent = "目前顯示本次載入的分析期數。";
   els.dashboard.hidden = false;
   els.gameName.textContent = latest.name;
-  els.sourceLink.href = latest.sourceUrl;
-  els.sourceLink.textContent = latest.source;
   els.period.textContent = `期別 ${latest.period || "-"}`;
   els.date.textContent = `日期 ${latest.date || "-"}`;
   els.latestBalls.innerHTML = balls(latest.numbers);
@@ -1072,22 +1083,22 @@ function render(payload) {
 function renderPlans(subscription) {
   if (!subscription?.plans?.length) return;
   state.subscription = subscription;
-  els.plans.innerHTML = subscription.plans
+  const proPlans = subscription.plans.filter((plan) => plan.id === "pro");
+  els.plans.innerHTML = proPlans
     .map((plan) => {
-      const isPro = plan.id === "pro";
-      const active = state.plan === plan.id;
-      const action = active ? "目前使用" : isPro ? (subscription.enabled ? "訂閱 Pro" : "預覽 Pro") : "切回免費";
+      const active = state.plan === "pro";
+      const action = active ? "目前使用" : subscription.enabled ? "訂閱 Pro" : "預覽 Pro";
       return `
-        <div class="plan ${isPro ? "pro" : ""} ${active ? "active" : ""}">
+        <div class="plan pro ${active ? "active" : ""}">
           <div class="plan-title">
             <h3>${plan.name}</h3>
-            <span>${active ? "使用中" : isPro ? "升級" : "基本"}</span>
+            <span>${active ? "使用中" : "升級"}</span>
           </div>
           <div class="price">${plan.price}</div>
           <ul class="features">
             ${plan.features.map((feature) => `<li>${feature}</li>`).join("")}
           </ul>
-          <button class="plan-action ${isPro ? "" : "secondary"}" data-plan="${plan.id}" ${active ? "disabled" : ""}>${action}</button>
+          <button class="plan-action" data-plan="pro" ${active ? "disabled" : ""}>${action}</button>
         </div>
       `;
     })
@@ -1095,14 +1106,6 @@ function renderPlans(subscription) {
 
   els.plans.querySelectorAll("[data-plan]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (button.dataset.plan !== "pro") {
-        state.plan = "free";
-        savePlanPreview();
-        renderPlans(subscription);
-        applyPlanAccess();
-        setStatus("已切回免費版：保留最新開獎、基本統計與本次載入歷史。");
-        return;
-      }
       if (subscription.enabled && subscription.paymentLink) {
         window.open(subscription.paymentLink, "_blank", "noopener,noreferrer");
         return;
@@ -1134,14 +1137,6 @@ function pushSupported() {
 
 function updateNotificationUi() {
   if (!els.notifyToggle) return;
-  if (!isProPlan()) {
-    els.notifyBadge.textContent = "Pro";
-    els.notifyText.textContent = "開獎通知屬於 Pro 訂閱版；升級後可讓手機接收新一期提醒。";
-    els.notifyToggle.textContent = "Pro 解鎖";
-    els.notifyToggle.disabled = false;
-    els.notifyTest.disabled = true;
-    return;
-  }
   if (!notificationSupported()) {
     els.notifyBadge.textContent = "不支援";
     els.notifyText.textContent = "這個瀏覽器目前不支援網站通知。iPhone 請先用 Safari 加入主畫面後再試。";
@@ -1238,7 +1233,6 @@ async function disableNotifications() {
 }
 
 async function toggleNotifications() {
-  if (!requirePro("開獎通知")) return;
   try {
     if (state.pushSubscription) {
       await disableNotifications();
@@ -1370,8 +1364,7 @@ async function runCrossYearSearch() {
     els.historyNumber.value = "";
     renderHistory();
     const years = payload.searchedYears?.length ? `${payload.searchedYears[0]}-${payload.searchedYears[payload.searchedYears.length - 1]}` : `${fromYear}-${toYear}`;
-    const sourceNote = payload.sourceNote ? ` ${payload.sourceNote}` : "";
-    els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。${sourceNote}`;
+    els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。`;
     setStatus(`已完成跨年查詢：${payload.total} 筆。`);
   } catch (error) {
     setStatus(error.message, true);
@@ -1399,11 +1392,15 @@ document.querySelectorAll(".segment").forEach((button) => {
   });
 });
 
+els.tabButtons.forEach((button) => {
+  button.addEventListener("click", () => activateTab(button.dataset.tab));
+});
+
 els.limit.addEventListener("change", () => {
   if (!isProPlan() && Number(els.limit.value) > 90) {
     els.limit.value = "90";
     state.limit = 90;
-    setStatus("免費版最多分析 90 期；Pro 可使用 120、180、365 期。", true);
+    setStatus("目前最多分析 90 期；Pro 可使用 120、180、365 期。", true);
     return;
   }
   state.limit = Number(els.limit.value);
