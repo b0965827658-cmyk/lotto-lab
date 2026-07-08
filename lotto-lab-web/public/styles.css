@@ -97,6 +97,26 @@ h2 {
   margin-bottom: 14px;
 }
 
+.notify-quick {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 8px 10px;
+  margin-left: auto;
+}
+
+.notify-quick .fineprint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.notify-quick .save-button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(2, minmax(118px, 1fr));
@@ -153,6 +173,48 @@ select {
   gap: 14px;
 }
 
+.page-tabs {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.page-tab {
+  min-height: 44px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.page-tab.active {
+  background: var(--green);
+  color: #fff;
+}
+
+.tab-panel {
+  grid-column: 1 / -1;
+  display: none;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tab-panel.active {
+  display: grid;
+}
+
+.tab-panel[data-tab-panel="history"] .wide,
+.tab-panel[data-tab-panel="subscription"] .subscription-panel {
+  grid-column: 1 / -1;
+}
+
 .panel {
   min-width: 0;
   border: 1px solid var(--line);
@@ -168,10 +230,6 @@ select {
   grid-column: span 2;
 }
 
-.notify-panel {
-  grid-column: span 1;
-}
-
 .subscription-panel {
   display: grid;
   grid-template-columns: minmax(220px, 0.85fr) minmax(320px, 1.15fr);
@@ -181,7 +239,7 @@ select {
 
 .plan-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 
@@ -297,26 +355,6 @@ select {
   font-size: 14px;
   font-weight: 750;
   line-height: 1.65;
-}
-
-.notify-panel {
-  background: #f9fbf8;
-}
-
-.notify-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.notify-actions .save-button,
-.notify-actions .text-button {
-  width: 100%;
-}
-
-.notify-actions .text-button {
-  height: 42px;
 }
 
 [data-tier="pro"] {
@@ -1185,11 +1223,30 @@ th {
     flex-direction: column;
   }
 
+  .notify-quick {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-left: 0;
+  }
+
   .segmented {
     grid-template-columns: 1fr 1fr;
   }
 
+  .page-tabs {
+    display: flex;
+    overflow-x: auto;
+    padding: 6px;
+  }
+
+  .page-tab {
+    flex: 0 0 auto;
+    min-width: 104px;
+    padding: 0 14px;
+  }
+
   .dashboard,
+  .tab-panel,
   .latest-panel,
   .wide,
   .subscription-panel,
@@ -1197,11 +1254,14 @@ th {
   .model-panel,
   .backtest-panel,
   .pattern-panel,
-  .notify-panel,
   .candidate-panel {
     display: grid;
     grid-template-columns: 1fr;
     grid-column: span 1;
+  }
+
+  .tab-panel:not(.active) {
+    display: none;
   }
 
   .plan-grid {

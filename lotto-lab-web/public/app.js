@@ -126,6 +126,8 @@ const els = {
   notifyToggle: $("#notifyToggleBtn"),
   notifyTest: $("#notifyTestBtn"),
   proPanels: Array.from(document.querySelectorAll('[data-tier="pro"]')),
+  tabButtons: Array.from(document.querySelectorAll("[data-tab]")),
+  tabPanels: Array.from(document.querySelectorAll("[data-tab-panel]")),
 };
 
 function pad(n) {
@@ -211,7 +213,19 @@ function isProPlan() {
 function requirePro(feature) {
   if (isProPlan()) return true;
   setStatus(`${feature} 是 Pro 訂閱版功能。可以先按「預覽 Pro」查看完整介面。`, true);
+  activateTab("subscription");
   return false;
+}
+
+function activateTab(tabName) {
+  els.tabButtons.forEach((button) => {
+    const active = button.dataset.tab === tabName;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  els.tabPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
+  });
 }
 
 function loadPlanPreview() {
@@ -1123,14 +1137,6 @@ function pushSupported() {
 
 function updateNotificationUi() {
   if (!els.notifyToggle) return;
-  if (!isProPlan()) {
-    els.notifyBadge.textContent = "Pro";
-    els.notifyText.textContent = "開獎通知屬於 Pro 訂閱版；升級後可讓手機接收新一期提醒。";
-    els.notifyToggle.textContent = "Pro 解鎖";
-    els.notifyToggle.disabled = false;
-    els.notifyTest.disabled = true;
-    return;
-  }
   if (!notificationSupported()) {
     els.notifyBadge.textContent = "不支援";
     els.notifyText.textContent = "這個瀏覽器目前不支援網站通知。iPhone 請先用 Safari 加入主畫面後再試。";
@@ -1227,7 +1233,6 @@ async function disableNotifications() {
 }
 
 async function toggleNotifications() {
-  if (!requirePro("開獎通知")) return;
   try {
     if (state.pushSubscription) {
       await disableNotifications();
@@ -1385,6 +1390,10 @@ document.querySelectorAll(".segment").forEach((button) => {
     state.game = button.dataset.game;
     load();
   });
+});
+
+els.tabButtons.forEach((button) => {
+  button.addEventListener("click", () => activateTab(button.dataset.tab));
 });
 
 els.limit.addEventListener("change", () => {
