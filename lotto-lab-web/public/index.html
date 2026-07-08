@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=24" />
+    <link rel="stylesheet" href="/styles.css?v=29" />
   </head>
   <body>
     <main class="shell">
@@ -31,6 +31,9 @@
         <label class="select-wrap">
           分析期數
           <select id="limitSelect">
+            <option value="10">近 10 期</option>
+            <option value="20">近 20 期</option>
+            <option value="36">近 36 期</option>
             <option value="60">60 期</option>
             <option value="90" selected>90 期</option>
             <option value="120">120 期</option>
@@ -38,42 +41,31 @@
             <option value="365">365 期</option>
           </select>
         </label>
+        <div class="notify-quick">
+          <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
+          <span id="notifyBadge" class="count-pill">未啟用</span>
+          <button id="notifyTestBtn" class="text-button notify-test" type="button" hidden>測試</button>
+          <p class="fineprint" id="notifyText">開啟後，有新一期開獎時可收到通知。</p>
+        </div>
       </section>
 
       <section class="status" id="status">正在讀取資料...</section>
 
       <section class="dashboard" id="dashboard" hidden>
-        <article class="panel subscription-panel">
-          <div>
-            <p class="label">訂閱方案</p>
-            <h2>Pro 統計分析</h2>
-            <p class="fineprint">免費版保留基本查詢；訂閱版解鎖進階模型、跨年紀錄、開獎通知與高分組合。</p>
-          </div>
-          <div class="plan-grid" id="planGrid"></div>
-        </article>
+        <nav class="page-tabs" aria-label="功能分頁">
+          <button class="page-tab active" type="button" data-tab="latest">最新開獎</button>
+          <button class="page-tab" type="button" data-tab="history">歷史開獎</button>
+          <button class="page-tab" type="button" data-tab="model">模型</button>
+          <button class="page-tab" type="button" data-tab="subscription">升級訂閱</button>
+        </nav>
 
-        <article class="panel notify-panel" data-tier="pro" data-lock-title="Pro 開獎通知" data-lock-text="訂閱後可開啟新一期開獎推播提醒。">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">開獎通知</p>
-              <h2>最新開獎提醒</h2>
-            </div>
-            <span id="notifyBadge" class="count-pill">未啟用</span>
-          </div>
-          <p class="fineprint" id="notifyText">開啟後，有新一期開獎時可收到通知。手機建議先加入主畫面。</p>
-          <div class="notify-actions">
-            <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
-            <button id="notifyTestBtn" class="text-button" type="button">測試</button>
-          </div>
-        </article>
-
+        <div class="tab-panel active" data-tab-panel="latest">
         <article class="panel latest-panel">
           <div class="panel-head">
             <div>
               <p class="label">最新一期</p>
               <h2 id="gameName">-</h2>
             </div>
-            <a id="sourceLink" class="source-link" href="#" target="_blank" rel="noreferrer">資料源</a>
           </div>
           <div class="meta">
             <span id="period">期別 -</span>
@@ -146,6 +138,41 @@
           <div class="saved-list" id="savedList"></div>
         </article>
 
+        <article class="panel">
+          <div class="panel-head compact">
+            <p class="label">熱號</p>
+            <span id="drawCount">-</span>
+          </div>
+          <div class="rank-list" id="hotList"></div>
+        </article>
+
+        <article class="panel">
+          <p class="label">冷號</p>
+          <div class="rank-list" id="coldList"></div>
+        </article>
+
+        <article class="panel">
+          <p class="label">最久未開</p>
+          <div class="rank-list" id="overdueList"></div>
+        </article>
+
+        <article class="panel wide disclaimer-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">使用提醒</p>
+              <h2>免責聲明</h2>
+            </div>
+            <span class="count-pill">重要</span>
+          </div>
+          <div class="disclaimer-grid">
+            <p>本服務提供的選號、版路、回測與統計內容，僅供資料分析與娛樂參考，不保證中獎，也不構成投注、投資或財務建議。</p>
+            <p>開獎號碼與期別會盡量以官方資料及公開來源校對；若資料來源延遲、改版或異常，仍以台灣彩券與 California Lottery 官方公告為準。</p>
+            <p>使用者應自行判斷投注風險，理性投注，避免超出可負擔範圍。本服務不代售彩券，也不處理兌獎、投注或獎金相關事務。</p>
+          </div>
+        </article>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="model">
         <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 模型設定" data-lock-text="訂閱後可切換板路模式並調整權重。">
           <div class="panel-head compact">
             <div>
@@ -199,25 +226,9 @@
           <p class="fineprint">依追蹤分數排序，保留隨機性；這是分析候選，不是中獎保證。</p>
           <div class="candidate-list" id="candidateList"></div>
         </article>
+        </div>
 
-        <article class="panel">
-          <div class="panel-head compact">
-            <p class="label">熱號</p>
-            <span id="drawCount">-</span>
-          </div>
-          <div class="rank-list" id="hotList"></div>
-        </article>
-
-        <article class="panel">
-          <p class="label">冷號</p>
-          <div class="rank-list" id="coldList"></div>
-        </article>
-
-        <article class="panel">
-          <p class="label">最久未開</p>
-          <div class="rank-list" id="overdueList"></div>
-        </article>
-
+        <div class="tab-panel" data-tab-panel="history">
         <article class="panel wide">
           <div class="panel-head compact">
             <div>
@@ -260,8 +271,20 @@
             </table>
           </div>
         </article>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="subscription">
+        <article class="panel subscription-panel">
+          <div>
+            <p class="label">訂閱方案</p>
+            <h2>Pro 統計分析</h2>
+            <p class="fineprint">解鎖進階模型、跨年紀錄與高分組合。</p>
+          </div>
+          <div class="plan-grid" id="planGrid"></div>
+        </article>
+        </div>
       </section>
     </main>
-    <script src="/app.js?v=24"></script>
+    <script src="/app.js?v=29"></script>
   </body>
 </html>
