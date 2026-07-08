@@ -1261,7 +1261,7 @@ class Handler(SimpleHTTPRequestHandler):
                 lottery = build_payload(game, 90)["latest"]
                 numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
                 message = {
-                    "title": f"{lottery.get('name', 'Lotto Lab')} 已開獎",
+                    "title": f"{lottery.get('name', '摘星王')} 已開獎",
                     "body": f"第 {lottery.get('period', '-')} 期：{numbers}",
                     "url": f"/?game={game}",
                     "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
@@ -1330,7 +1330,7 @@ def main():
     port = int(os.environ.get("PORT", "8787"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)
-    print(f"Lotto Lab running at http://{host}:{port}")
+    print(f"摘星王 running at http://{host}:{port}")
     server.serve_forever()
 
 
