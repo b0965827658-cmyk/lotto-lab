@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import html
 import io
 import json
@@ -19,6 +20,12 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+
+try:
+    from pywebpush import WebPushException, webpush
+except Exception:  # pragma: no cover - optional production dependency
+    WebPushException = None
+    webpush = None
 
 _ORIGINAL_GETADDRINFO = socket.getaddrinfo
 
@@ -43,6 +50,11 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = 15 * 60
 STRIPE_PAYMENT_LINK = os.environ.get("LOTTO_STRIPE_PAYMENT_LINK", "").strip()
+PUSH_PUBLIC_KEY = os.environ.get("LOTTO_VAPID_PUBLIC_KEY", "").strip()
+PUSH_PRIVATE_KEY = os.environ.get("LOTTO_VAPID_PRIVATE_KEY", "").strip()
+PUSH_CONTACT_EMAIL = os.environ.get("LOTTO_PUSH_CONTACT_EMAIL", "admin@example.com").strip()
+NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
+SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", ROOT / "data" / "push_subscriptions.json"))
 
 
 @dataclass
@@ -52,6 +64,62 @@ class CacheItem:
 
 
 cache: dict[str, CacheItem] = {}
+
+
+def load_push_subscriptions() -> list[dict[str, Any]]:
+    try:
+        if not SUBSCRIPTIONS_FILE.exists():
+            return []
+        payload = json.loads(SUBSCRIPTIONS_FILE.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, list) else []
+    except Exception:
+        return []
+
+
+def save_push_subscriptions(subscriptions: list[dict[str, Any]]) -> None:
+    SUBSCRIPTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SUBSCRIPTIONS_FILE.write_text(json.dumps(subscriptions, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def subscription_id(subscription: dict[str, Any]) -> str:
+    endpoint = str(subscription.get("endpoint", ""))
+    return hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
+
+
+def upsert_push_subscription(subscription: dict[str, Any], game: str = "all") -> int:
+    if not isinstance(subscription, dict) or not subscription.get("endpoint"):
+        raise ValueError("缺少有效的通知訂閱資料")
+    subscriptions = load_push_subscriptions()
+    item_id = subscription_id(subscription)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    record = {"id": item_id, "subscription": subscription, "game": game or "all", "updatedAt": now}
+    kept = [item for item in subscriptions if item.get("id") != item_id]
+    kept.append(record)
+    save_push_subscriptions(kept)
+    return len(kept)
+
+
+def remove_push_subscription(subscription: dict[str, Any]) -> int:
+    item_id = subscription_id(subscription)
+    subscriptions = [item for item in load_push_subscriptions() if item.get("id") != item_id]
+    save_push_subscriptions(subscriptions)
+    return len(subscriptions)
+
+
+def push_server_ready() -> bool:
+    return bool(PUSH_PUBLIC_KEY and PUSH_PRIVATE_KEY and webpush)
+
+
+def send_push_message(subscription: dict[str, Any], payload: dict[str, Any]) -> None:
+    if not push_server_ready():
+        raise RuntimeError("尚未設定完整推播金鑰，無法由伺服器群發通知")
+    subject = f"mailto:{PUSH_CONTACT_EMAIL}" if "@" in PUSH_CONTACT_EMAIL else PUSH_CONTACT_EMAIL
+    webpush(
+        subscription_info=subscription,
+        data=json.dumps(payload, ensure_ascii=False),
+        vapid_private_key=PUSH_PRIVATE_KEY,
+        vapid_claims={"sub": subject},
+    )
 
 
 def cached(key: str, loader):
@@ -1019,6 +1087,12 @@ class Handler(SimpleHTTPRequestHandler):
                             },
                         ],
                     },
+                    "notifications": {
+                        "supported": bool(PUSH_PUBLIC_KEY),
+                        "serverReady": push_server_ready(),
+                        "publicKey": PUSH_PUBLIC_KEY,
+                        "subscriberCount": len(load_push_subscriptions()),
+                    },
                 }
             )
             return
@@ -1054,6 +1128,81 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(exc)}, status=502)
             return
         return super().do_GET()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/push-subscription":
+            try:
+                payload = self.read_json_body()
+                action = payload.get("action", "subscribe")
+                subscription = payload.get("subscription", {})
+                if action == "subscribe":
+                    count = upsert_push_subscription(subscription, payload.get("game", "all"))
+                    self.send_json({"ok": True, "subscriberCount": count})
+                    return
+                if action == "unsubscribe":
+                    count = remove_push_subscription(subscription)
+                    self.send_json({"ok": True, "subscriberCount": count})
+                    return
+                raise ValueError("不支援的通知操作")
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+        if parsed.path == "/api/notify-latest":
+            try:
+                payload = self.read_json_body()
+                if NOTIFY_SECRET:
+                    supplied = self.headers.get("X-Lotto-Notify-Secret", "") or str(payload.get("secret", ""))
+                    if supplied != NOTIFY_SECRET:
+                        self.send_json({"ok": False, "error": "通知密鑰不正確"}, status=403)
+                        return
+                if not push_server_ready():
+                    self.send_json({"ok": False, "error": "尚未設定完整推播金鑰"}, status=400)
+                    return
+                game = payload.get("game", "tw539")
+                lottery = build_payload(game, 90)["latest"]
+                numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
+                message = {
+                    "title": f"{lottery.get('name', 'Lotto Lab')} 已開獎",
+                    "body": f"第 {lottery.get('period', '-')} 期：{numbers}",
+                    "url": f"/?game={game}",
+                    "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
+                }
+                sent, failed, alive = self.broadcast_notification(message)
+                self.send_json({"ok": True, "sent": sent, "failed": failed, "subscriberCount": alive, "message": message})
+                return
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=500)
+                return
+        self.send_json({"ok": False, "error": "not found"}, status=404)
+
+    def read_json_body(self) -> dict[str, Any]:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length <= 0:
+            return {}
+        body = self.rfile.read(length)
+        return json.loads(body.decode("utf-8"))
+
+    def broadcast_notification(self, message: dict[str, Any]) -> tuple[int, int, int]:
+        subscriptions = load_push_subscriptions()
+        sent = 0
+        failed = 0
+        alive = []
+        for item in subscriptions:
+            subscription = item.get("subscription", {})
+            try:
+                send_push_message(subscription, message)
+                sent += 1
+                alive.append(item)
+            except Exception as exc:
+                failed += 1
+                response = getattr(exc, "response", None)
+                status_code = getattr(response, "status_code", None)
+                if status_code not in (404, 410):
+                    alive.append(item)
+        if len(alive) != len(subscriptions):
+            save_push_subscriptions(alive)
+        return sent, failed, len(alive)
 
     def send_json(self, payload: dict[str, Any], status: int = 200):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
