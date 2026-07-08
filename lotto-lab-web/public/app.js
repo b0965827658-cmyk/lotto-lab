@@ -81,7 +81,6 @@ const els = {
   refresh: $("#refreshBtn"),
   limit: $("#limitSelect"),
   gameName: $("#gameName"),
-  sourceLink: $("#sourceLink"),
   period: $("#period"),
   date: $("#date"),
   latestBalls: $("#latestBalls"),
@@ -536,7 +535,7 @@ function shortCycleProfile() {
 function patternHints() {
   const patterns = state.analysis?.patterns || {};
   const pairs = (patterns.pairCombos || []).map((item) => item.numbers || []).filter((pair) => pair.length === 2);
-  const dragTargets = [...new Set((patterns.dragCards || []).map((item) => item.target).filter(Boolean))];
+  const dragTargets = [...new Set((patterns.dragCards || []).map((item) => item.follow).filter(Boolean))];
   const intervals = (patterns.intervals || []).slice(0, 3).filter((item) => item.start && item.end);
   const intervalNumbers = [
     ...new Set(intervals.flatMap((item) => Array.from({ length: item.end - item.start + 1 }, (_, index) => item.start + index))),
@@ -932,7 +931,7 @@ function renderPatterns(patterns, profiles = []) {
   const dragText = patterns.dragCards?.length
     ? patterns.dragCards
         .slice(0, 5)
-        .map((item, index) => chip(`${pad(item.source)}拖${pad(item.target)} ${item.rate}%`, index < 2 ? "gold" : ""))
+        .map((item, index) => chip(`${pad(item.base)}拖${pad(item.follow)} ${item.rate}%`, index < 2 ? "gold" : ""))
         .join("")
     : empty;
   const repeatText = patterns.repeatCandidates?.length
@@ -1050,8 +1049,6 @@ function render(payload) {
   els.historyScope.textContent = "目前顯示本次載入的分析期數。";
   els.dashboard.hidden = false;
   els.gameName.textContent = latest.name;
-  els.sourceLink.href = latest.sourceUrl;
-  els.sourceLink.textContent = latest.source;
   els.period.textContent = `期別 ${latest.period || "-"}`;
   els.date.textContent = `日期 ${latest.date || "-"}`;
   els.latestBalls.innerHTML = balls(latest.numbers);
@@ -1362,8 +1359,7 @@ async function runCrossYearSearch() {
     els.historyNumber.value = "";
     renderHistory();
     const years = payload.searchedYears?.length ? `${payload.searchedYears[0]}-${payload.searchedYears[payload.searchedYears.length - 1]}` : `${fromYear}-${toYear}`;
-    const sourceNote = payload.sourceNote ? ` ${payload.sourceNote}` : "";
-    els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。${sourceNote}`;
+    els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。`;
     setStatus(`已完成跨年查詢：${payload.total} 筆。`);
   } catch (error) {
     setStatus(error.message, true);

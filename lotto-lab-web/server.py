@@ -430,7 +430,7 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
         draws = filter_history_rows(draws, query, number)
     draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     return {
-        "history": draws[:limit],
+        "history": public_draws(draws[:limit]),
         "total": len(draws),
         "availableYears": available_years,
         "searchedYears": searched_years,
@@ -501,12 +501,11 @@ def search_california_history(from_year: int, to_year: int, keyword: str = "", n
     rows = filter_history_rows(rows, keyword, number)
     rows.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     return {
-        "history": rows[:limit],
+        "history": public_draws(rows[:limit]),
         "total": len(rows),
         "availableYears": available_years,
         "searchedYears": searched_years,
         "limited": len(rows) > limit,
-        "sourceNote": "加州天天樂目前依資料源可取得的歷史範圍查詢；若來源只提供近期資料，跨年結果會較少。",
     }
 
 
@@ -975,17 +974,17 @@ def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profi
         source_total = profile["dragSourceTotals"].get(source, 0) or 1
         source_targets = [
             {
-                "source": source,
-                "target": target,
+                "base": source,
+                "follow": target,
                 "count": count,
                 "rate": round((count / source_total) * 100, 1),
             }
             for (src, target), count in profile["dragCounts"].items()
             if src == source
         ]
-        source_targets.sort(key=lambda item: (-item["count"], -item["rate"], item["target"]))
+        source_targets.sort(key=lambda item: (-item["count"], -item["rate"], item["follow"]))
         drag_rows.extend(source_targets[:2])
-    drag_rows.sort(key=lambda item: (-item["count"], -item["rate"], item["source"], item["target"]))
+    drag_rows.sort(key=lambda item: (-item["count"], -item["rate"], item["base"], item["follow"]))
     repeat_rows = []
     for number in latest:
         total = profile["repeatSourceTotals"].get(number, 0)
@@ -1079,15 +1078,23 @@ def build_payload(game: str, limit: int) -> dict[str, Any]:
             history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
         draws = history[:limit]
         analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
-        return {"latest": latest, "history": draws, "analysis": analysis}
+        return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
     if game == "ca-fantasy5":
         history = california_history(limit)
         if not history:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         draws = history[:limit]
         analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
-        return {"latest": history[0], "history": draws, "analysis": analysis}
+        return {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
     raise ValueError("unknown game")
+
+
+def public_draw(draw: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in draw.items() if key not in {"source", "sourceUrl"}}
+
+
+def public_draws(draws: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [public_draw(draw) for draw in draws]
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -1178,7 +1185,7 @@ class Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
-                limit = clamp_int(params.get("limit", ["180"])[0], 180, 20, 365)
+                limit = clamp_int(params.get("limit", ["180"])[0], 180, 10, 365)
                 payload = build_payload(game, limit)
                 self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
             except ValueError as exc:

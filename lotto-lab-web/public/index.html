@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=27" />
+    <link rel="stylesheet" href="/styles.css?v=28" />
   </head>
   <body>
     <main class="shell">
@@ -31,6 +31,9 @@
         <label class="select-wrap">
           分析期數
           <select id="limitSelect">
+            <option value="10">近 10 期</option>
+            <option value="20">近 20 期</option>
+            <option value="36">近 36 期</option>
             <option value="60">60 期</option>
             <option value="90" selected>90 期</option>
             <option value="120">120 期</option>
@@ -73,7 +76,6 @@
               <p class="label">最新一期</p>
               <h2 id="gameName">-</h2>
             </div>
-            <a id="sourceLink" class="source-link" href="#" target="_blank" rel="noreferrer">資料源</a>
           </div>
           <div class="meta">
             <span id="period">期別 -</span>
@@ -277,6 +279,6 @@
         </article>
       </section>
     </main>
-    <script src="/app.js?v=27"></script>
+    <script src="/app.js?v=28"></script>
   </body>
 </html>
