@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=23" />
+    <link rel="stylesheet" href="/styles.css?v=24" />
   </head>
   <body>
     <main class="shell">
@@ -47,12 +47,12 @@
           <div>
             <p class="label">訂閱方案</p>
             <h2>Pro 統計分析</h2>
-            <p class="fineprint">免費看最新開獎；訂閱後可解鎖完整分析、歷史趨勢與後續通知功能。</p>
+            <p class="fineprint">免費版保留基本查詢；訂閱版解鎖進階模型、跨年紀錄、開獎通知與高分組合。</p>
           </div>
           <div class="plan-grid" id="planGrid"></div>
         </article>
 
-        <article class="panel notify-panel">
+        <article class="panel notify-panel" data-tier="pro" data-lock-title="Pro 開獎通知" data-lock-text="訂閱後可開啟新一期開獎推播提醒。">
           <div class="panel-head compact">
             <div>
               <p class="label">開獎通知</p>
@@ -89,7 +89,7 @@
           <p class="fineprint" id="analysisNote"></p>
         </article>
 
-        <article class="panel backtest-panel">
+        <article class="panel backtest-panel" data-tier="pro" data-lock-title="Pro 模型回測" data-lock-text="訂閱後可查看近期命中表現與模型排名。">
           <div class="panel-head compact">
             <div>
               <p class="label">模型回測</p>
@@ -115,7 +115,7 @@
           <p class="fineprint" id="backtestMethod"></p>
         </article>
 
-        <article class="panel pattern-panel">
+        <article class="panel pattern-panel" data-tier="pro" data-lock-title="Pro 版路分析" data-lock-text="訂閱後可查看區間、尾數、拖牌與連莊推理。">
           <div class="panel-head compact">
             <div>
               <p class="label">版路分析</p>
@@ -146,7 +146,7 @@
           <div class="saved-list" id="savedList"></div>
         </article>
 
-        <article class="panel model-panel">
+        <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 模型設定" data-lock-text="訂閱後可切換板路模式並調整權重。">
           <div class="panel-head compact">
             <div>
               <p class="label">模型設定</p>
@@ -188,7 +188,7 @@
           <p class="fineprint" id="modelSummary">目前模型：熱度 30%、遺漏 25%、分散 25%、回測 20%。</p>
         </article>
 
-        <article class="panel candidate-panel">
+        <article class="panel candidate-panel" data-tier="pro" data-lock-title="Pro 高分組合" data-lock-text="訂閱後可重新產生多組候選排序。">
           <div class="panel-head compact">
             <div>
               <p class="label">高分組合</p>
@@ -262,6 +262,6 @@
         </article>
       </section>
     </main>
-    <script src="/app.js?v=23"></script>
+    <script src="/app.js?v=24"></script>
   </body>
 </html>

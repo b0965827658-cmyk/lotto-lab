@@ -192,9 +192,33 @@ select {
   background: #f9fbf8;
 }
 
+.plan.active {
+  outline: 2px solid rgba(22, 106, 82, 0.28);
+}
+
 .plan.pro {
   background: #173f38;
   color: #fff;
+}
+
+.plan.pro.active {
+  outline-color: rgba(214, 152, 34, 0.55);
+}
+
+.plan-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plan-title span {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 900;
+  opacity: 0.78;
 }
 
 .plan h3 {
@@ -235,6 +259,11 @@ select {
   font-weight: 900;
 }
 
+.plan-action:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
 .plan.pro .plan-action {
   background: var(--gold);
   color: #1e2722;
@@ -264,6 +293,48 @@ select {
 
 .notify-actions .text-button {
   height: 42px;
+}
+
+[data-tier="pro"] {
+  position: relative;
+}
+
+body[data-plan="free"] [data-tier="pro"].locked {
+  overflow: hidden;
+}
+
+body[data-plan="free"] [data-tier="pro"].locked::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: 8px;
+  background: rgba(249, 251, 248, 0.78);
+  backdrop-filter: blur(1.5px);
+}
+
+body[data-plan="free"] [data-tier="pro"].locked::after {
+  content: attr(data-lock-title) "\A" attr(data-lock-text);
+  white-space: pre-line;
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 18px;
+  z-index: 5;
+  border: 1px solid rgba(22, 106, 82, 0.22);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--green);
+  padding: 14px;
+  box-shadow: 0 12px 28px rgba(31, 47, 39, 0.14);
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+body[data-plan="free"] .pro-required {
+  border-color: rgba(214, 152, 34, 0.7);
+  background: #f7efe1;
+  color: #6c4b13;
 }
 
 .pick-panel {
