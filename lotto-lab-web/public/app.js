@@ -34,6 +34,7 @@ const STORAGE_KEY = "lotto-lab-saved-picks";
 const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
+const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
 
 const FOCUS_PRESETS = {
   balanced: {
@@ -74,6 +75,17 @@ const FOCUS_PRESETS = {
 };
 
 const MODE_SNAPSHOT_KEYS = ["balanced", "classic", "hot", "overdue", "interval", "pattern", "backtest"];
+const VALIDATION_RECORDS = [
+  {
+    game: "tw539",
+    mode: "區間舊版截圖",
+    source: "已補登",
+    date: "2026-07-08",
+    period: "115000165",
+    pick: [1, 6, 11, 30, 34],
+    actual: [1, 11, 23, 30, 34],
+  },
+];
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -298,6 +310,18 @@ function loadSavedPicks() {
 
 function saveSavedPicks(picks) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(picks));
+}
+
+function loadModelSnapshots() {
+  try {
+    return JSON.parse(localStorage.getItem(MODEL_SNAPSHOT_STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveModelSnapshots(snapshots) {
+  localStorage.setItem(MODEL_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshots.slice(0, 160)));
 }
 
 function loadModelWeights() {
@@ -769,6 +793,67 @@ function modeSnapshotCandidates() {
   }).filter(Boolean);
 }
 
+function rememberModelSnapshots() {
+  if (!state.latest || !state.history.length || !isProPlan()) return;
+  const currentKey = `${state.game}-${state.latest.period || state.latest.date || ""}`;
+  const existing = loadModelSnapshots().filter((item) => item.key !== currentKey);
+  const snapshots = modeSnapshotCandidates().map(({ key, preset, candidate }) => ({
+    key: currentKey,
+    game: state.game,
+    basePeriod: state.latest.period || "",
+    baseDate: state.latest.date || "",
+    modeKey: key,
+    mode: preset.label,
+    pick: candidate.numbers,
+    score: candidate.score.total,
+    createdAt: new Date().toISOString(),
+  }));
+  saveModelSnapshots([...snapshots, ...existing]);
+}
+
+function validationRowsForLatest() {
+  if (!state.latest) return [];
+  const latestActual = state.latest.numbers || [];
+  const manualRows = VALIDATION_RECORDS.filter((record) => {
+    const sameGame = record.game === state.game;
+    const sameDate = record.date && record.date === state.latest.date;
+    const samePeriod = record.period && record.period === state.latest.period;
+    const sameActual = record.actual?.join(",") === latestActual.join(",");
+    return sameGame && (sameDate || samePeriod || sameActual);
+  }).map((record) => ({
+    date: record.date,
+    period: record.period,
+    mode: record.mode,
+    source: record.source,
+    pick: record.pick,
+    actual: record.actual,
+    hits: matchCount(record.pick, record.actual),
+  }));
+
+  const trackedRows = loadModelSnapshots()
+    .filter((item) => item.game === state.game && item.basePeriod !== state.latest.period && item.baseDate !== state.latest.date)
+    .slice(0, 7)
+    .map((item) => ({
+      date: state.latest.date,
+      period: state.latest.period,
+      mode: item.mode,
+      source: `由 ${item.baseDate || item.basePeriod || "上一期"} 留存`,
+      pick: item.pick,
+      actual: latestActual,
+      hits: matchCount(item.pick, latestActual),
+    }))
+    .filter((row) => row.hits >= 2)
+    .sort((a, b) => b.hits - a.hits);
+
+  const unique = new Set();
+  return [...manualRows, ...trackedRows].filter((row) => {
+    const key = `${row.mode}-${row.pick.join(",")}-${row.actual.join(",")}`;
+    if (unique.has(key)) return false;
+    unique.add(key);
+    return true;
+  });
+}
+
 function referenceCandidate() {
   const candidates = generateCandidates();
   if (candidates.length) return candidates[0];
@@ -956,6 +1041,39 @@ function renderModelBacktest(backtest, profiles = []) {
     (backtest.threePlusRate ?? 0) === 0
       ? `<div class="backtest-warning">最近 ${backtest.testedCount} 期沒有 3 中以上，這時候先看摸邊率和 2 中以上，比只盯 3 中更準。</div>`
       : "";
+  const validationRows = validationRowsForLatest();
+  const validationHtml = validationRows.length
+    ? `
+      <div class="hit-track-list">
+        <div class="hit-track-title">
+          <strong>命中追蹤</strong>
+          <span>含舊版截圖補登與之後自動留存的推薦快照</span>
+        </div>
+        ${validationRows
+          .map(
+            (row) => `
+              <div class="backtest-card hit-track-card ${row.hits >= 4 ? "strong" : ""}">
+                <div>
+                  <strong>${row.mode}</strong>
+                  <span>${row.source}</span>
+                  <span>${row.date || "-"} · 期別 ${row.period || "-"}</span>
+                </div>
+                <div>
+                  <span class="tiny-label">當時畫面</span>
+                  <div class="saved-balls">${miniBalls(row.pick, row.actual)}</div>
+                </div>
+                <div>
+                  <span class="tiny-label">實際開獎</span>
+                  <div class="saved-balls">${miniBalls(row.actual)}</div>
+                </div>
+                <div class="hit-chip">${row.hits} 中</div>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    `
+    : "";
   els.backtestMethod.innerHTML = `
     ${backtest.method}
     <span class="backtest-method-line">命中分布：0中 ${distribution[0] || 0}、1中 ${distribution[1] || 0}、2中 ${distribution[2] || 0}、3中以上 ${backtest.threePlusCount || 0}。2中以上 ${twoPlusText}，3中以上 ${threePlusText}。</span>
@@ -981,9 +1099,10 @@ function renderModelBacktest(backtest, profiles = []) {
       `,
     )
     .join("");
-  if (ranking || warning) {
-    els.backtestRecent.insertAdjacentHTML("afterbegin", `${warning}<div class="model-rank-list">${ranking}</div>`);
+  if (validationHtml || ranking || warning) {
+    els.backtestRecent.insertAdjacentHTML("afterbegin", `${validationHtml}${warning}<div class="model-rank-list">${ranking}</div>`);
   }
+  rememberModelSnapshots();
 }
 
 function renderPatterns(patterns, profiles = []) {

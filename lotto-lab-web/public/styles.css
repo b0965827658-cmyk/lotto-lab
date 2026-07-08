@@ -982,6 +982,44 @@ body[data-plan="free"] .pro-required {
   padding: 10px;
 }
 
+.hit-track-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.hit-track-title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px;
+  border: 1px solid rgba(214, 152, 34, 0.38);
+  border-radius: 8px;
+  background: #fff9ec;
+  padding: 10px;
+}
+
+.hit-track-title strong {
+  color: #7b540f;
+  font-size: 14px;
+}
+
+.hit-track-title span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.hit-track-card.strong {
+  border-color: rgba(214, 152, 34, 0.7);
+  background: #fff9ec;
+}
+
+.hit-track-card.strong .hit-chip {
+  background: var(--gold);
+  color: #1e2722;
+}
+
 .backtest-card strong,
 .backtest-card span {
   display: block;
