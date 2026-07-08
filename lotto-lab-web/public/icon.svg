@@ -1,9 +1,42 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#166a52"/>
-  <circle cx="182" cy="198" r="76" fill="#ffffff"/>
-  <circle cx="330" cy="198" r="76" fill="#d69822"/>
-  <circle cx="256" cy="330" r="76" fill="#245f89"/>
-  <text x="182" y="222" text-anchor="middle" font-family="Arial, sans-serif" font-size="64" font-weight="800" fill="#166a52">39</text>
-  <text x="330" y="222" text-anchor="middle" font-family="Arial, sans-serif" font-size="64" font-weight="800" fill="#1e2722">5</text>
-  <text x="256" y="354" text-anchor="middle" font-family="Arial, sans-serif" font-size="64" font-weight="800" fill="#ffffff">539</text>
+  <defs>
+    <linearGradient id="bg" x1="80" y1="42" x2="426" y2="468" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0b473c"/>
+      <stop offset=".52" stop-color="#11382f"/>
+      <stop offset="1" stop-color="#081f1c"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="146" y1="82" x2="366" y2="408" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff1b8"/>
+      <stop offset=".45" stop-color="#e0a62e"/>
+      <stop offset="1" stop-color="#a56d18"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="36%" r="62%">
+      <stop stop-color="#ffffff" stop-opacity=".16"/>
+      <stop offset=".62" stop-color="#ffffff" stop-opacity=".04"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#03100d" flood-opacity=".4"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="214" r="196" fill="url(#glow)"/>
+  <path d="M118 372c58 42 218 53 276-1" fill="none" stroke="#f4d47c" stroke-width="5" stroke-linecap="round" opacity=".26"/>
+  <g filter="url(#softShadow)">
+    <path d="M152 307l36-130 64 63 46-102 38 104 68-60-44 128c-82 33-207 32-308-3z" fill="url(#gold)"/>
+    <path d="M171 333c58 20 125 24 196 0l-23 58H194l-23-58z" fill="url(#gold)"/>
+    <path d="M153 307c96 32 202 33 306 3" fill="none" stroke="#fff3c9" stroke-width="7" stroke-linecap="round" opacity=".45"/>
+  </g>
+  <path d="M256 72l18 54 57 1-46 33 17 55-46-33-46 33 17-55-46-33 57-1 18-54z" fill="#fff6cf"/>
+  <g fill="#f7e19c">
+    <circle cx="159" cy="186" r="11"/>
+    <circle cx="210" cy="245" r="9"/>
+    <circle cx="305" cy="246" r="9"/>
+    <circle cx="360" cy="190" r="11"/>
+  </g>
+  <g fill="#0e372f" opacity=".94">
+    <circle cx="212" cy="332" r="13"/>
+    <circle cx="256" cy="338" r="13"/>
+    <circle cx="300" cy="332" r="13"/>
+  </g>
 </svg>

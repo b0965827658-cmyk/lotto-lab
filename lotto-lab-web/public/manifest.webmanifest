@@ -1,6 +1,6 @@
 {
-  "name": "Lotto Lab 開獎分析",
-  "short_name": "Lotto Lab",
+  "name": "摘星王",
+  "short_name": "摘星王",
   "description": "今彩 539 與加州天天樂開獎號碼、歷史資料與統計參考選號。",
   "start_url": "/",
   "scope": "/",

@@ -1244,7 +1244,7 @@ async function toggleNotifications() {
   }
 }
 
-async function showLocalTestNotification(title = "Lotto Lab 開獎通知", body = "這是一則測試通知。") {
+async function showLocalTestNotification(title = "摘星王開獎通知", body = "這是一則測試通知。") {
   if (!notificationSupported()) {
     setStatus("這個瀏覽器目前不支援通知。", true);
     return;
@@ -1514,7 +1514,7 @@ if (els.notifyToggle) {
 if (els.notifyTest) {
   els.notifyTest.addEventListener("click", () => {
     const latest = state.latest;
-    const title = latest ? `${latest.name} 最新開獎通知` : "Lotto Lab 開獎通知";
+    const title = latest ? `${latest.name} 最新開獎通知` : "摘星王開獎通知";
     const body = latest ? `第 ${latest.period || "-"} 期：${latest.numbers.map(pad).join("、")}` : "這是一則測試通知。";
     showLocalTestNotification(title, body);
   });
