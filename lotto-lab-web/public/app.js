@@ -9,6 +9,13 @@ const state = {
   requestId: 0,
   apiCache: new Map(),
   candidateCache: new Map(),
+  notifications: {
+    supported: false,
+    publicKey: "",
+    subscriberCount: 0,
+  },
+  serviceWorkerRegistration: null,
+  pushSubscription: null,
   modelWeights: {
     heat: 30,
     overdue: 25,
@@ -112,6 +119,10 @@ const els = {
   patternRepeat: $("#patternRepeat"),
   patternGrid: $("#patternGrid"),
   patternLines: $("#patternLines"),
+  notifyBadge: $("#notifyBadge"),
+  notifyText: $("#notifyText"),
+  notifyToggle: $("#notifyToggleBtn"),
+  notifyTest: $("#notifyTestBtn"),
 };
 
 function pad(n) {
@@ -1039,11 +1050,172 @@ function renderPlans(subscription) {
   });
 }
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+}
+
+function notificationSupported() {
+  return "Notification" in window && "serviceWorker" in navigator;
+}
+
+function pushSupported() {
+  return notificationSupported() && "PushManager" in window;
+}
+
+function updateNotificationUi() {
+  if (!els.notifyToggle) return;
+  if (!notificationSupported()) {
+    els.notifyBadge.textContent = "不支援";
+    els.notifyText.textContent = "這個瀏覽器目前不支援網站通知。iPhone 請先用 Safari 加入主畫面後再試。";
+    els.notifyToggle.disabled = true;
+    els.notifyTest.disabled = true;
+    return;
+  }
+
+  const permission = Notification.permission;
+  const hasPushKey = Boolean(state.notifications.publicKey);
+  const isSubscribed = Boolean(state.pushSubscription);
+  els.notifyBadge.textContent = isSubscribed ? "已訂閱" : permission === "denied" ? "已封鎖" : "可開啟";
+  els.notifyToggle.textContent = isSubscribed ? "取消通知" : hasPushKey ? "開啟通知" : "開啟本機提醒";
+  els.notifyToggle.disabled = permission === "denied";
+  els.notifyTest.disabled = permission === "denied";
+
+  if (permission === "denied") {
+    els.notifyText.textContent = "瀏覽器目前封鎖通知。請到瀏覽器網站設定允許通知後，再回來開啟開獎提醒。";
+  } else if (isSubscribed) {
+    els.notifyText.textContent = `已登錄開獎通知。新一期更新時，系統可發送提醒；目前約 ${state.notifications.subscriberCount || 1} 個裝置訂閱。`;
+  } else if (!hasPushKey) {
+    els.notifyText.textContent = "通知介面已可用；正式群發需要在 Render 設定 VAPID 推播金鑰。現在可先測試本機通知。";
+  } else {
+    els.notifyText.textContent = "開啟後，有新一期開獎時可收到通知。手機建議先加入主畫面。";
+  }
+}
+
+async function getServiceWorkerRegistration() {
+  if (!notificationSupported()) return null;
+  if (state.serviceWorkerRegistration) return state.serviceWorkerRegistration;
+  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js");
+  return state.serviceWorkerRegistration;
+}
+
+async function syncPushSubscription() {
+  if (!pushSupported()) {
+    updateNotificationUi();
+    return;
+  }
+  const registration = await getServiceWorkerRegistration();
+  state.pushSubscription = await registration.pushManager.getSubscription();
+  updateNotificationUi();
+}
+
+async function postSubscription(action, subscription) {
+  const response = await fetch("/api/push-subscription", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, subscription, game: state.game }),
+  });
+  const payload = await response.json();
+  if (!payload.ok) throw new Error(payload.error || "通知訂閱失敗");
+  state.notifications.subscriberCount = payload.subscriberCount || state.notifications.subscriberCount || 0;
+  return payload;
+}
+
+async function enableNotifications() {
+  if (!notificationSupported()) {
+    setStatus("這個瀏覽器目前不支援通知。", true);
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    updateNotificationUi();
+    setStatus("通知權限尚未開啟。", true);
+    return;
+  }
+  const registration = await getServiceWorkerRegistration();
+  if (!pushSupported() || !state.notifications.publicKey) {
+    updateNotificationUi();
+    await showLocalTestNotification("開獎通知已允許", "正式群發待設定推播金鑰；目前可在開站時接收本機提醒。");
+    return;
+  }
+  state.pushSubscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(state.notifications.publicKey),
+  });
+  await postSubscription("subscribe", state.pushSubscription);
+  updateNotificationUi();
+  setStatus("已開啟開獎通知。");
+}
+
+async function disableNotifications() {
+  if (!state.pushSubscription) {
+    updateNotificationUi();
+    return;
+  }
+  const oldSubscription = state.pushSubscription;
+  await oldSubscription.unsubscribe();
+  state.pushSubscription = null;
+  await postSubscription("unsubscribe", oldSubscription);
+  updateNotificationUi();
+  setStatus("已取消開獎通知。");
+}
+
+async function toggleNotifications() {
+  try {
+    if (state.pushSubscription) {
+      await disableNotifications();
+    } else {
+      await enableNotifications();
+    }
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+async function showLocalTestNotification(title = "Lotto Lab 開獎通知", body = "這是一則測試通知。") {
+  if (!notificationSupported()) {
+    setStatus("這個瀏覽器目前不支援通知。", true);
+    return;
+  }
+  if (Notification.permission !== "granted") {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      updateNotificationUi();
+      setStatus("通知權限尚未開啟。", true);
+      return;
+    }
+  }
+  const registration = await getServiceWorkerRegistration();
+  await registration.showNotification(title, {
+    body,
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    data: { url: `/?game=${state.game}` },
+  });
+  updateNotificationUi();
+  setStatus("已送出測試通知。");
+}
+
+async function initNotifications(config) {
+  state.notifications = {
+    supported: Boolean(config?.supported),
+    publicKey: config?.publicKey || "",
+    subscriberCount: config?.subscriberCount || 0,
+  };
+  updateNotificationUi();
+  if (notificationSupported()) {
+    await syncPushSubscription().catch(() => updateNotificationUi());
+  }
+}
+
 async function loadConfig() {
   try {
     const response = await fetch("/api/config");
     const payload = await response.json();
     if (payload.ok) renderPlans(payload.subscription);
+    if (payload.ok) await initNotifications(payload.notifications);
   } catch (error) {
     setStatus("訂閱設定讀取失敗，但開獎資料仍可使用。", true);
   }
@@ -1244,15 +1416,27 @@ els.clearHistorySearch.addEventListener("click", () => {
   setStatus("已清除歷史查詢條件。");
 });
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+if (els.notifyToggle) {
+  els.notifyToggle.addEventListener("click", toggleNotifications);
+}
+
+if (els.notifyTest) {
+  els.notifyTest.addEventListener("click", () => {
+    const latest = state.latest;
+    const title = latest ? `${latest.name} 最新開獎通知` : "Lotto Lab 開獎通知";
+    const body = latest ? `第 ${latest.period || "-"} 期：${latest.numbers.map(pad).join("、")}` : "這是一則測試通知。";
+    showLocalTestNotification(title, body);
   });
 }
+
+window.addEventListener("load", () => {
+  getServiceWorkerRegistration().catch(() => {});
+});
 
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 initHistoryYears();
 renderModelControls();
+updateNotificationUi();
 loadConfig();
 load();
