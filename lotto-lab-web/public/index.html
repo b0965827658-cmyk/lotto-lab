@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=22" />
+    <link rel="stylesheet" href="/styles.css?v=23" />
   </head>
   <body>
     <main class="shell">
@@ -50,6 +50,21 @@
             <p class="fineprint">免費看最新開獎；訂閱後可解鎖完整分析、歷史趨勢與後續通知功能。</p>
           </div>
           <div class="plan-grid" id="planGrid"></div>
+        </article>
+
+        <article class="panel notify-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">開獎通知</p>
+              <h2>最新開獎提醒</h2>
+            </div>
+            <span id="notifyBadge" class="count-pill">未啟用</span>
+          </div>
+          <p class="fineprint" id="notifyText">開啟後，有新一期開獎時可收到通知。手機建議先加入主畫面。</p>
+          <div class="notify-actions">
+            <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
+            <button id="notifyTestBtn" class="text-button" type="button">測試</button>
+          </div>
         </article>
 
         <article class="panel latest-panel">
@@ -247,6 +262,6 @@
         </article>
       </section>
     </main>
-    <script src="/app.js?v=22"></script>
+    <script src="/app.js?v=23"></script>
   </body>
 </html>
