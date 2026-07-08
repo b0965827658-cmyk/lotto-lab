@@ -369,7 +369,16 @@ function scorePick(numbers, backtest) {
   const repeatBonus = Math.min(3, numbers.filter((number) => hints.repeatNumbers.includes(number)).length * 1.5);
   const intervalHits = hints.intervals.map((range) => numbers.filter((number) => number >= range.start && number <= range.end).length);
   const intervalBonus = Math.min(5, Math.max(0, ...intervalHits) * 1.6);
-  const patternBonus = pairBonus + dragBonus + repeatBonus + intervalBonus;
+  const shortCycleBonus =
+    state.game === "ca-fantasy5"
+      ? Math.min(
+          8,
+          numbers.filter((number) => hints.shortCycle.aroundNumbers.includes(number)).length * 2.2 +
+            numbers.filter((number) => hints.shortCycle.edgeNumbers.includes(number)).length * 1.6 +
+            numbers.filter((number) => hints.shortCycle.anchorNumbers.includes(number)).length * 0.9,
+        )
+      : 0;
+  const patternBonus = pairBonus + dragBonus + repeatBonus + intervalBonus + shortCycleBonus;
   const weights = normalizedWeights();
   const total = clamp(
     Math.round(heat * weights.heat + overdue * weights.overdue + spread * weights.spread + backtestScore * weights.backtest + patternBonus),
@@ -377,7 +386,17 @@ function scorePick(numbers, backtest) {
     100,
   );
   const label = total >= 75 ? "高追蹤" : total >= 55 ? "可觀察" : "保守";
-  return { total, heat, overdue, spread, backtest: backtestScore, pattern: Math.round(patternBonus), interval: Math.round(intervalBonus), label };
+  return {
+    total,
+    heat,
+    overdue,
+    spread,
+    backtest: backtestScore,
+    pattern: Math.round(patternBonus),
+    interval: Math.round(intervalBonus),
+    shortCycle: Math.round(shortCycleBonus),
+    label,
+  };
 }
 
 function scoreDetails(score) {
@@ -419,7 +438,39 @@ function hotTailProfile() {
 }
 
 function shouldFilterByHotTail() {
+  if (state.game === "ca-fantasy5") return false;
   return ["hot", "pattern", "interval"].includes(state.analysisFocus);
+}
+
+function shortCycleProfile() {
+  if (state.game !== "ca-fantasy5") {
+    return { aroundNumbers: [], edgeNumbers: [], anchorNumbers: [], label: "" };
+  }
+  const recent = state.history.slice(0, 10);
+  const aroundScore = new Map();
+  const anchorScore = new Map();
+  recent.forEach((draw, drawIndex) => {
+    const recencyWeight = drawIndex < 3 ? 3 : drawIndex < 6 ? 2 : 1;
+    draw.numbers.forEach((number) => {
+      anchorScore.set(number, (anchorScore.get(number) || 0) + recencyWeight);
+      [-2, -1, 1, 2].forEach((offset) => {
+        const nearby = number + offset;
+        if (nearby >= 1 && nearby <= 39) {
+          const distanceWeight = Math.abs(offset) === 1 ? 1 : 0.65;
+          aroundScore.set(nearby, (aroundScore.get(nearby) || 0) + recencyWeight * distanceWeight);
+        }
+      });
+    });
+  });
+  const edgeNumbers = Array.from({ length: 39 }, (_, index) => index + 1).filter((number) => number <= 5 || number >= 35);
+  const sortByScore = (scoreMap) =>
+    [...scoreMap.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+      .map(([number]) => number);
+  const aroundNumbers = sortByScore(aroundScore).filter((number) => !anchorScore.has(number)).slice(0, 16);
+  const anchorNumbers = sortByScore(anchorScore).slice(0, 12);
+  const label = `近10期環繞 ${aroundNumbers.slice(0, 6).map(pad).join("、")}；邊線 ${edgeNumbers.slice(0, 5).map(pad).join("、")}/${edgeNumbers.slice(-5).map(pad).join("、")}`;
+  return { aroundNumbers, edgeNumbers, anchorNumbers, label };
 }
 
 function patternHints() {
@@ -438,7 +489,8 @@ function patternHints() {
         .map((item) => item.number),
     ),
   ];
-  return { pairs, dragTargets, intervalNumbers, intervals, repeatNumbers };
+  const shortCycle = shortCycleProfile();
+  return { pairs, dragTargets, intervalNumbers, intervals, repeatNumbers, shortCycle };
 }
 
 function candidatePool() {
@@ -460,7 +512,11 @@ function candidatePool() {
     .slice(0, balancedSize)
     .map((row) => row.number);
   const hints = patternHints();
-  const patternNumbers = [...hints.pairs.flat(), ...hints.dragTargets, ...hints.intervalNumbers, ...hints.repeatNumbers];
+  const shortCycleNumbers =
+    state.game === "ca-fantasy5"
+      ? [...hints.shortCycle.aroundNumbers, ...hints.shortCycle.edgeNumbers, ...hints.shortCycle.anchorNumbers]
+      : [];
+  const patternNumbers = [...hints.pairs.flat(), ...hints.dragTargets, ...hints.intervalNumbers, ...hints.repeatNumbers, ...shortCycleNumbers];
   const pool = [...new Set([...hot, ...overdue, ...balanced, ...patternNumbers, ...tailFilteredUniverse])].filter(numberAllowed);
   if (pool.length >= 12) return pool;
   return filterByTail ? tailFilteredUniverse : Array.from({ length: 39 }, (_, i) => i + 1);
@@ -480,6 +536,9 @@ function buildCandidate(pool) {
   const dragTargets = hints.dragTargets.filter((number) => poolSet.has(number));
   const intervalNumbers = hints.intervalNumbers.filter((number) => poolSet.has(number));
   const repeatNumbers = hints.repeatNumbers.filter((number) => poolSet.has(number));
+  const shortAround = hints.shortCycle.aroundNumbers.filter((number) => poolSet.has(number));
+  const shortEdges = hints.shortCycle.edgeNumbers.filter((number) => poolSet.has(number));
+  const shortAnchors = hints.shortCycle.anchorNumbers.filter((number) => poolSet.has(number));
   const classicList = [...frequencyRows]
     .map((row) => ({ n: row.number, score: row.count * 0.45 + row.gap * 0.27 + Math.random() * 5 }))
     .filter((item) => poolSet.has(item.n))
@@ -524,6 +583,18 @@ function buildCandidate(pool) {
   }
   if (repeatNumbers.length && numbers.size < 5 && Math.random() < 0.45) {
     numbers.add(randomChoice(repeatNumbers));
+  }
+  if (state.game === "ca-fantasy5") {
+    while (numbers.size < 2 && shortAround.length) numbers.add(randomChoice(shortAround));
+    if (shortEdges.length && numbers.size < 5 && Math.random() < 0.72) {
+      numbers.add(randomChoice(shortEdges));
+    }
+    if (shortAnchors.length && numbers.size < 5 && Math.random() < 0.5) {
+      numbers.add(randomChoice(shortAnchors));
+    }
+    if (shortAround.length && numbers.size < 4 && Math.random() < 0.85) {
+      numbers.add(randomChoice(shortAround));
+    }
   }
   if (focus === "classic" && classicList.length) {
     while (numbers.size < 4) numbers.add(randomChoice(classicList));
@@ -597,11 +668,13 @@ function renderReferencePick() {
   }
   const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
   const tailProfile = hotTailProfile();
+  const shortCycle = shortCycleProfile();
   els.pickBalls.innerHTML = balls(candidate.numbers);
   els.pickMeta.innerHTML = `
     <span>${focus.label}</span>
     <span>${focus.description}</span>
     <span>熱尾 ${tailProfile.label}</span>
+    ${state.game === "ca-fantasy5" ? `<span>${shortCycle.label}</span>` : ""}
     <span>分數 ${candidate.score.total}</span>
     <span>版路 +${candidate.score.pattern || 0}</span>
     <span>最高 ${candidate.backtest.bestHit} 中</span>
@@ -777,6 +850,15 @@ function renderPatterns(patterns, profiles = []) {
   const neighborText = patterns.neighborNumbers?.length
     ? patterns.neighborNumbers.slice(0, 12).map((number) => chip(pad(number))).join("")
     : empty;
+  const shortCycle = shortCycleProfile();
+  const shortCycleText =
+    state.game === "ca-fantasy5"
+      ? [
+          ...shortCycle.aroundNumbers.slice(0, 8).map((number) => chip(pad(number), "gold")),
+          ...shortCycle.edgeNumbers.slice(0, 3).map((number) => chip(pad(number))),
+          ...shortCycle.edgeNumbers.slice(-3).map((number) => chip(pad(number))),
+        ].join("")
+      : "";
   const pairText = patterns.pairCombos?.length
     ? patterns.pairCombos
         .slice(0, 5)
@@ -826,6 +908,15 @@ function renderPatterns(patterns, profiles = []) {
       <span>上期鄰近</span>
       <strong class="pattern-line-main">${neighborText}</strong>
     </div>
+    ${
+      state.game === "ca-fantasy5"
+        ? `<div class="pattern-soft">
+            <span>天天樂近10期</span>
+            <strong class="pattern-line-main">${shortCycleText || empty}</strong>
+            <em class="pattern-note">近10期附近環繞優先，再補 01-05 / 35-39 邊線。</em>
+          </div>`
+        : ""
+    }
     <div class="pattern-wide">
       <span>模型比較</span>
       <strong class="pattern-line-main">${profileText || empty}</strong>
