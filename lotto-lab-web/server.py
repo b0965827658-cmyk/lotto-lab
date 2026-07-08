@@ -1074,12 +1074,6 @@ class Handler(SimpleHTTPRequestHandler):
                         "paymentLink": STRIPE_PAYMENT_LINK,
                         "plans": [
                             {
-                                "id": "free",
-                                "name": "免費版",
-                                "price": "$0",
-                                "features": ["最新開獎號碼", "90 期內基本統計", "熱號冷號與遺漏榜", "本次載入歷史紀錄"],
-                            },
-                            {
                                 "id": "pro",
                                 "name": "Pro 訂閱",
                                 "price": "$9 / 月起",

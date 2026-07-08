@@ -764,7 +764,7 @@ function savePick(numbers) {
 
 function renderCandidates() {
   if (!isProPlan()) {
-    els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；免費版會保留上方一組統計參考選號。</div>`;
+    els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；目前會保留上方一組統計參考選號。</div>`;
     return;
   }
   if (!state.analysis || !state.history.length) {
@@ -1072,22 +1072,22 @@ function render(payload) {
 function renderPlans(subscription) {
   if (!subscription?.plans?.length) return;
   state.subscription = subscription;
-  els.plans.innerHTML = subscription.plans
+  const proPlans = subscription.plans.filter((plan) => plan.id === "pro");
+  els.plans.innerHTML = proPlans
     .map((plan) => {
-      const isPro = plan.id === "pro";
-      const active = state.plan === plan.id;
-      const action = active ? "目前使用" : isPro ? (subscription.enabled ? "訂閱 Pro" : "預覽 Pro") : "切回免費";
+      const active = state.plan === "pro";
+      const action = active ? "目前使用" : subscription.enabled ? "訂閱 Pro" : "預覽 Pro";
       return `
-        <div class="plan ${isPro ? "pro" : ""} ${active ? "active" : ""}">
+        <div class="plan pro ${active ? "active" : ""}">
           <div class="plan-title">
             <h3>${plan.name}</h3>
-            <span>${active ? "使用中" : isPro ? "升級" : "基本"}</span>
+            <span>${active ? "使用中" : "升級"}</span>
           </div>
           <div class="price">${plan.price}</div>
           <ul class="features">
             ${plan.features.map((feature) => `<li>${feature}</li>`).join("")}
           </ul>
-          <button class="plan-action ${isPro ? "" : "secondary"}" data-plan="${plan.id}" ${active ? "disabled" : ""}>${action}</button>
+          <button class="plan-action" data-plan="pro" ${active ? "disabled" : ""}>${action}</button>
         </div>
       `;
     })
@@ -1095,14 +1095,6 @@ function renderPlans(subscription) {
 
   els.plans.querySelectorAll("[data-plan]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (button.dataset.plan !== "pro") {
-        state.plan = "free";
-        savePlanPreview();
-        renderPlans(subscription);
-        applyPlanAccess();
-        setStatus("已切回免費版：保留最新開獎、基本統計與本次載入歷史。");
-        return;
-      }
       if (subscription.enabled && subscription.paymentLink) {
         window.open(subscription.paymentLink, "_blank", "noopener,noreferrer");
         return;
@@ -1403,7 +1395,7 @@ els.limit.addEventListener("change", () => {
   if (!isProPlan() && Number(els.limit.value) > 90) {
     els.limit.value = "90";
     state.limit = 90;
-    setStatus("免費版最多分析 90 期；Pro 可使用 120、180、365 期。", true);
+    setStatus("目前最多分析 90 期；Pro 可使用 120、180、365 期。", true);
     return;
   }
   state.limit = Number(els.limit.value);
