@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=30" />
+    <link rel="stylesheet" href="/styles.css?v=31" />
   </head>
   <body>
     <main class="shell">
@@ -215,6 +215,18 @@
           <p class="fineprint" id="modelSummary">目前模型：熱度 30%、遺漏 25%、分散 25%、回測 20%。</p>
         </article>
 
+        <article class="panel mode-snapshot-panel" data-tier="pro" data-lock-title="Pro 模式版路" data-lock-text="訂閱後可查看每個模式各自產生的候選組合。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">模式版路</p>
+              <h2>各模式快照</h2>
+            </div>
+            <span class="count-pill">含區間</span>
+          </div>
+          <p class="fineprint">每個模式各自產生一組，保留最高命中與 3 中以上次數；點卡片可切換到該模式。</p>
+          <div class="mode-snapshot-list" id="modeSnapshotList"></div>
+        </article>
+
         <article class="panel candidate-panel" data-tier="pro" data-lock-title="Pro 高分組合" data-lock-text="訂閱後可重新產生多組候選排序。">
           <div class="panel-head compact">
             <div>
@@ -285,6 +297,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=30"></script>
+    <script src="/app.js?v=31"></script>
   </body>
 </html>

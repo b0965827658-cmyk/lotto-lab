@@ -73,6 +73,8 @@ const FOCUS_PRESETS = {
   },
 };
 
+const MODE_SNAPSHOT_KEYS = ["balanced", "classic", "hot", "overdue", "interval", "pattern", "backtest"];
+
 const $ = (selector) => document.querySelector(selector);
 
 const els = {
@@ -99,6 +101,7 @@ const els = {
   usePick: $("#usePickBtn"),
   generate: $("#generateBtn"),
   candidates: $("#candidateList"),
+  modeSnapshots: $("#modeSnapshotList"),
   modelInputs: Array.from(document.querySelectorAll("[data-weight]")),
   focusButtons: Array.from(document.querySelectorAll("[data-focus]")),
   modelSummary: $("#modelSummary"),
@@ -132,6 +135,25 @@ const els = {
 
 function pad(n) {
   return String(n).padStart(2, "0");
+}
+
+function hashString(value) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function createRng(seed) {
+  let value = hashString(seed) || 1;
+  return () => {
+    value += 0x6d2b79f5;
+    let next = Math.imul(value ^ (value >>> 15), value | 1);
+    next ^= next + Math.imul(next ^ (next >>> 7), next | 61);
+    return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function balls(numbers) {
@@ -260,7 +282,10 @@ function applyPlanAccess() {
   els.generate.disabled = !pro;
   els.crossYearSearch.classList.toggle("pro-required", !pro);
   updateNotificationUi();
-  if (state.analysis) renderCandidates();
+  if (state.analysis) {
+    renderCandidates();
+    renderModeSnapshots();
+  }
 }
 
 function loadSavedPicks() {
@@ -595,11 +620,11 @@ function candidatePool() {
   return filterByTail ? tailFilteredUniverse : Array.from({ length: 39 }, (_, i) => i + 1);
 }
 
-function randomChoice(items) {
-  return items[Math.floor(Math.random() * items.length)];
+function randomChoice(items, rng = Math.random) {
+  return items[Math.floor(rng() * items.length)];
 }
 
-function buildCandidate(pool) {
+function buildCandidate(pool, rng = Math.random) {
   const numbers = new Set();
   const frequencyRows = state.analysis?.frequency || [];
   const stats = new Map(frequencyRows.map((row) => [row.number, row]));
@@ -613,7 +638,7 @@ function buildCandidate(pool) {
   const shortEdges = hints.shortCycle.edgeNumbers.filter((number) => poolSet.has(number));
   const shortAnchors = hints.shortCycle.anchorNumbers.filter((number) => poolSet.has(number));
   const classicList = [...frequencyRows]
-    .map((row) => ({ n: row.number, score: row.count * 0.45 + row.gap * 0.27 + Math.random() * 5 }))
+    .map((row) => ({ n: row.number, score: row.count * 0.45 + row.gap * 0.27 + rng() * 5 }))
     .filter((item) => poolSet.has(item.n))
     .sort((a, b) => b.score - a.score || a.n - b.n)
     .slice(0, 22)
@@ -638,59 +663,59 @@ function buildCandidate(pool) {
 
   zones.forEach((zone) => {
     const chance = focus === "pattern" || focus === "interval" ? 0.88 : 0.72;
-    if (numbers.size < 5 && zone.length && Math.random() < chance) {
-      numbers.add(randomChoice(zone));
+    if (numbers.size < 5 && zone.length && rng() < chance) {
+      numbers.add(randomChoice(zone, rng));
     }
   });
-  if ((focus === "pattern" || focus === "interval" || Math.random() < 0.55) && pairChoices.length && numbers.size <= 3) {
-    randomChoice(pairChoices).forEach((number) => numbers.add(number));
+  if ((focus === "pattern" || focus === "interval" || rng() < 0.55) && pairChoices.length && numbers.size <= 3) {
+    randomChoice(pairChoices, rng).forEach((number) => numbers.add(number));
   }
-  if (dragTargets.length && numbers.size < 5 && Math.random() < 0.72) {
-    numbers.add(randomChoice(dragTargets));
+  if (dragTargets.length && numbers.size < 5 && rng() < 0.72) {
+    numbers.add(randomChoice(dragTargets, rng));
   }
-  if (intervalNumbers.length && numbers.size < 5 && Math.random() < 0.78) {
-    numbers.add(randomChoice(intervalNumbers));
+  if (intervalNumbers.length && numbers.size < 5 && rng() < 0.78) {
+    numbers.add(randomChoice(intervalNumbers, rng));
   }
   if ((focus === "pattern" || focus === "interval") && intervalNumbers.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(intervalNumbers));
+    while (numbers.size < 3) numbers.add(randomChoice(intervalNumbers, rng));
   }
-  if (repeatNumbers.length && numbers.size < 5 && Math.random() < 0.45) {
-    numbers.add(randomChoice(repeatNumbers));
+  if (repeatNumbers.length && numbers.size < 5 && rng() < 0.45) {
+    numbers.add(randomChoice(repeatNumbers, rng));
   }
   if (state.game === "ca-fantasy5") {
-    while (numbers.size < 2 && shortAround.length) numbers.add(randomChoice(shortAround));
-    if (shortEdges.length && numbers.size < 5 && Math.random() < 0.72) {
-      numbers.add(randomChoice(shortEdges));
+    while (numbers.size < 2 && shortAround.length) numbers.add(randomChoice(shortAround, rng));
+    if (shortEdges.length && numbers.size < 5 && rng() < 0.72) {
+      numbers.add(randomChoice(shortEdges, rng));
     }
-    if (shortAnchors.length && numbers.size < 5 && Math.random() < 0.5) {
-      numbers.add(randomChoice(shortAnchors));
+    if (shortAnchors.length && numbers.size < 5 && rng() < 0.5) {
+      numbers.add(randomChoice(shortAnchors, rng));
     }
-    if (shortAround.length && numbers.size < 4 && Math.random() < 0.85) {
-      numbers.add(randomChoice(shortAround));
+    if (shortAround.length && numbers.size < 4 && rng() < 0.85) {
+      numbers.add(randomChoice(shortAround, rng));
     }
   }
   if (focus === "classic" && classicList.length) {
-    while (numbers.size < 4) numbers.add(randomChoice(classicList));
+    while (numbers.size < 4) numbers.add(randomChoice(classicList, rng));
   }
   if (focus === "hot" && hotList.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(hotList));
+    while (numbers.size < 3) numbers.add(randomChoice(hotList, rng));
   }
   if (focus === "overdue" && overdueList.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(overdueList));
+    while (numbers.size < 3) numbers.add(randomChoice(overdueList, rng));
   }
   if (focus === "backtest") {
     const top = [...pool]
       .map((n) => {
         const row = stats.get(n) || { count: 0, gap: 0 };
-        return { n, score: row.count * 0.35 + row.gap * 0.25 + Math.random() * 8 };
+        return { n, score: row.count * 0.35 + row.gap * 0.25 + rng() * 8 };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, 20)
       .map((item) => item.n);
-    while (numbers.size < 4 && top.length) numbers.add(randomChoice(top));
+    while (numbers.size < 4 && top.length) numbers.add(randomChoice(top, rng));
   }
   while (numbers.size < 5) {
-    numbers.add(randomChoice(pool));
+    numbers.add(randomChoice(pool, rng));
   }
   return [...numbers].sort((a, b) => a - b);
 }
@@ -700,11 +725,13 @@ function generateCandidates() {
   const cached = state.candidateCache.get(cacheKey);
   if (cached) return cached;
   const pool = candidatePool();
+  const seed = `${cacheKey}-${state.history[0]?.numbers?.join(".") || ""}`;
+  const rng = createRng(seed);
   const seen = new Set();
   const candidates = [];
   const attempts = state.analysisFocus === "backtest" ? 260 : 200;
   for (let i = 0; i < attempts; i += 1) {
-    const numbers = buildCandidate(pool);
+    const numbers = buildCandidate(pool, rng);
     const key = numbers.join(",");
     if (seen.has(key)) continue;
     seen.add(key);
@@ -717,6 +744,29 @@ function generateCandidates() {
     .slice(0, 5);
   state.candidateCache.set(cacheKey, result);
   return result;
+}
+
+function withTemporaryFocus(focusKey, callback) {
+  const previousFocus = state.analysisFocus;
+  const previousWeights = { ...state.modelWeights };
+  const preset = FOCUS_PRESETS[focusKey] || FOCUS_PRESETS.balanced;
+  state.analysisFocus = focusKey;
+  state.modelWeights = { ...preset.weights };
+  try {
+    return callback();
+  } finally {
+    state.analysisFocus = previousFocus;
+    state.modelWeights = previousWeights;
+  }
+}
+
+function modeSnapshotCandidates() {
+  if (!state.analysis || !state.history.length) return [];
+  return MODE_SNAPSHOT_KEYS.map((key) => {
+    const preset = FOCUS_PRESETS[key];
+    const candidate = withTemporaryFocus(key, () => generateCandidates()[0]);
+    return candidate ? { key, preset, candidate } : null;
+  }).filter(Boolean);
 }
 
 function referenceCandidate() {
@@ -809,6 +859,64 @@ function renderCandidates() {
     button.addEventListener("click", () => {
       const numbers = button.dataset.candidate.split(",").map(Number);
       savePick(numbers);
+    });
+  });
+}
+
+function renderModeSnapshots() {
+  if (!els.modeSnapshots) return;
+  if (!isProPlan()) {
+    els.modeSnapshots.innerHTML = `<div class="empty-state">各模式快照屬於 Pro 訂閱版；可先用「預覽 Pro」查看。</div>`;
+    return;
+  }
+  if (!state.analysis || !state.history.length) {
+    els.modeSnapshots.innerHTML = `<div class="empty-state">資料讀取後會顯示每個模式的候選組合。</div>`;
+    return;
+  }
+
+  const activeFocus = state.analysisFocus;
+  els.modeSnapshots.innerHTML = modeSnapshotCandidates()
+    .map(({ key, preset, candidate }) => {
+      const isActive = key === activeFocus;
+      const isInterval = key === "interval";
+      const recentGood = candidate.backtest.recentGoodDraw;
+      const latestHits = state.latest?.numbers ? matchCount(candidate.numbers, state.latest.numbers) : 0;
+      const recentText = recentGood ? `近中 ${recentGood.hits}：${recentGood.date || recentGood.period || "-"}` : "近中待觀察";
+      return `
+        <button class="mode-snapshot-card ${isActive ? "active" : ""} ${isInterval ? "featured" : ""}" type="button" data-mode-snapshot="${key}">
+          <span class="mode-snapshot-kicker">${isInterval ? "同類版路" : "模式"}</span>
+          <strong>${preset.label}</strong>
+          <span class="mode-snapshot-desc">${preset.description}</span>
+          <span class="saved-balls">${miniBalls(candidate.numbers)}</span>
+          <span class="candidate-meta">
+            <span>本期 ${latestHits} 中</span>
+            <span>分數 ${candidate.score.total}</span>
+            <span>版路 +${candidate.score.pattern || 0}</span>
+            <span>最高 ${candidate.backtest.bestHit} 中</span>
+            <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
+            <span>${recentText}</span>
+          </span>
+        </button>
+      `;
+    })
+    .join("");
+
+  els.modeSnapshots.querySelectorAll("[data-mode-snapshot]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!requirePro("模式版路切換")) return;
+      const focusKey = button.dataset.modeSnapshot;
+      const preset = FOCUS_PRESETS[focusKey];
+      if (!preset) return;
+      state.analysisFocus = focusKey;
+      state.modelWeights = { ...preset.weights };
+      saveAnalysisFocus();
+      saveModelWeights();
+      renderModelControls();
+      renderSavedPicks();
+      renderReferencePick();
+      renderCandidates();
+      renderModeSnapshots();
+      setStatus(`已切換到 ${preset.label} 模式。`);
     });
   });
 }
@@ -1077,6 +1185,7 @@ function render(payload) {
   renderSavedPicks();
   renderReferencePick();
   renderCandidates();
+  renderModeSnapshots();
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
 }
 
@@ -1436,6 +1545,7 @@ els.generate.addEventListener("click", () => {
   state.candidateCache.clear();
   renderReferencePick();
   renderCandidates();
+  renderModeSnapshots();
   setStatus("已重新產生高分候選組合。");
 });
 
@@ -1452,6 +1562,7 @@ els.focusButtons.forEach((button) => {
     renderSavedPicks();
     renderReferencePick();
     renderCandidates();
+    renderModeSnapshots();
     setStatus(`分析重點已切換：${preset.label}。`);
   });
 });
@@ -1465,6 +1576,7 @@ els.modelInputs.forEach((input) => {
     renderSavedPicks();
     renderReferencePick();
     renderCandidates();
+    renderModeSnapshots();
     setStatus("模型設定已更新。");
   });
 });
@@ -1479,6 +1591,7 @@ els.resetModel.addEventListener("click", () => {
   renderSavedPicks();
   renderReferencePick();
   renderCandidates();
+  renderModeSnapshots();
   setStatus("模型設定已重設。");
 });
 
