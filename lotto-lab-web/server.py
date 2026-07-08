@@ -11,6 +11,7 @@ import re
 import socket
 import ssl
 import time
+import posixpath
 import urllib.error
 import urllib.request
 import zipfile
@@ -19,7 +20,7 @@ from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 try:
     from pywebpush import WebPushException, webpush
@@ -49,6 +50,16 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = 15 * 60
+MAX_JSON_BODY_BYTES = 64 * 1024
+MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
+API_RATE_LIMITS = {
+    "/api/lottery": (90, 60),
+    "/api/history-search": (45, 60),
+    "/api/config": (120, 60),
+    "/api/push-subscription": (20, 60),
+    "/api/notify-latest": (5, 600),
+}
+ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
 STRIPE_PAYMENT_LINK = os.environ.get("LOTTO_STRIPE_PAYMENT_LINK", "").strip()
 PUSH_PUBLIC_KEY = os.environ.get("LOTTO_VAPID_PUBLIC_KEY", "").strip()
 PUSH_PRIVATE_KEY = os.environ.get("LOTTO_VAPID_PRIVATE_KEY", "").strip()
@@ -64,6 +75,31 @@ class CacheItem:
 
 
 cache: dict[str, CacheItem] = {}
+rate_limit_hits: dict[tuple[str, str], list[float]] = {}
+
+
+def clamp_int(value: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(minimum, min(maximum, number))
+
+
+def clean_game(value: str) -> str:
+    game = (value or "tw539").strip()
+    if game not in ALLOWED_GAMES:
+        raise ValueError("不支援的遊戲種類")
+    return game
+
+
+def validate_push_subscription(subscription: dict[str, Any]) -> None:
+    endpoint = str(subscription.get("endpoint", ""))
+    keys = subscription.get("keys", {})
+    if not endpoint.startswith("https://"):
+        raise ValueError("缺少有效的通知 endpoint")
+    if not isinstance(keys, dict) or not keys.get("p256dh") or not keys.get("auth"):
+        raise ValueError("缺少有效的通知金鑰")
 
 
 def load_push_subscriptions() -> list[dict[str, Any]]:
@@ -89,10 +125,13 @@ def subscription_id(subscription: dict[str, Any]) -> str:
 def upsert_push_subscription(subscription: dict[str, Any], game: str = "all") -> int:
     if not isinstance(subscription, dict) or not subscription.get("endpoint"):
         raise ValueError("缺少有效的通知訂閱資料")
+    validate_push_subscription(subscription)
     subscriptions = load_push_subscriptions()
+    if len(subscriptions) >= MAX_PUSH_SUBSCRIPTIONS and subscription_id(subscription) not in {item.get("id") for item in subscriptions}:
+        raise ValueError("通知訂閱數已達上限")
     item_id = subscription_id(subscription)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    record = {"id": item_id, "subscription": subscription, "game": game or "all", "updatedAt": now}
+    record = {"id": item_id, "subscription": subscription, "game": game if game in ALLOWED_GAMES else "all", "updatedAt": now}
     kept = [item for item in subscriptions if item.get("id") != item_id]
     kept.append(record)
     save_push_subscriptions(kept)
@@ -391,7 +430,7 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
         draws = filter_history_rows(draws, query, number)
     draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     return {
-        "history": draws[:limit],
+        "history": public_draws(draws[:limit]),
         "total": len(draws),
         "availableYears": available_years,
         "searchedYears": searched_years,
@@ -462,12 +501,11 @@ def search_california_history(from_year: int, to_year: int, keyword: str = "", n
     rows = filter_history_rows(rows, keyword, number)
     rows.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     return {
-        "history": rows[:limit],
+        "history": public_draws(rows[:limit]),
         "total": len(rows),
         "availableYears": available_years,
         "searchedYears": searched_years,
         "limited": len(rows) > limit,
-        "sourceNote": "加州天天樂目前依資料源可取得的歷史範圍查詢；若來源只提供近期資料，跨年結果會較少。",
     }
 
 
@@ -936,17 +974,17 @@ def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profi
         source_total = profile["dragSourceTotals"].get(source, 0) or 1
         source_targets = [
             {
-                "source": source,
-                "target": target,
+                "base": source,
+                "follow": target,
                 "count": count,
                 "rate": round((count / source_total) * 100, 1),
             }
             for (src, target), count in profile["dragCounts"].items()
             if src == source
         ]
-        source_targets.sort(key=lambda item: (-item["count"], -item["rate"], item["target"]))
+        source_targets.sort(key=lambda item: (-item["count"], -item["rate"], item["follow"]))
         drag_rows.extend(source_targets[:2])
-    drag_rows.sort(key=lambda item: (-item["count"], -item["rate"], item["source"], item["target"]))
+    drag_rows.sort(key=lambda item: (-item["count"], -item["rate"], item["base"], item["follow"]))
     repeat_rows = []
     for number in latest:
         total = profile["repeatSourceTotals"].get(number, 0)
@@ -1040,28 +1078,81 @@ def build_payload(game: str, limit: int) -> dict[str, Any]:
             history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
         draws = history[:limit]
         analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
-        return {"latest": latest, "history": draws, "analysis": analysis}
+        return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
     if game == "ca-fantasy5":
         history = california_history(limit)
         if not history:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         draws = history[:limit]
         analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
-        return {"latest": history[0], "history": draws, "analysis": analysis}
+        return {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
     raise ValueError("unknown game")
 
 
+def public_draw(draw: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in draw.items() if key not in {"source", "sourceUrl"}}
+
+
+def public_draws(draws: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [public_draw(draw) for draw in draws]
+
+
 class Handler(SimpleHTTPRequestHandler):
+    server_version = "LottoLab"
+    sys_version = ""
+
     def translate_path(self, path: str) -> str:
-        clean = urlparse(path).path
+        clean = posixpath.normpath(unquote(urlparse(path).path))
         if clean.startswith("/api/"):
             return str(PUBLIC / "index.html")
         if clean == "/":
             return str(PUBLIC / "index.html")
-        return str(PUBLIC / clean.lstrip("/"))
+        target = (PUBLIC / clean.lstrip("/")).resolve()
+        public_root = PUBLIC.resolve()
+        if target == public_root or public_root in target.parents:
+            return str(target)
+        return str(PUBLIC / "index.html")
+
+    def client_key(self) -> str:
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",", 1)[0].strip()
+        return self.client_address[0] if self.client_address else "unknown"
+
+    def rate_limited(self, path: str) -> tuple[bool, int]:
+        limit = API_RATE_LIMITS.get(path)
+        if not limit:
+            return False, 0
+        max_hits, window_seconds = limit
+        now = time.time()
+        key = (self.client_key(), path)
+        hits = [hit for hit in rate_limit_hits.get(key, []) if now - hit < window_seconds]
+        if len(hits) >= max_hits:
+            retry_after = max(1, int(window_seconds - (now - hits[0])))
+            rate_limit_hits[key] = hits
+            return True, retry_after
+        hits.append(now)
+        rate_limit_hits[key] = hits
+        return False, 0
+
+    def verify_origin(self) -> bool:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        origin_host = urlparse(origin).netloc
+        return origin_host == self.headers.get("Host", "")
+
+    def reject_if_rate_limited(self, path: str) -> bool:
+        limited, retry_after = self.rate_limited(path)
+        if not limited:
+            return False
+        self.send_json({"ok": False, "error": "請求太頻繁，請稍後再試"}, status=429, extra_headers={"Retry-After": str(retry_after)})
+        return True
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/") and self.reject_if_rate_limited(parsed.path):
+            return
         if parsed.path == "/api/health":
             self.send_json({"ok": True, "service": "lotto-lab", "time": datetime.now().isoformat(timespec="seconds")})
             return
@@ -1074,16 +1165,10 @@ class Handler(SimpleHTTPRequestHandler):
                         "paymentLink": STRIPE_PAYMENT_LINK,
                         "plans": [
                             {
-                                "id": "free",
-                                "name": "免費版",
-                                "price": "$0",
-                                "features": ["最新開獎號碼", "90 期內基本統計", "熱號冷號與遺漏榜", "本次載入歷史紀錄"],
-                            },
-                            {
                                 "id": "pro",
                                 "name": "Pro 訂閱",
                                 "price": "$9 / 月起",
-                                "features": ["120-365 期進階分析", "跨年歷史查詢", "模型回測與版路模式", "高分組合排序", "開獎推播通知"],
+                                "features": ["120-365 期進階分析", "跨年歷史查詢", "模型回測與版路模式", "高分組合排序"],
                             },
                         ],
                     },
@@ -1098,25 +1183,29 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/lottery":
             params = parse_qs(parsed.query)
-            game = params.get("game", ["tw539"])[0]
-            limit = max(20, min(365, int(params.get("limit", ["180"])[0])))
             try:
+                game = clean_game(params.get("game", ["tw539"])[0])
+                limit = clamp_int(params.get("limit", ["180"])[0], 180, 10, 365)
                 payload = build_payload(game, limit)
                 self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=502)
             return
         if parsed.path == "/api/history-search":
             params = parse_qs(parsed.query)
-            game = params.get("game", ["tw539"])[0]
             current_year = datetime.now().year
-            from_year = int(params.get("fromYear", [str(current_year - 2)])[0])
-            to_year = int(params.get("toYear", [str(current_year)])[0])
-            keyword = params.get("keyword", [""])[0]
-            number_value = params.get("number", [""])[0]
-            number = int(number_value) if number_value else None
-            limit = max(50, min(5000, int(params.get("limit", ["2000"])[0])))
             try:
+                game = clean_game(params.get("game", ["tw539"])[0])
+                from_year = clamp_int(params.get("fromYear", [str(current_year - 2)])[0], current_year - 2, 1990, current_year)
+                to_year = clamp_int(params.get("toYear", [str(current_year)])[0], current_year, 1990, current_year)
+                if from_year > to_year:
+                    from_year, to_year = to_year, from_year
+                keyword = params.get("keyword", [""])[0].strip()[:40]
+                number_value = params.get("number", [""])[0]
+                number = clamp_int(number_value, 0, 1, 39) if number_value else None
+                limit = clamp_int(params.get("limit", ["2000"])[0], 2000, 50, 5000)
                 if game == "tw539":
                     payload = search_taiwan_history(from_year, to_year, keyword=keyword, number=number, limit=limit)
                 elif game == "ca-fantasy5":
@@ -1124,6 +1213,8 @@ class Handler(SimpleHTTPRequestHandler):
                 else:
                     raise ValueError("不支援的遊戲種類")
                 self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=502)
             return
@@ -1131,6 +1222,11 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/") and self.reject_if_rate_limited(parsed.path):
+            return
+        if not self.verify_origin():
+            self.send_json({"ok": False, "error": "不允許的請求來源"}, status=403)
+            return
         if parsed.path == "/api/push-subscription":
             try:
                 payload = self.read_json_body()
@@ -1151,15 +1247,17 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/notify-latest":
             try:
                 payload = self.read_json_body()
-                if NOTIFY_SECRET:
-                    supplied = self.headers.get("X-Lotto-Notify-Secret", "") or str(payload.get("secret", ""))
-                    if supplied != NOTIFY_SECRET:
-                        self.send_json({"ok": False, "error": "通知密鑰不正確"}, status=403)
-                        return
+                if not NOTIFY_SECRET:
+                    self.send_json({"ok": False, "error": "尚未設定通知密鑰"}, status=403)
+                    return
+                supplied = self.headers.get("X-Lotto-Notify-Secret", "") or str(payload.get("secret", ""))
+                if supplied != NOTIFY_SECRET:
+                    self.send_json({"ok": False, "error": "通知密鑰不正確"}, status=403)
+                    return
                 if not push_server_ready():
                     self.send_json({"ok": False, "error": "尚未設定完整推播金鑰"}, status=400)
                     return
-                game = payload.get("game", "tw539")
+                game = clean_game(payload.get("game", "tw539"))
                 lottery = build_payload(game, 90)["latest"]
                 numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
                 message = {
@@ -1180,8 +1278,13 @@ class Handler(SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length <= 0:
             return {}
+        if length > MAX_JSON_BODY_BYTES:
+            raise ValueError("資料量過大")
         body = self.rfile.read(length)
-        return json.loads(body.decode("utf-8"))
+        payload = json.loads(body.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("JSON 格式不正確")
+        return payload
 
     def broadcast_notification(self, message: dict[str, Any]) -> tuple[int, int, int]:
         subscriptions = load_push_subscriptions()
@@ -1204,11 +1307,21 @@ class Handler(SimpleHTTPRequestHandler):
             save_push_subscriptions(alive)
         return sent, failed, len(alive)
 
-    def send_json(self, payload: dict[str, Any], status: int = 200):
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+        super().end_headers()
+
+    def send_json(self, payload: dict[str, Any], status: int = 200, extra_headers: dict[str, str] | None = None):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for key, value in (extra_headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
