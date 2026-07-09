@@ -13,6 +13,7 @@ const state = {
   candidateCache: new Map(),
   notifications: {
     supported: false,
+    serverReady: false,
     publicKey: "",
     subscriberCount: 0,
   },
@@ -35,6 +36,10 @@ const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v1";
+const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
+const POLL_INTERVAL_MS = 4 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 18000;
 
 const FOCUS_PRESETS = {
   balanced: {
@@ -322,6 +327,87 @@ function loadModelSnapshots() {
 
 function saveModelSnapshots(snapshots) {
   localStorage.setItem(MODEL_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshots.slice(0, 160)));
+}
+
+function loadApiCacheStore() {
+  try {
+    return JSON.parse(localStorage.getItem(API_CACHE_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveApiCacheStore(store) {
+  try {
+    localStorage.setItem(API_CACHE_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // Storage can be full or blocked in private browsing. In-memory cache still works.
+  }
+}
+
+function readCachedPayload(cacheKey) {
+  const memory = state.apiCache.get(cacheKey);
+  if (memory) return memory;
+  const store = loadApiCacheStore();
+  const record = store[cacheKey];
+  if (!record?.payload) return null;
+  state.apiCache.set(cacheKey, record.payload);
+  return record.payload;
+}
+
+function writeCachedPayload(cacheKey, payload) {
+  state.apiCache.set(cacheKey, payload);
+  const store = loadApiCacheStore();
+  store[cacheKey] = { savedAt: Date.now(), payload };
+  Object.entries(store)
+    .sort((a, b) => (b[1].savedAt || 0) - (a[1].savedAt || 0))
+    .slice(12)
+    .forEach(([key]) => {
+      delete store[key];
+    });
+  saveApiCacheStore(store);
+}
+
+function drawKey(draw) {
+  if (!draw) return "";
+  return `${draw.name || state.game}|${draw.period || ""}|${draw.date || ""}|${(draw.numbers || []).join(".")}`;
+}
+
+function readLastSeenDraw() {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_SEEN_DRAW_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeLastSeenDraw(game, latest) {
+  const store = readLastSeenDraw();
+  store[game] = drawKey(latest);
+  try {
+    localStorage.setItem(LAST_SEEN_DRAW_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // Ignore blocked storage; notifications still work while the page is open.
+  }
+}
+
+async function fetchJsonWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "Cache-Control": "no-cache",
+        ...(options.headers || {}),
+      },
+    });
+    return await response.json();
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function loadModelWeights() {
@@ -1375,18 +1461,24 @@ function updateNotificationUi() {
 
   const permission = Notification.permission;
   const hasPushKey = Boolean(state.notifications.publicKey);
+  const serverReady = Boolean(state.notifications.serverReady);
   const isSubscribed = Boolean(state.pushSubscription);
   els.notifyBadge.textContent = isSubscribed ? "已訂閱" : permission === "denied" ? "已封鎖" : "可開啟";
   els.notifyToggle.textContent = isSubscribed ? "取消通知" : hasPushKey ? "開啟通知" : "開啟本機提醒";
   els.notifyToggle.disabled = permission === "denied";
   els.notifyTest.disabled = permission === "denied";
+  els.notifyTest.hidden = permission === "denied" || !notificationSupported();
 
   if (permission === "denied") {
     els.notifyText.textContent = "瀏覽器目前封鎖通知。請到瀏覽器網站設定允許通知後，再回來開啟開獎提醒。";
-  } else if (isSubscribed) {
+  } else if (isSubscribed && serverReady) {
     els.notifyText.textContent = `已登錄開獎通知。新一期更新時，系統可發送提醒；目前約 ${state.notifications.subscriberCount || 1} 個裝置訂閱。`;
+  } else if (permission === "granted" && !serverReady) {
+    els.notifyText.textContent = "已開啟本機提醒；網站開著時偵測到新一期會跳通知。離線群發需設定 Render 推播金鑰與排程。";
+  } else if (isSubscribed) {
+    els.notifyText.textContent = "已訂閱通知；離線群發還需要 Render 推播金鑰與定時觸發流程。";
   } else if (!hasPushKey) {
-    els.notifyText.textContent = "通知介面已可用；正式群發需要在 Render 設定 VAPID 推播金鑰。現在可先測試本機通知。";
+    els.notifyText.textContent = "可先開啟本機提醒；正式離線群發需要在 Render 設定 VAPID 推播金鑰。";
   } else {
     els.notifyText.textContent = "開啟後，有新一期開獎時可收到通知。手機建議先加入主畫面。";
   }
@@ -1472,7 +1564,7 @@ async function toggleNotifications() {
   }
 }
 
-async function showLocalTestNotification(title = "摘星王開獎通知", body = "這是一則測試通知。") {
+async function showLocalTestNotification(title = "摘星王開獎通知", body = "這是一則測試通知。", options = {}) {
   if (!notificationSupported()) {
     setStatus("這個瀏覽器目前不支援通知。", true);
     return;
@@ -1493,12 +1585,22 @@ async function showLocalTestNotification(title = "摘星王開獎通知", body =
     data: { url: `/?game=${state.game}` },
   });
   updateNotificationUi();
-  setStatus("已送出測試通知。");
+  if (!options.silent) setStatus("已送出測試通知。");
+}
+
+async function notifyIfLatestChanged(latest, previousKey) {
+  const nextKey = drawKey(latest);
+  if (!latest || !nextKey || !previousKey || previousKey === nextKey) return;
+  if (Notification.permission !== "granted") return;
+  const title = `${latest.name || "摘星王"} 已更新`;
+  const body = `第 ${latest.period || "-"} 期：${(latest.numbers || []).map(pad).join("、")}`;
+  await showLocalTestNotification(title, body, { silent: true });
 }
 
 async function initNotifications(config) {
   state.notifications = {
     supported: Boolean(config?.supported),
+    serverReady: Boolean(config?.serverReady),
     publicKey: config?.publicKey || "",
     subscriberCount: config?.subscriberCount || 0,
   };
@@ -1510,8 +1612,7 @@ async function initNotifications(config) {
 
 async function loadConfig() {
   try {
-    const response = await fetch("/api/config");
-    const payload = await response.json();
+    const payload = await fetchJsonWithTimeout("/api/config");
     if (payload.ok) {
       state.plan = loadPlanPreview();
       renderPlans(payload.subscription);
@@ -1522,40 +1623,56 @@ async function loadConfig() {
   }
 }
 
-async function load() {
+async function load(options = {}) {
+  const silent = Boolean(options.silent);
   if (!isProPlan() && state.limit > 90) {
     state.limit = 90;
     els.limit.value = "90";
   }
   const cacheKey = `${state.game}-${state.limit}`;
-  const cachedPayload = state.apiCache.get(cacheKey);
+  const cachedPayload = readCachedPayload(cacheKey);
   const requestId = ++state.requestId;
   if (cachedPayload) {
     render(cachedPayload);
-    setStatus("已用暫存資料顯示，正在背景確認最新資料...");
+    if (!silent) setStatus("已先顯示暫存資料，正在背景確認最新開獎...");
   } else {
-    setStatus("正在讀取資料...");
+    if (!silent) setStatus("正在讀取資料...");
   }
-  els.refresh.disabled = true;
+  if (!silent) els.refresh.disabled = true;
   try {
-    const response = await fetch(`/api/lottery?game=${state.game}&limit=${state.limit}`);
-    const payload = await response.json();
+    const previousSeen = readLastSeenDraw()[state.game] || "";
+    const payload = await fetchJsonWithTimeout(`/api/lottery?game=${state.game}&limit=${state.limit}&t=${Date.now()}`);
     if (!payload.ok) throw new Error(payload.error || "資料讀取失敗");
     if (requestId !== state.requestId) return;
-    state.apiCache.set(cacheKey, payload);
+    writeCachedPayload(cacheKey, payload);
     render(payload);
+    await notifyIfLatestChanged(payload.latest, previousSeen).catch(() => {});
+    writeLastSeenDraw(state.game, payload.latest);
   } catch (error) {
     if (cachedPayload) {
-      setStatus("目前使用暫存資料；背景更新暫時失敗。", true);
+      if (!silent) setStatus("目前使用暫存資料；背景更新暫時失敗。", true);
       return;
     }
     els.dashboard.hidden = true;
-    setStatus(error.message, true);
+    if (!silent) setStatus(error.name === "AbortError" ? "讀取逾時，請稍後再試。" : error.message, true);
   } finally {
     if (requestId === state.requestId) {
       els.refresh.disabled = false;
     }
   }
+}
+
+function startAutoRefresh() {
+  window.setInterval(() => {
+    if (document.visibilityState === "visible") {
+      load({ silent: true });
+    }
+  }, POLL_INTERVAL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      load({ silent: true });
+    }
+  });
 }
 
 async function runCrossYearSearch() {
@@ -1582,8 +1699,7 @@ async function runCrossYearSearch() {
       number,
       limit: "5000",
     });
-    const response = await fetch(`/api/history-search?${params}`);
-    const payload = await response.json();
+    const payload = await fetchJsonWithTimeout(`/api/history-search?${params}`);
     if (!payload.ok) throw new Error(payload.error || "跨年查詢失敗");
     state.displayHistory = payload.history;
     state.historySearch.keyword = "";
@@ -1595,7 +1711,7 @@ async function runCrossYearSearch() {
     els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。`;
     setStatus(`已完成跨年查詢：${payload.total} 筆。`);
   } catch (error) {
-    setStatus(error.message, true);
+    setStatus(error.name === "AbortError" ? "查詢逾時，請縮小年份範圍或稍後再試。" : error.message, true);
   } finally {
     els.crossYearSearch.disabled = false;
   }
@@ -1765,3 +1881,4 @@ applyPlanAccess();
 updateNotificationUi();
 loadConfig();
 load();
+startAutoRefresh();
