@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=34" />
+    <link rel="stylesheet" href="/styles.css?v=35" />
   </head>
   <body>
     <main class="shell">
@@ -72,6 +72,21 @@
             <span id="date">日期 -</span>
           </div>
           <div class="balls" id="latestBalls"></div>
+        </article>
+
+        <article class="panel countdown-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">下次開獎</p>
+              <h2 id="countdownTime">--:--:--</h2>
+            </div>
+            <span id="countdownBadge" class="count-pill">預估</span>
+          </div>
+          <div class="countdown-meta">
+            <span id="countdownGame">-</span>
+            <strong id="countdownDrawAt">-</strong>
+            <small id="countdownHint">依各彩種開獎時間估算。</small>
+          </div>
         </article>
 
         <article class="panel pick-panel">
@@ -297,6 +312,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=34"></script>
+    <script src="/app.js?v=35"></script>
   </body>
 </html>
