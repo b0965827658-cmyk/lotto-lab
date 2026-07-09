@@ -10,6 +10,7 @@ import random
 import re
 import socket
 import ssl
+import threading
 import time
 import posixpath
 import urllib.error
@@ -67,6 +68,13 @@ PUSH_CONTACT_EMAIL = os.environ.get("LOTTO_PUSH_CONTACT_EMAIL", "admin@example.c
 NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
 SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", ROOT / "data" / "push_subscriptions.json"))
 NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", ROOT / "data" / "notify_state.json"))
+AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "180"))
+AUTO_NOTIFY_GAMES = [
+    game.strip()
+    for game in os.environ.get("LOTTO_AUTO_NOTIFY_GAMES", "tw539,ca-fantasy5").split(",")
+    if game.strip() in ALLOWED_GAMES
+]
 
 
 @dataclass
@@ -77,6 +85,7 @@ class CacheItem:
 
 cache: dict[str, CacheItem] = {}
 rate_limit_hits: dict[tuple[str, str], list[float]] = {}
+notify_lock = threading.Lock()
 
 
 def clamp_int(value: str, default: int, minimum: int, maximum: int) -> int:
@@ -187,6 +196,77 @@ def mark_notified(game: str, draw: dict[str, Any]) -> None:
     state = load_notify_state()
     state[game] = f"{draw.get('period', '')}|{draw.get('date', '')}|{'.'.join(str(number) for number in draw.get('numbers', []))}"
     save_notify_state(state)
+
+
+def latest_notification_message(game: str, lottery: dict[str, Any]) -> dict[str, Any]:
+    numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
+    return {
+        "title": f"{lottery.get('name', '摘星王')} 已開獎",
+        "body": f"第 {lottery.get('period', '-')} 期：{numbers}",
+        "url": f"/?game={game}",
+        "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
+    }
+
+
+def broadcast_push_message(message: dict[str, Any]) -> tuple[int, int, int]:
+    subscriptions = load_push_subscriptions()
+    sent = 0
+    failed = 0
+    alive = []
+    for item in subscriptions:
+        subscription = item.get("subscription", {})
+        try:
+            send_push_message(subscription, message)
+            sent += 1
+            alive.append(item)
+        except Exception as exc:
+            failed += 1
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            if status_code not in (404, 410):
+                alive.append(item)
+    if len(alive) != len(subscriptions):
+        save_push_subscriptions(alive)
+    return sent, failed, len(alive)
+
+
+def notify_latest_game(game: str) -> dict[str, Any]:
+    if not push_server_ready():
+        return {"ok": False, "game": game, "error": "尚未設定完整推播金鑰"}
+    if not load_push_subscriptions():
+        return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": 0, "skipped": True, "message": "目前沒有訂閱用戶"}
+    lottery = build_payload(game, 90)["latest"]
+    if already_notified(game, lottery):
+        return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": len(load_push_subscriptions()), "skipped": True, "message": "這一期已通知過"}
+    message = latest_notification_message(game, lottery)
+    sent, failed, alive = broadcast_push_message(message)
+    if sent > 0:
+        mark_notified(game, lottery)
+    return {"ok": True, "game": game, "sent": sent, "failed": failed, "subscriberCount": alive, "message": message}
+
+
+def auto_notify_loop() -> None:
+    time.sleep(20)
+    while True:
+        try:
+            if push_server_ready() and AUTO_NOTIFY_GAMES:
+                with notify_lock:
+                    for game in AUTO_NOTIFY_GAMES:
+                        result = notify_latest_game(game)
+                        if result.get("sent") or result.get("failed"):
+                            print(
+                                "auto notify",
+                                game,
+                                "sent",
+                                result.get("sent", 0),
+                                "failed",
+                                result.get("failed", 0),
+                                "subscribers",
+                                result.get("subscriberCount", 0),
+                            )
+        except Exception as exc:
+            print(f"auto notify error: {exc}")
+        time.sleep(max(60, AUTO_NOTIFY_INTERVAL_SECONDS))
 
 
 def cached(key: str, loader):
@@ -1203,6 +1283,9 @@ class Handler(SimpleHTTPRequestHandler):
                     "notifications": {
                         "supported": bool(PUSH_PUBLIC_KEY),
                         "serverReady": push_server_ready(),
+                        "autoNotify": AUTO_NOTIFY_ENABLED,
+                        "autoNotifyIntervalSeconds": max(60, AUTO_NOTIFY_INTERVAL_SECONDS),
+                        "autoNotifyGames": AUTO_NOTIFY_GAMES,
                         "publicKey": PUSH_PUBLIC_KEY,
                         "subscriberCount": len(load_push_subscriptions()),
                     },
@@ -1286,21 +1369,8 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "尚未設定完整推播金鑰"}, status=400)
                     return
                 game = clean_game(payload.get("game", "tw539"))
-                lottery = build_payload(game, 90)["latest"]
-                if already_notified(game, lottery):
-                    self.send_json({"ok": True, "sent": 0, "failed": 0, "subscriberCount": len(load_push_subscriptions()), "skipped": True, "message": "這一期已通知過"})
-                    return
-                numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
-                message = {
-                    "title": f"{lottery.get('name', '摘星王')} 已開獎",
-                    "body": f"第 {lottery.get('period', '-')} 期：{numbers}",
-                    "url": f"/?game={game}",
-                    "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
-                }
-                sent, failed, alive = self.broadcast_notification(message)
-                if sent > 0:
-                    mark_notified(game, lottery)
-                self.send_json({"ok": True, "sent": sent, "failed": failed, "subscriberCount": alive, "message": message})
+                with notify_lock:
+                    self.send_json(notify_latest_game(game))
                 return
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=500)
@@ -1320,25 +1390,7 @@ class Handler(SimpleHTTPRequestHandler):
         return payload
 
     def broadcast_notification(self, message: dict[str, Any]) -> tuple[int, int, int]:
-        subscriptions = load_push_subscriptions()
-        sent = 0
-        failed = 0
-        alive = []
-        for item in subscriptions:
-            subscription = item.get("subscription", {})
-            try:
-                send_push_message(subscription, message)
-                sent += 1
-                alive.append(item)
-            except Exception as exc:
-                failed += 1
-                response = getattr(exc, "response", None)
-                status_code = getattr(response, "status_code", None)
-                if status_code not in (404, 410):
-                    alive.append(item)
-        if len(alive) != len(subscriptions):
-            save_push_subscriptions(alive)
-        return sent, failed, len(alive)
+        return broadcast_push_message(message)
 
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -1369,6 +1421,9 @@ def main():
     port = int(os.environ.get("PORT", "8787"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)
+    if AUTO_NOTIFY_ENABLED:
+        threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
+        print(f"auto notify enabled every {max(60, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
     print(f"摘星王 running at http://{host}:{port}")
     server.serve_forever()
 
