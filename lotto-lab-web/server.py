@@ -49,7 +49,7 @@ PILIO_TAIWAN_URL = "https://www.pilio.idv.tw/lto539/list.asp?indexpage={page}&or
 CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
-CACHE_TTL_SECONDS = 15 * 60
+CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "300"))
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 API_RATE_LIMITS = {
@@ -62,10 +62,11 @@ API_RATE_LIMITS = {
 ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
 STRIPE_PAYMENT_LINK = os.environ.get("LOTTO_STRIPE_PAYMENT_LINK", "").strip()
 PUSH_PUBLIC_KEY = os.environ.get("LOTTO_VAPID_PUBLIC_KEY", "").strip()
-PUSH_PRIVATE_KEY = os.environ.get("LOTTO_VAPID_PRIVATE_KEY", "").strip()
+PUSH_PRIVATE_KEY = os.environ.get("LOTTO_VAPID_PRIVATE_KEY", "").strip().replace("\\n", "\n")
 PUSH_CONTACT_EMAIL = os.environ.get("LOTTO_PUSH_CONTACT_EMAIL", "admin@example.com").strip()
 NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
 SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", ROOT / "data" / "push_subscriptions.json"))
+NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", ROOT / "data" / "notify_state.json"))
 
 
 @dataclass
@@ -159,6 +160,33 @@ def send_push_message(subscription: dict[str, Any], payload: dict[str, Any]) -> 
         vapid_private_key=PUSH_PRIVATE_KEY,
         vapid_claims={"sub": subject},
     )
+
+
+def load_notify_state() -> dict[str, Any]:
+    try:
+        if not NOTIFY_STATE_FILE.exists():
+            return {}
+        payload = json.loads(NOTIFY_STATE_FILE.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_notify_state(state: dict[str, Any]) -> None:
+    NOTIFY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    NOTIFY_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def already_notified(game: str, draw: dict[str, Any]) -> bool:
+    state = load_notify_state()
+    key = f"{draw.get('period', '')}|{draw.get('date', '')}|{'.'.join(str(number) for number in draw.get('numbers', []))}"
+    return bool(key and state.get(game) == key)
+
+
+def mark_notified(game: str, draw: dict[str, Any]) -> None:
+    state = load_notify_state()
+    state[game] = f"{draw.get('period', '')}|{draw.get('date', '')}|{'.'.join(str(number) for number in draw.get('numbers', []))}"
+    save_notify_state(state)
 
 
 def cached(key: str, loader):
@@ -1259,6 +1287,9 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 game = clean_game(payload.get("game", "tw539"))
                 lottery = build_payload(game, 90)["latest"]
+                if already_notified(game, lottery):
+                    self.send_json({"ok": True, "sent": 0, "failed": 0, "subscriberCount": len(load_push_subscriptions()), "skipped": True, "message": "這一期已通知過"})
+                    return
                 numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
                 message = {
                     "title": f"{lottery.get('name', '摘星王')} 已開獎",
@@ -1267,6 +1298,8 @@ class Handler(SimpleHTTPRequestHandler):
                     "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
                 }
                 sent, failed, alive = self.broadcast_notification(message)
+                if sent > 0:
+                    mark_notified(game, lottery)
                 self.send_json({"ok": True, "sent": sent, "failed": failed, "subscriberCount": alive, "message": message})
                 return
             except Exception as exc:
@@ -1313,6 +1346,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+        parsed = urlparse(self.path)
+        if parsed.path in ("/", "/index.html", "/sw.js", "/manifest.webmanifest"):
+            self.send_header("Cache-Control", "no-cache")
+        elif parsed.path.startswith(("/app.js", "/styles.css", "/icon")):
+            self.send_header("Cache-Control", "public, max-age=86400")
         super().end_headers()
 
     def send_json(self, payload: dict[str, Any], status: int = 200, extra_headers: dict[str, str] | None = None):
@@ -1320,6 +1358,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         for key, value in (extra_headers or {}).items():
             self.send_header(key, value)
         self.end_headers()
