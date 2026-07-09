@@ -13,6 +13,7 @@ const state = {
   candidateCache: new Map(),
   backtestCache: new Map(),
   modelRenderTimer: null,
+  countdownTimer: null,
   notifications: {
     supported: false,
     serverReady: false,
@@ -107,6 +108,11 @@ const els = {
   period: $("#period"),
   date: $("#date"),
   latestBalls: $("#latestBalls"),
+  countdownTime: $("#countdownTime"),
+  countdownBadge: $("#countdownBadge"),
+  countdownGame: $("#countdownGame"),
+  countdownDrawAt: $("#countdownDrawAt"),
+  countdownHint: $("#countdownHint"),
   pickBalls: $("#pickBalls"),
   pickMeta: $("#pickMeta"),
   note: $("#analysisNote"),
@@ -186,6 +192,111 @@ function miniBalls(numbers, winners = []) {
   return numbers
     .map((n) => `<span class="mini-ball ${winnerSet.has(n) ? "hit" : ""}">${pad(n)}</span>`)
     .join("");
+}
+
+function zonedParts(date, timeZone) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  return Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)])
+  );
+}
+
+function zonedDate(timeZone, year, month, day, hour, minute = 0, second = 0) {
+  const guess = Date.UTC(year, month - 1, day, hour, minute, second);
+  const parts = zonedParts(new Date(guess), timeZone);
+  const rendered = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return new Date(guess - (rendered - guess));
+}
+
+function zonedDayIndex(date, timeZone) {
+  const parts = zonedParts(date, timeZone);
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+}
+
+function addDaysInZone(timeZone, date, days) {
+  const parts = zonedParts(date, timeZone);
+  const base = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+  return zonedDate(timeZone, base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), 0, 0, 0);
+}
+
+function nextDrawForGame(game, now = new Date()) {
+  const schedule =
+    game === "ca-fantasy5"
+      ? {
+          gameName: "加州天天樂",
+          timeZone: "America/Los_Angeles",
+          hour: 18,
+          minute: 30,
+          drawDays: [0, 1, 2, 3, 4, 5, 6],
+          localLabel: "加州每日 18:30 後",
+          hint: "已換算成你目前裝置時間。",
+        }
+      : {
+          gameName: "今彩 539",
+          timeZone: "Asia/Taipei",
+          hour: 20,
+          minute: 30,
+          drawDays: [1, 2, 3, 4, 5, 6],
+          localLabel: "台灣週一至週六 20:30",
+          hint: "週日休市，倒數會自動跳到週一。",
+        };
+
+  for (let offset = 0; offset < 10; offset += 1) {
+    const dayStart = addDaysInZone(schedule.timeZone, now, offset);
+    const parts = zonedParts(dayStart, schedule.timeZone);
+    const candidate = zonedDate(schedule.timeZone, parts.year, parts.month, parts.day, schedule.hour, schedule.minute, 0);
+    if (schedule.drawDays.includes(zonedDayIndex(candidate, schedule.timeZone)) && candidate > now) {
+      return { ...schedule, at: candidate };
+    }
+  }
+  return { ...schedule, at: new Date(now.getTime() + 24 * 60 * 60 * 1000) };
+}
+
+function formatCountdown(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const time = [hours, minutes, seconds].map(pad).join(":");
+  return days > 0 ? `${days}天 ${time}` : time;
+}
+
+function renderCountdown() {
+  if (!els.countdownTime) return;
+  const next = nextDrawForGame(state.game);
+  const diff = next.at.getTime() - Date.now();
+  const localDrawAt = new Intl.DateTimeFormat("zh-Hant-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(next.at);
+  els.countdownTime.textContent = formatCountdown(diff);
+  els.countdownBadge.textContent = diff <= 0 ? "更新中" : "倒數";
+  els.countdownGame.textContent = next.gameName;
+  els.countdownDrawAt.textContent = `${localDrawAt} 開獎`;
+  els.countdownHint.textContent = `${next.localLabel}，${next.hint}`;
+}
+
+function startCountdown() {
+  renderCountdown();
+  if (state.countdownTimer) window.clearInterval(state.countdownTimer);
+  state.countdownTimer = window.setInterval(renderCountdown, 1000);
 }
 
 function rankRows(items, mode) {
@@ -1792,6 +1903,7 @@ document.querySelectorAll(".segment").forEach((button) => {
     document.querySelectorAll(".segment").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
     state.game = button.dataset.game;
+    renderCountdown();
     load();
   });
 });
@@ -1925,6 +2037,7 @@ initHistoryYears();
 renderModelControls();
 applyPlanAccess();
 updateNotificationUi();
+startCountdown();
 loadConfig();
 load();
 startAutoRefresh();
