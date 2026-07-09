@@ -11,6 +11,8 @@ const state = {
   requestId: 0,
   apiCache: new Map(),
   candidateCache: new Map(),
+  backtestCache: new Map(),
+  modelRenderTimer: null,
   notifications: {
     supported: false,
     serverReady: false,
@@ -40,6 +42,8 @@ const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v1";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const POLL_INTERVAL_MS = 4 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 18000;
+const MAX_BACKTEST_CACHE_SIZE = 600;
+const MODEL_RENDER_DEBOUNCE_MS = 120;
 
 const FOCUS_PRESETS = {
   balanced: {
@@ -487,7 +491,32 @@ function matchCount(numbers, winners) {
   return numbers.filter((n) => winnerSet.has(n)).length;
 }
 
+function historyCacheKey() {
+  const first = state.history[0];
+  const last = state.history[state.history.length - 1];
+  return [
+    state.game,
+    state.limit,
+    state.history.length,
+    first?.period || first?.date || "",
+    last?.period || last?.date || "",
+  ].join("|");
+}
+
+function rememberBacktestResult(key, result) {
+  state.backtestCache.set(key, result);
+  if (state.backtestCache.size <= MAX_BACKTEST_CACHE_SIZE) return;
+  const overflow = state.backtestCache.size - MAX_BACKTEST_CACHE_SIZE;
+  Array.from(state.backtestCache.keys())
+    .slice(0, overflow)
+    .forEach((oldKey) => state.backtestCache.delete(oldKey));
+}
+
 function backtestPick(numbers) {
+  const cacheKey = `${historyCacheKey()}|${numbers.join(",")}`;
+  const cached = state.backtestCache.get(cacheKey);
+  if (cached) return cached;
+
   const distribution = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   let bestHit = 0;
   let bestDraw = null;
@@ -505,7 +534,7 @@ function backtestPick(numbers) {
     }
   });
 
-  return {
+  const result = {
     distribution,
     bestHit,
     bestDraw,
@@ -513,6 +542,8 @@ function backtestPick(numbers) {
     testedCount: state.history.length,
     profitableCount: distribution[3] + distribution[4] + distribution[5],
   };
+  rememberBacktestResult(cacheKey, result);
+  return result;
 }
 
 function backtestBars(distribution, testedCount) {
@@ -834,26 +865,31 @@ function generateCandidates() {
   const cacheKey = `${state.game}-${state.limit}-${state.latest?.date || ""}-${state.latest?.period || ""}-${state.analysisFocus}-${JSON.stringify(state.modelWeights)}`;
   const cached = state.candidateCache.get(cacheKey);
   if (cached) return cached;
-  const pool = candidatePool();
-  const seed = `${cacheKey}-${state.history[0]?.numbers?.join(".") || ""}`;
-  const rng = createRng(seed);
-  const seen = new Set();
-  const candidates = [];
-  const attempts = state.analysisFocus === "backtest" ? 260 : 200;
-  for (let i = 0; i < attempts; i += 1) {
-    const numbers = buildCandidate(pool, rng);
-    const key = numbers.join(",");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const backtest = backtestPick(numbers);
-    const score = scorePick(numbers, backtest);
-    candidates.push({ numbers, backtest, score });
+  try {
+    const pool = candidatePool();
+    const seed = `${cacheKey}-${state.history[0]?.numbers?.join(".") || ""}`;
+    const rng = createRng(seed);
+    const seen = new Set();
+    const candidates = [];
+    const attempts = state.analysisFocus === "backtest" ? 260 : 200;
+    for (let i = 0; i < attempts; i += 1) {
+      const numbers = buildCandidate(pool, rng);
+      const key = numbers.join(",");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const backtest = backtestPick(numbers);
+      const score = scorePick(numbers, backtest);
+      candidates.push({ numbers, backtest, score });
+    }
+    const result = candidates
+      .sort((a, b) => b.score.total - a.score.total || b.backtest.bestHit - a.backtest.bestHit)
+      .slice(0, 5);
+    state.candidateCache.set(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error("Candidate generation failed", error);
+    return [];
   }
-  const result = candidates
-    .sort((a, b) => b.score.total - a.score.total || b.backtest.bestHit - a.backtest.bestHit)
-    .slice(0, 5);
-  state.candidateCache.set(cacheKey, result);
-  return result;
 }
 
 function withTemporaryFocus(focusKey, callback) {
@@ -1006,6 +1042,10 @@ function renderCandidates() {
     return;
   }
   const candidates = generateCandidates();
+  if (!candidates.length) {
+    els.candidates.innerHTML = `<div class="empty-state">模型回測暫時忙碌，請稍後再按一次重新產生。</div>`;
+    return;
+  }
   els.candidates.innerHTML = candidates
     .map(
       (candidate, index) => `
@@ -1046,7 +1086,12 @@ function renderModeSnapshots() {
   }
 
   const activeFocus = state.analysisFocus;
-  els.modeSnapshots.innerHTML = modeSnapshotCandidates()
+  const snapshots = modeSnapshotCandidates();
+  if (!snapshots.length) {
+    els.modeSnapshots.innerHTML = `<div class="empty-state">模式回測暫時忙碌，請稍後再切換一次。</div>`;
+    return;
+  }
+  els.modeSnapshots.innerHTML = snapshots
     .map(({ key, preset, candidate }) => {
       const isActive = key === activeFocus;
       const isInterval = key === "interval";
@@ -1083,13 +1128,28 @@ function renderModeSnapshots() {
       saveAnalysisFocus();
       saveModelWeights();
       renderModelControls();
-      renderSavedPicks();
-      renderReferencePick();
-      renderCandidates();
-      renderModeSnapshots();
-      setStatus(`已切換到 ${preset.label} 模式。`);
+      scheduleModelRender(`已切換到 ${preset.label} 模式。`);
     });
   });
+}
+
+function renderModelOutput() {
+  renderSavedPicks();
+  renderReferencePick();
+  renderCandidates();
+  renderModeSnapshots();
+}
+
+function scheduleModelRender(message = "模型設定已更新。") {
+  if (state.modelRenderTimer) {
+    window.clearTimeout(state.modelRenderTimer);
+  }
+  setStatus("模型正在重新計算...");
+  state.modelRenderTimer = window.setTimeout(() => {
+    state.modelRenderTimer = null;
+    renderModelOutput();
+    setStatus(message);
+  }, MODEL_RENDER_DEBOUNCE_MS);
 }
 
 function renderModelBacktest(backtest, profiles = []) {
@@ -1749,6 +1809,7 @@ els.limit.addEventListener("change", () => {
   }
   state.limit = Number(els.limit.value);
   state.candidateCache.clear();
+  state.backtestCache.clear();
   load();
 });
 
@@ -1778,10 +1839,7 @@ els.usePick.addEventListener("click", () => {
 els.generate.addEventListener("click", () => {
   if (!requirePro("高分組合")) return;
   state.candidateCache.clear();
-  renderReferencePick();
-  renderCandidates();
-  renderModeSnapshots();
-  setStatus("已重新產生高分候選組合。");
+  scheduleModelRender("已重新產生高分候選組合。");
 });
 
 els.focusButtons.forEach((button) => {
@@ -1794,11 +1852,7 @@ els.focusButtons.forEach((button) => {
     saveAnalysisFocus();
     saveModelWeights();
     renderModelControls();
-    renderSavedPicks();
-    renderReferencePick();
-    renderCandidates();
-    renderModeSnapshots();
-    setStatus(`分析重點已切換：${preset.label}。`);
+    scheduleModelRender(`分析重點已切換：${preset.label}。`);
   });
 });
 
@@ -1808,11 +1862,7 @@ els.modelInputs.forEach((input) => {
     state.modelWeights[input.dataset.weight] = Number(input.value);
     saveModelWeights();
     renderModelControls();
-    renderSavedPicks();
-    renderReferencePick();
-    renderCandidates();
-    renderModeSnapshots();
-    setStatus("模型設定已更新。");
+    scheduleModelRender("模型設定已更新。");
   });
 });
 
@@ -1823,11 +1873,7 @@ els.resetModel.addEventListener("click", () => {
   saveAnalysisFocus();
   saveModelWeights();
   renderModelControls();
-  renderSavedPicks();
-  renderReferencePick();
-  renderCandidates();
-  renderModeSnapshots();
-  setStatus("模型設定已重設。");
+  scheduleModelRender("模型設定已重設。");
 });
 
 els.historyKeyword.addEventListener("input", () => {
