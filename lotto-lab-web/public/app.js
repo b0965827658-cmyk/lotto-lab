@@ -1138,6 +1138,7 @@ function savePick(numbers) {
     createdAt: new Date().toISOString(),
   });
   saveSavedPicks(picks.slice(0, 80));
+  syncSavedPicksToServer().catch(() => {});
   renderSavedPicks();
   setStatus(`已儲存 ${gameLabel(state.game)}：${normalized.map(pad).join(" · ")}`);
   return true;
@@ -1532,6 +1533,7 @@ function renderSavedPicks() {
     button.addEventListener("click", () => {
       const next = loadSavedPicks().filter((pick) => pick.id !== button.dataset.deletePick);
       saveSavedPicks(next);
+      syncSavedPicksToServer().catch(() => {});
       renderSavedPicks();
       setStatus("已刪除儲存號碼。");
     });
@@ -1671,18 +1673,30 @@ async function syncPushSubscription() {
   const registration = await getServiceWorkerRegistration();
   state.pushSubscription = await registration.pushManager.getSubscription();
   updateNotificationUi();
+  await syncSavedPicksToServer().catch(() => {});
 }
 
 async function postSubscription(action, subscription) {
   const response = await fetch("/api/push-subscription", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, subscription, game: state.game }),
+    body: JSON.stringify({ action, subscription, game: state.game, savedPicks: notificationSavedPicks() }),
   });
   const payload = await response.json();
   if (!payload.ok) throw new Error(payload.error || "通知訂閱失敗");
   state.notifications.subscriberCount = payload.subscriberCount || state.notifications.subscriberCount || 0;
   return payload;
+}
+
+function notificationSavedPicks() {
+  return loadSavedPicks()
+    .slice(0, 20)
+    .map((pick) => ({ game: pick.game, numbers: pick.numbers }));
+}
+
+async function syncSavedPicksToServer() {
+  if (!state.pushSubscription) return;
+  await postSubscription("sync-picks", state.pushSubscription);
 }
 
 async function enableNotifications() {
@@ -1752,8 +1766,8 @@ async function showLocalTestNotification(title = "摘星狙擊手開獎通知", 
   const registration = await getServiceWorkerRegistration();
   await registration.showNotification(title, {
     body,
-    icon: "/icon-192.png",
-    badge: "/icon-192.png",
+    icon: "/logo-sniper-star-192.png?v=40",
+    badge: "/logo-sniper-star-192.png?v=40",
     data: { url: `/?game=${state.game}` },
   });
   updateNotificationUi();
@@ -1764,9 +1778,41 @@ async function notifyIfLatestChanged(latest, previousKey) {
   const nextKey = drawKey(latest);
   if (!latest || !nextKey || !previousKey || previousKey === nextKey) return;
   if (Notification.permission !== "granted") return;
-  const title = `${latest.name || "摘星狙擊手"} 已更新`;
-  const body = `第 ${latest.period || "-"} 期：${(latest.numbers || []).map(pad).join("、")}`;
+  const watchedPicks = loadSavedPicks().filter((pick) => pick.game === state.game).slice(0, 20);
+  const outcomes = watchedPicks
+    .map((pick) => {
+      const hitNumbers = pick.numbers.filter((number) => (latest.numbers || []).includes(number));
+      return hitNumbers.length ? starHitMessage(hitNumbers) : "";
+    })
+    .filter(Boolean);
+  const title = outcomes.length ? `${latest.name || "摘星狙擊手"} 命中通知` : `${latest.name || "摘星狙擊手"} 已更新`;
+  let body = outcomes.length
+    ? outcomes.slice(0, 3).join(" ｜ ")
+    : `第 ${latest.period || "-"} 期：${(latest.numbers || []).map(pad).join("、")}`;
+  if (!outcomes.length && watchedPicks.length) {
+    body += `；你儲存的 ${watchedPicks.length} 組號碼本期未命中。`;
+  } else if (outcomes.length > 3) {
+    body += `；另有 ${outcomes.length - 3} 組號碼命中。`;
+  }
   await showLocalTestNotification(title, body, { silent: true });
+}
+
+function starHitMessage(hitNumbers) {
+  const numbers = hitNumbers.map(pad).join("、");
+  switch (hitNumbers.length) {
+    case 1:
+      return `恭喜（${numbers}）摘下一星`;
+    case 2:
+      return `恭喜（${numbers}）摘下二星`;
+    case 3:
+      return `恭喜（${numbers}）太神了！摘下三星`;
+    case 4:
+      return `恭喜（${numbers}）你超神了！摘下四星`;
+    case 5:
+      return `恭喜（${numbers}）你已成為最強狙擊手！五顆通通拿下`;
+    default:
+      return `本期命中 ${hitNumbers.length} 顆：${numbers}`;
+  }
 }
 
 async function initNotifications(config) {
