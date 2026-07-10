@@ -973,10 +973,26 @@ def number_stats(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str,
     for draw in recent_window:
         for number in draw["numbers"]:
             recent_frequency[number] += 1
+    window_frequencies = {}
+    for window_size in (6, 12, 18, 24, 36, 60, 90):
+        window_rows = ordered[:window_size]
+        window_counts = {n: 0 for n in range(1, max_number + 1)}
+        for draw in window_rows:
+            for number in draw["numbers"]:
+                window_counts[number] += 1
+        window_frequencies[str(window_size)] = window_counts
+    appearance_streak = {n: 0 for n in range(1, max_number + 1)}
+    for number in appearance_streak:
+        for draw in ordered:
+            if number not in draw["numbers"]:
+                break
+            appearance_streak[number] += 1
     return {
         "ordered": ordered,
         "frequency": frequency,
         "recentFrequency": recent_frequency,
+        "windowFrequencies": window_frequencies,
+        "appearanceStreak": appearance_streak,
         "gaps": gaps,
     }
 
@@ -989,23 +1005,28 @@ MODEL_PROFILES = {
     },
     "balanced": {
         "label": "綜合版路",
-        "number": {"heat": 0.19, "recent": 0.18, "trend": 0.11, "gap": 0.14, "neighbor": 0.07, "tail": 0.06, "pair": 0.06, "drag": 0.08, "repeatSignal": 0.04, "interval": 0.07},
+        "number": {"heat": 0.14, "recent": 0.16, "trend": 0.10, "gap": 0.12, "neighbor": 0.06, "tail": 0.05, "pair": 0.05, "drag": 0.06, "repeatSignal": 0.04, "interval": 0.06, "multiWindow": 0.10, "tailMomentum": 0.04, "streak": 0.02},
         "combo": {"spread": 0.16, "zone": 0.17, "odd": 0.13, "low": 0.09, "sum": 0.16, "tail": 0.08, "repeat": 0.11, "interval": 0.10},
     },
     "momentum": {
         "label": "近期動能",
-        "number": {"heat": 0.14, "recent": 0.27, "trend": 0.17, "gap": 0.06, "neighbor": 0.06, "tail": 0.04, "pair": 0.05, "drag": 0.08, "repeatSignal": 0.05, "interval": 0.08},
+        "number": {"heat": 0.10, "recent": 0.23, "trend": 0.15, "gap": 0.04, "neighbor": 0.06, "tail": 0.04, "pair": 0.05, "drag": 0.07, "repeatSignal": 0.05, "interval": 0.07, "multiWindow": 0.09, "tailMomentum": 0.08, "streak": 0.05},
         "combo": {"spread": 0.13, "zone": 0.15, "odd": 0.11, "low": 0.09, "sum": 0.14, "tail": 0.08, "repeat": 0.20, "interval": 0.10},
     },
     "cycle": {
         "label": "遺漏週期",
-        "number": {"heat": 0.15, "recent": 0.09, "trend": 0.06, "gap": 0.28, "neighbor": 0.08, "tail": 0.06, "pair": 0.08, "drag": 0.07, "repeatSignal": 0.05, "interval": 0.08},
+        "number": {"heat": 0.12, "recent": 0.08, "trend": 0.05, "gap": 0.24, "neighbor": 0.07, "tail": 0.05, "pair": 0.07, "drag": 0.07, "repeatSignal": 0.05, "interval": 0.07, "multiWindow": 0.09, "tailMomentum": 0.02, "streak": 0.02},
         "combo": {"spread": 0.18, "zone": 0.16, "odd": 0.11, "low": 0.11, "sum": 0.16, "tail": 0.09, "repeat": 0.09, "interval": 0.10},
     },
     "shape": {
         "label": "區間尾數",
-        "number": {"heat": 0.13, "recent": 0.12, "trend": 0.08, "gap": 0.10, "neighbor": 0.06, "tail": 0.15, "pair": 0.15, "drag": 0.05, "repeatSignal": 0.02, "interval": 0.14},
+        "number": {"heat": 0.10, "recent": 0.10, "trend": 0.06, "gap": 0.08, "neighbor": 0.05, "tail": 0.13, "pair": 0.13, "drag": 0.05, "repeatSignal": 0.02, "interval": 0.13, "multiWindow": 0.08, "tailMomentum": 0.05, "streak": 0.02},
         "combo": {"spread": 0.15, "zone": 0.22, "odd": 0.14, "low": 0.10, "sum": 0.12, "tail": 0.09, "repeat": 0.04, "interval": 0.14},
+    },
+    "adaptive": {
+        "label": "自適應集成",
+        "number": {"heat": 0.12, "recent": 0.14, "trend": 0.10, "gap": 0.10, "neighbor": 0.06, "tail": 0.05, "pair": 0.08, "drag": 0.07, "repeatSignal": 0.05, "interval": 0.08, "multiWindow": 0.10, "tailMomentum": 0.08, "streak": 0.05},
+        "combo": {"spread": 0.13, "zone": 0.14, "odd": 0.10, "low": 0.07, "sum": 0.13, "tail": 0.07, "repeat": 0.11, "interval": 0.15, "shape": 0.10},
     },
 }
 
@@ -1041,10 +1062,14 @@ def signature_score(value: Any, counts: dict[Any, int]) -> float:
 def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
     ordered = list(draws)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    recent6 = ordered[:6]
     recent12 = ordered[:12]
+    recent24 = ordered[:24]
     recent30 = ordered[:30]
+    recent36 = ordered[:36]
     older30 = ordered[30:60]
     recent60 = ordered[:60]
+    recent90 = ordered[:90]
 
     def frequencies(rows: list[dict[str, Any]]) -> dict[int, int]:
         values = {n: 0 for n in range(1, max_number + 1)}
@@ -1053,11 +1078,29 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
                 values[number] += 1
         return values
 
+    recent6_freq = frequencies(recent6)
     recent12_freq = frequencies(recent12)
+    recent24_freq = frequencies(recent24)
     recent30_freq = frequencies(recent30)
+    recent36_freq = frequencies(recent36)
     older30_freq = frequencies(older30)
     all_freq = frequencies(ordered)
-    gaps = number_stats(ordered, max_number)["gaps"]
+    stats = number_stats(ordered, max_number)
+    gaps = stats["gaps"]
+    appearance_streak = stats["appearanceStreak"]
+
+    window_specs = ((6, 0.30), (12, 0.25), (24, 0.20), (36, 0.14), (60, 0.07), (90, 0.04))
+    window_rows = {size: ordered[:size] for size, _ in window_specs}
+    window_frequencies = {size: frequencies(rows) for size, rows in window_rows.items()}
+    multi_window_raw = {
+        n: sum(
+            safe_divide(window_frequencies[size][n], len(window_rows[size])) * weight
+            for size, weight in window_specs
+            if window_rows[size]
+        )
+        for n in range(1, max_number + 1)
+    }
+    max_multi_window = max(multi_window_raw.values()) or 1
 
     max_all = max(all_freq.values()) or 1
     max_recent12 = max(recent12_freq.values()) or 1
@@ -1069,6 +1112,22 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
         for number in draw["numbers"]:
             tails[number % 10] += 1
     max_tail = max(tails.values()) or 1
+    tail_recent12 = {n: 0 for n in range(10)}
+    tail_prior24 = {n: 0 for n in range(10)}
+    for draw in recent12:
+        for number in draw["numbers"]:
+            tail_recent12[number % 10] += 1
+    for draw in ordered[12:36]:
+        for number in draw["numbers"]:
+            tail_prior24[number % 10] += 1
+    tail_momentum_raw = {
+        tail: max(
+            0.0,
+            safe_divide(tail_recent12[tail], len(recent12)) - safe_divide(tail_prior24[tail], len(ordered[12:36])),
+        )
+        for tail in range(10)
+    }
+    max_tail_momentum = max(tail_momentum_raw.values()) or 1
 
     pair_counts: dict[tuple[int, int], int] = {}
     for draw in recent60:
@@ -1138,6 +1197,7 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
     max_interval_number = max(interval_number_score.values()) or 1
 
     zone_counts: dict[tuple[int, int, int, int], int] = {}
+    shape_counts: dict[tuple[tuple[int, int, int, int], int, int], int] = {}
     odd_counts: dict[int, int] = {}
     low_counts: dict[int, int] = {}
     sum_values = []
@@ -1149,16 +1209,23 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
         odd_counts[odd] = odd_counts.get(odd, 0) + 1
         low = sum(1 for n in numbers if n <= max_number // 2)
         low_counts[low] = low_counts.get(low, 0) + 1
+        shape = (zone, odd, low)
+        shape_counts[shape] = shape_counts.get(shape, 0) + 1
         sum_values.append(sum(numbers))
     sorted_sums = sorted(sum_values)
     center_sum = sorted_sums[len(sorted_sums) // 2] if sorted_sums else (max_number + 1) * 2.5
     low_sum = sorted_sums[max(0, int(len(sorted_sums) * 0.2) - 1)] if sorted_sums else center_sum - 24
     high_sum = sorted_sums[min(len(sorted_sums) - 1, int(len(sorted_sums) * 0.8))] if sorted_sums else center_sum + 24
     sum_width = max(18, (high_sum - low_sum) / 2)
+    max_streak = max(appearance_streak.values()) or 1
 
     number_scores = {}
     for n in range(1, max_number + 1):
         trend = max(0, recent30_freq[n] - older30_freq[n])
+        short_rate = safe_divide(recent6_freq[n], len(recent6))
+        mid_rate = safe_divide(recent36_freq[n], len(recent36))
+        long_rate = safe_divide(all_freq[n], len(ordered))
+        momentum = max(0.0, short_rate - long_rate) * 0.65 + max(0.0, mid_rate - long_rate) * 0.35
         number_scores[n] = {
             "heat": safe_divide(all_freq[n], max_all),
             "recent": safe_divide(recent12_freq[n], max_recent12),
@@ -1170,6 +1237,10 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
             "drag": safe_divide(drag_number_score[n], max_drag_number),
             "repeatSignal": safe_divide(repeat_counts[n], max_repeat_number) if n in latest_numbers else 0.0,
             "interval": safe_divide(interval_number_score[n], max_interval_number),
+            "multiWindow": safe_divide(multi_window_raw[n], max_multi_window),
+            "tailMomentum": safe_divide(tail_momentum_raw[n % 10], max_tail_momentum),
+            "streak": safe_divide(min(appearance_streak[n], 3), min(3, max_streak)),
+            "momentum": momentum,
         }
 
     return {
@@ -1177,6 +1248,7 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
         "numberScores": number_scores,
         "pairCounts": pair_counts,
         "zoneCounts": zone_counts,
+        "shapeCounts": shape_counts,
         "oddCounts": odd_counts,
         "lowCounts": low_counts,
         "centerSum": center_sum,
@@ -1191,6 +1263,10 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
         "repeatSourceTotals": repeat_source_totals,
         "intervalHitCounts": interval_hit_counts,
         "intervalFocusCounts": interval_focus_counts,
+        "multiWindowScores": multi_window_raw,
+        "tailMomentum": tail_momentum_raw,
+        "appearanceStreak": appearance_streak,
+        "windowSizes": [size for size, _ in window_specs if window_rows[size]],
     }
 
 
@@ -1221,6 +1297,7 @@ def combo_pattern_score(numbers: list[int], profile: dict[str, Any], model: dict
     low = sum(1 for n in sorted_numbers if n <= max_number // 2)
     repeat = len(set(sorted_numbers) & profile["latestNumbers"])
     tail_diversity = len({n % 10 for n in sorted_numbers}) / min(5, 10)
+    shape = (zone_signature(sorted_numbers), odd, low)
     scores = {
         "spread": combo_spread_score(sorted_numbers, max_number),
         "zone": signature_score(zone_signature(sorted_numbers), profile["zoneCounts"]),
@@ -1229,6 +1306,7 @@ def combo_pattern_score(numbers: list[int], profile: dict[str, Any], model: dict
         "sum": closeness(sum(sorted_numbers), profile["centerSum"], profile["sumWidth"]),
         "tail": tail_diversity,
         "repeat": closeness(repeat, profile["repeatTarget"], 1.6),
+        "shape": signature_score(shape, profile.get("shapeCounts", {})),
         "interval": max(
             (
                 (sum(1 for n in sorted_numbers if start <= n <= end) / 5)
@@ -1319,7 +1397,7 @@ def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_cou
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     distribution = {str(n): 0 for n in range(pick_count + 1)}
     rows = []
-    sample_size = min(18, max(0, len(ordered) - 25))
+    sample_size = min(24, max(0, len(ordered) - 25))
     for index in range(sample_size):
         target = ordered[index]
         training = ordered[index + 1 : index + 91]
@@ -1349,6 +1427,12 @@ def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_cou
     two_plus = sum(1 for row in rows if row["hits"] >= 2)
     three_plus = sum(1 for row in rows if row["hits"] >= 3)
     best_hit = max((row["hits"] for row in rows), default=0)
+    midpoint = max(1, tested // 2)
+    recent_segment = rows[:midpoint]
+    older_segment = rows[midpoint:]
+    recent_average = safe_divide(sum(row["hits"] for row in recent_segment), len(recent_segment))
+    older_average = safe_divide(sum(row["hits"] for row in older_segment), len(older_segment))
+    stability = max(0.0, round(100 - abs(recent_average - older_average) * 35, 1)) if older_segment else 0.0
     return {
         "testedCount": tested,
         "averageHit": round(hit_sum / tested, 2) if tested else 0,
@@ -1359,9 +1443,11 @@ def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_cou
         "threePlusCount": three_plus,
         "threePlusRate": round((three_plus / tested) * 100, 1) if tested else 0,
         "bestHit": best_hit,
+        "recentAverageHit": round(recent_average, 2),
+        "stability": stability,
         "distribution": distribution,
         "recentRows": rows[:10],
-        "method": f"每一期只用該期以前的歷史資料產生推薦，再與實際開獎比對；目前採用「{MODEL_PROFILES.get(profile_name, MODEL_PROFILES['balanced'])['label']}」。",
+        "method": f"每一期只用該期以前的歷史資料產生推薦，再與實際開獎比對；採用多視窗、版路支持度與近期穩定度；目前採用「{MODEL_PROFILES.get(profile_name, MODEL_PROFILES['balanced'])['label']}」。",
     }
 
 
@@ -1371,11 +1457,13 @@ def choose_model_profile(draws: list[dict[str, Any]], max_number: int = 39, pick
         backtest = rolling_backtest(draws, max_number=max_number, pick_count=pick_count, profile_name=profile_name)
         quality = (
             backtest["averageHit"] * 100
-            + backtest["onePlusRate"] * 0.55
-            + backtest["twoPlusRate"] * 1.35
-            + backtest["threePlusRate"] * 2.6
-            + backtest["bestHit"] * 14
-            + backtest["distribution"].get("2", 0) * 2.1
+            + backtest["recentAverageHit"] * 22
+            + backtest["onePlusRate"] * 0.45
+            + backtest["twoPlusRate"] * 1.25
+            + backtest["threePlusRate"] * 2.5
+            + backtest["bestHit"] * 10
+            + backtest["distribution"].get("2", 0) * 1.7
+            + backtest["stability"] * 0.22
         )
         results.append(
             {
@@ -1388,6 +1476,8 @@ def choose_model_profile(draws: list[dict[str, Any]], max_number: int = 39, pick
                 "threePlusRate": backtest["threePlusRate"],
                 "bestHit": backtest["bestHit"],
                 "testedCount": backtest["testedCount"],
+                "recentAverageHit": backtest["recentAverageHit"],
+                "stability": backtest["stability"],
             }
         )
     results.sort(key=lambda item: (-item["quality"], -item["averageHit"], -item["threePlusRate"], item["id"]))
@@ -1412,6 +1502,29 @@ def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profi
             window[0],
         ),
     )[:5]
+    max_multi_window = max(profile["multiWindowScores"].values()) or 1
+    multi_window_rows = sorted(
+        profile["multiWindowScores"].items(), key=lambda item: (-item[1], item[0])
+    )[:8]
+    tail_momentum_rows = sorted(
+        profile["tailMomentum"].items(), key=lambda item: (-item[1], item[0])
+    )[:5]
+    selected_model = MODEL_PROFILES.get(selected_profile, MODEL_PROFILES["balanced"])
+    signal_rows = []
+    for number, features in profile["numberScores"].items():
+        support_count = sum(
+            1
+            for key in ("multiWindow", "tailMomentum", "pair", "drag", "repeatSignal", "interval")
+            if features.get(key, 0) >= 0.55
+        )
+        signal_rows.append(
+            {
+                "number": number,
+                "score": round(score_number(number, profile, selected_model) * 100),
+                "support": support_count,
+            }
+        )
+    signal_rows.sort(key=lambda item: (-item["score"], -item["support"], item["number"]))
     transitions = [len(set(newer["numbers"]) & set(older["numbers"])) for newer, older in zip(ordered, ordered[1:])]
     repeat_avg = round(sum(transitions[:30]) / min(30, len(transitions)), 2) if transitions else 0
     latest = ordered[0]["numbers"] if ordered else []
@@ -1475,6 +1588,12 @@ def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profi
             "center": profile["centerSum"],
         },
         "spanAverage": round(sum(span_values) / len(span_values), 1) if span_values else 0,
+        "multiWindowNumbers": [
+            {"number": number, "score": round((score / max_multi_window) * 100)}
+            for number, score in multi_window_rows
+        ],
+        "tailMomentum": [{"tail": tail, "score": round(score * 100, 1)} for tail, score in tail_momentum_rows],
+        "signalLeaders": signal_rows[:8],
     }
 
 
@@ -1513,7 +1632,7 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
         "backtest": backtest,
         "modelProfiles": model_results,
         "patterns": patterns,
-        "note": "這是用熱度、近期動能、遺漏週期、尾數區間、奇偶大小、總和版路、鄰近號與滾動回測做的統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
+        "note": "這是用多視窗熱度、近期動能、遺漏週期、尾數動能、區間集中、奇偶大小、總和版路、拖牌連莊、鄰近號與穩定度回測做的交叉統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
     }
 
 
