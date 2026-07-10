@@ -41,8 +41,8 @@ const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
 const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v1";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
-const POLL_INTERVAL_MS = 4 * 60 * 1000;
-const FETCH_TIMEOUT_MS = 18000;
+const POLL_INTERVAL_MS = 2 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 60000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
 
