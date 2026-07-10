@@ -327,6 +327,73 @@ select {
   grid-column: span 2;
 }
 
+.latest-panel {
+  position: relative;
+  overflow: hidden;
+  border-color: #2f6c5d;
+  background: #123f36;
+  color: #f8f4e3;
+}
+
+.latest-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("/logo-sniper-star.svg?v=40") no-repeat right -54px center / 360px;
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.latest-panel::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 18px;
+  width: 72px;
+  height: 4px;
+  border-radius: 0 0 4px 4px;
+  background: var(--gold);
+}
+
+.latest-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.latest-panel .label {
+  color: #b9d0c5;
+}
+
+.latest-panel h2 {
+  color: #fffdf4;
+}
+
+.latest-panel .meta {
+  color: #d8e8df;
+}
+
+.latest-panel .meta span {
+  border-color: rgba(216, 232, 223, 0.28);
+  background: rgba(7, 33, 29, 0.38);
+}
+
+.latest-panel .balls {
+  min-height: 116px;
+  margin-top: 20px;
+  padding: 20px 14px;
+  border: 1px solid rgba(246, 211, 109, 0.34);
+  border-radius: 8px;
+  background: rgba(4, 27, 24, 0.58);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.latest-panel .ball {
+  border: 3px solid #f5d16b;
+  background: var(--gold);
+  color: #1f261c;
+  box-shadow: inset 0 -8px 14px rgba(92, 55, 0, 0.2), 0 6px 14px rgba(0, 0, 0, 0.22);
+}
+
 .subscription-panel {
   display: grid;
   grid-template-columns: minmax(220px, 0.85fr) minmax(320px, 1.15fr);
@@ -1500,6 +1567,16 @@ th {
   .hero-subtitle {
     margin-left: 62px;
     font-size: 12px;
+  }
+
+  .latest-panel::before {
+    right: -42px;
+    background-size: 270px;
+    opacity: 0.16;
+  }
+
+  .latest-panel .balls {
+    padding: 16px 8px;
   }
 
   .control-band {
