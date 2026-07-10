@@ -1583,7 +1583,7 @@ function renderPlans(subscription) {
           <ul class="features">
             ${plan.features.map((feature) => `<li>${feature}</li>`).join("")}
           </ul>
-          <p class="plan-disclaimer">本訂閱附加功能只輔助提高中獎機率，並非百發百中；所有選號仍以統計參考為主。</p>
+          <p class="plan-disclaimer">本訂閱附加功能只輔助提高中獎機率，並非百發百中；所有選號仍以統計參考為主。請理性投注，賽事每天有，祝您中獎。</p>
           <button class="plan-action" data-plan="pro" ${active ? "disabled" : ""}>${action}</button>
         </div>
       `;
