@@ -719,6 +719,13 @@ function scorePick(numbers, backtest) {
   const repeatBonus = Math.min(3, numbers.filter((number) => hints.repeatNumbers.includes(number)).length * 1.5);
   const intervalHits = hints.intervals.map((range) => numbers.filter((number) => number >= range.start && number <= range.end).length);
   const intervalBonus = Math.min(5, Math.max(0, ...intervalHits) * 1.6);
+  const multiWindowNumbers = new Set((state.analysis?.patterns?.multiWindowNumbers || []).slice(0, 8).map((item) => item.number));
+  const signalLeaders = new Set((state.analysis?.patterns?.signalLeaders || []).slice(0, 8).map((item) => item.number));
+  const crossSignalBonus = Math.min(
+    6,
+    numbers.filter((number) => multiWindowNumbers.has(number)).length * 0.8 +
+      numbers.filter((number) => signalLeaders.has(number)).length * 0.65,
+  );
   const shortCycleBonus =
     state.game === "ca-fantasy5"
       ? Math.min(
@@ -728,7 +735,7 @@ function scorePick(numbers, backtest) {
             numbers.filter((number) => hints.shortCycle.anchorNumbers.includes(number)).length * 0.9,
         )
       : 0;
-  const patternBonus = pairBonus + dragBonus + repeatBonus + intervalBonus + shortCycleBonus;
+  const patternBonus = pairBonus + dragBonus + repeatBonus + intervalBonus + shortCycleBonus + crossSignalBonus;
   const weights = normalizedWeights();
   const total = clamp(
     Math.round(heat * weights.heat + overdue * weights.overdue + spread * weights.spread + backtestScore * weights.backtest + patternBonus),
@@ -745,6 +752,7 @@ function scorePick(numbers, backtest) {
     pattern: Math.round(patternBonus),
     interval: Math.round(intervalBonus),
     shortCycle: Math.round(shortCycleBonus),
+    crossSignal: Math.round(crossSignalBonus),
     label,
   };
 }
@@ -757,6 +765,7 @@ function scoreDetails(score) {
     ["回測", score.backtest],
     ["區間", score.interval || 0],
     ["版路", score.pattern || 0],
+    ["交叉", score.crossSignal || 0],
   ]
     .map(
       ([label, value]) => `
@@ -839,8 +848,10 @@ function patternHints() {
         .map((item) => item.number),
     ),
   ];
+  const windowNumbers = (patterns.multiWindowNumbers || []).slice(0, 8).map((item) => item.number);
+  const signalNumbers = (patterns.signalLeaders || []).slice(0, 8).map((item) => item.number);
   const shortCycle = shortCycleProfile();
-  return { pairs, dragTargets, intervalNumbers, intervals, repeatNumbers, shortCycle };
+  return { pairs, dragTargets, intervalNumbers, intervals, repeatNumbers, windowNumbers, signalNumbers, shortCycle };
 }
 
 function candidatePool() {
@@ -866,7 +877,15 @@ function candidatePool() {
     state.game === "ca-fantasy5"
       ? [...hints.shortCycle.aroundNumbers, ...hints.shortCycle.edgeNumbers, ...hints.shortCycle.anchorNumbers]
       : [];
-  const patternNumbers = [...hints.pairs.flat(), ...hints.dragTargets, ...hints.intervalNumbers, ...hints.repeatNumbers, ...shortCycleNumbers];
+  const patternNumbers = [
+    ...hints.pairs.flat(),
+    ...hints.dragTargets,
+    ...hints.intervalNumbers,
+    ...hints.repeatNumbers,
+    ...hints.windowNumbers,
+    ...hints.signalNumbers,
+    ...shortCycleNumbers,
+  ];
   const pool = [...new Set([...hot, ...overdue, ...balanced, ...patternNumbers, ...tailFilteredUniverse])].filter(numberAllowed);
   if (pool.length >= 12) return pool;
   return filterByTail ? tailFilteredUniverse : Array.from({ length: 39 }, (_, i) => i + 1);
@@ -1439,6 +1458,18 @@ function renderPatterns(patterns, profiles = []) {
         .map((item, index) => chip(`${pad(item.number)} ${item.rate}%`, index < 2 ? "gold" : ""))
         .join("")
     : empty;
+  const multiWindowText = patterns.multiWindowNumbers?.length
+    ? patterns.multiWindowNumbers
+        .slice(0, 6)
+        .map((item, index) => chip(`${pad(item.number)} ${item.score}`, index < 2 ? "gold" : ""))
+        .join("")
+    : empty;
+  const signalText = patterns.signalLeaders?.length
+    ? patterns.signalLeaders
+        .slice(0, 6)
+        .map((item, index) => chip(`${pad(item.number)} ${item.support}項`, index < 2 ? "gold" : ""))
+        .join("")
+    : empty;
   const profileText = profiles
     .slice(0, 3)
     .map((item, index) => chip(`${item.label} 均${item.averageHit} / 高${item.bestHit}`, index === 0 ? "gold" : ""))
@@ -1465,6 +1496,16 @@ function renderPatterns(patterns, profiles = []) {
     <div>
       <span>可能連莊</span>
       <strong class="pattern-line-main">${repeatText}</strong>
+    </div>
+    <div class="pattern-soft">
+      <span>多窗口交集</span>
+      <strong class="pattern-line-main">${multiWindowText}</strong>
+      <em class="pattern-note">近 6、12、24、36、60、90 期重疊支持，避免只追單一熱點。</em>
+    </div>
+    <div class="pattern-soft">
+      <span>交叉支持</span>
+      <strong class="pattern-line-main">${signalText}</strong>
+      <em class="pattern-note">同時得到尾數、拖牌、連莊、區間等訊號的號碼優先。</em>
     </div>
     <div>
       <span>上期鄰近</span>
