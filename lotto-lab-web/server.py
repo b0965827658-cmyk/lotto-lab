@@ -132,6 +132,20 @@ def database_execute(sql: str, params: tuple[Any, ...] = ()) -> None:
             connection.close()
 
 
+def database_execute_many(sql: str, rows: list[tuple[Any, ...]]) -> None:
+    if not rows:
+        return
+    with database_lock:
+        connection = database_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.executemany(database_sql(sql), rows)
+            if not DATABASE_URL:
+                connection.commit()
+        finally:
+            connection.close()
+
+
 def database_query(sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
     with database_lock:
         connection = database_connection()
@@ -192,20 +206,13 @@ def persist_draw_history(draws: list[dict[str, Any]]) -> None:
     if not database_ready:
         return
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    rows = []
     for draw in draws:
         game, period, date = database_draw_key(draw)
         numbers = draw.get("numbers", [])
         if game not in ALLOWED_GAMES or not period or not date or not isinstance(numbers, list) or len(numbers) != 5:
             continue
-        database_execute(
-            """
-            INSERT INTO draw_history (game, period, date, name, numbers_json, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT (game, period, date) DO UPDATE SET
-                name = excluded.name,
-                numbers_json = excluded.numbers_json,
-                updated_at = excluded.updated_at
-            """,
+        rows.append(
             (
                 game,
                 period,
@@ -213,8 +220,19 @@ def persist_draw_history(draws: list[dict[str, Any]]) -> None:
                 str(draw.get("name", "")),
                 json.dumps(numbers, ensure_ascii=False),
                 now,
-            ),
+            )
         )
+    database_execute_many(
+        """
+        INSERT INTO draw_history (game, period, date, name, numbers_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (game, period, date) DO UPDATE SET
+            name = excluded.name,
+            numbers_json = excluded.numbers_json,
+            updated_at = excluded.updated_at
+        """,
+        rows,
+    )
 
 
 def load_database_history(game: str, limit: int = 5000) -> list[dict[str, Any]]:
