@@ -57,6 +57,7 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "300"))
+LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "30"))
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 MAX_JSON_BODY_BYTES = 64 * 1024
@@ -593,9 +594,10 @@ def auto_notify_loop() -> None:
         time.sleep(max(60, AUTO_NOTIFY_INTERVAL_SECONDS))
 
 
-def cached(key: str, loader):
+def cached(key: str, loader, ttl_seconds: int | None = None):
     hit = cache.get(key)
-    if hit and time.time() - hit.created_at < CACHE_TTL_SECONDS:
+    ttl = CACHE_TTL_SECONDS if ttl_seconds is None else max(1, ttl_seconds)
+    if hit and time.time() - hit.created_at < ttl:
         return hit.value
     value = loader()
     cache[key] = CacheItem(value=value, created_at=time.time())
@@ -728,7 +730,7 @@ def taiwan_latest() -> dict[str, Any]:
                 return history[0]
             raise
 
-    return cached("taiwan-latest", load)
+    return cached("taiwan-latest", load, LATEST_CACHE_TTL_SECONDS)
 
 
 def taiwan_dataset_rows() -> list[dict[str, str]]:
