@@ -9,3 +9,5 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.13
+      # Optional: set DATABASE_URL in Render after connecting a PostgreSQL database.
+      # Without it, the app uses SQLite locally and the legacy file fallback on Render.
