@@ -930,7 +930,7 @@ def california_history(limit: int = 180) -> list[dict[str, Any]]:
         return merge_draw_history(values, load_database_history("ca-fantasy5", 5000))
 
     try:
-        return cached("california-history", load)[:limit]
+        return cached("california-history", load, LATEST_CACHE_TTL_SECONDS)[:limit]
     except Exception:
         return load_database_history("ca-fantasy5", limit)
 
