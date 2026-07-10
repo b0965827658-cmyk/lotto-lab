@@ -203,7 +203,7 @@ def mark_notified(game: str, draw: dict[str, Any]) -> None:
 def latest_notification_message(game: str, lottery: dict[str, Any]) -> dict[str, Any]:
     numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
     return {
-        "title": f"{lottery.get('name', '狙擊摘星王')} 已開獎",
+        "title": f"{lottery.get('name', '摘星狙擊手')} 已開獎",
         "body": f"第 {lottery.get('period', '-')} 期：{numbers}",
         "url": f"/?game={game}",
         "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
@@ -1461,7 +1461,7 @@ def main():
     if AUTO_NOTIFY_ENABLED:
         threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
         print(f"auto notify enabled every {max(60, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
-    print(f"狙擊摘星王 running at http://{host}:{port}")
+    print(f"摘星狙擊手 running at http://{host}:{port}")
     server.serve_forever()
 
 
