@@ -1,42 +1,93 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="80" y1="42" x2="426" y2="468" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0b473c"/>
-      <stop offset=".52" stop-color="#11382f"/>
-      <stop offset="1" stop-color="#081f1c"/>
+    <linearGradient id="bg" x1="70" y1="34" x2="438" y2="476" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#061c1b"/>
+      <stop offset=".48" stop-color="#0d4d40"/>
+      <stop offset="1" stop-color="#020c0b"/>
     </linearGradient>
-    <linearGradient id="gold" x1="146" y1="82" x2="366" y2="408" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#fff1b8"/>
-      <stop offset=".45" stop-color="#e0a62e"/>
-      <stop offset="1" stop-color="#a56d18"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="50%" cy="36%" r="62%">
-      <stop stop-color="#ffffff" stop-opacity=".16"/>
-      <stop offset=".62" stop-color="#ffffff" stop-opacity=".04"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    <radialGradient id="glass" cx="50%" cy="46%" r="68%">
+      <stop stop-color="#1b7b61" stop-opacity=".52"/>
+      <stop offset=".52" stop-color="#0a3a32" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#000000" stop-opacity=".58"/>
     </radialGradient>
-    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#03100d" flood-opacity=".4"/>
+    <radialGradient id="ball" cx="34%" cy="24%" r="76%">
+      <stop stop-color="#fff4bf"/>
+      <stop offset=".38" stop-color="#e5a41f"/>
+      <stop offset=".72" stop-color="#c27b0d"/>
+      <stop offset="1" stop-color="#744106"/>
+    </radialGradient>
+    <radialGradient id="ballGlow" cx="50%" cy="50%" r="58%">
+      <stop stop-color="#ffe285" stop-opacity=".52"/>
+      <stop offset=".64" stop-color="#ffe285" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#ffe285" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="deepShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="20" stdDeviation="20" flood-color="#000705" flood-opacity=".58"/>
     </filter>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <circle cx="256" cy="214" r="196" fill="url(#glow)"/>
-  <path d="M118 372c58 42 218 53 276-1" fill="none" stroke="#f4d47c" stroke-width="5" stroke-linecap="round" opacity=".26"/>
-  <g filter="url(#softShadow)">
-    <path d="M152 307l36-130 64 63 46-102 38 104 68-60-44 128c-82 33-207 32-308-3z" fill="url(#gold)"/>
-    <path d="M171 333c58 20 125 24 196 0l-23 58H194l-23-58z" fill="url(#gold)"/>
-    <path d="M153 307c96 32 202 33 306 3" fill="none" stroke="#fff3c9" stroke-width="7" stroke-linecap="round" opacity=".45"/>
+  <g opacity=".34">
+    <g transform="translate(319.8 232.7)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">01</text></g>
+    <g transform="translate(325.3 268.2)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">02</text></g>
+    <g transform="translate(307.9 299.5)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">03</text></g>
+    <g transform="translate(280.2 322.3)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">04</text></g>
+    <g transform="translate(243.4 327.8)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">05</text></g>
+    <g transform="translate(208.5 312.8)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">06</text></g>
+    <g transform="translate(191.6 279.5)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">07</text></g>
+    <g transform="translate(187.1 243.9)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">08</text></g>
+    <g transform="translate(204.3 212.7)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">09</text></g>
+    <g transform="translate(229.8 184.2)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">10</text></g>
+    <g transform="translate(267.9 187.9)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">11</text></g>
+    <g transform="translate(305.7 196.7)"><circle r="18" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">12</text></g>
+    <g transform="translate(380.0 278.6)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">13</text></g>
+    <g transform="translate(357.2 329.6)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">14</text></g>
+    <g transform="translate(318.0 371.3)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">15</text></g>
+    <g transform="translate(261.8 386.8)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">16</text></g>
+    <g transform="translate(202.7 380.6)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">17</text></g>
+    <g transform="translate(152.7 346.2)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">18</text></g>
+    <g transform="translate(128.6 291.1)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">19</text></g>
+    <g transform="translate(128.9 232.9)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">20</text></g>
+    <g transform="translate(146.8 176.6)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">21</text></g>
+    <g transform="translate(193.8 140.2)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">22</text></g>
+    <g transform="translate(250.3 127.5)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">23</text></g>
+    <g transform="translate(306.9 137.0)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">24</text></g>
+    <g transform="translate(350.2 173.8)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">25</text></g>
+    <g transform="translate(386.1 220.2)"><circle r="16" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900" fill="#062722">26</text></g>
+    <g transform="translate(421.4 335.9)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">27</text></g>
+    <g transform="translate(360.4 409.5)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">28</text></g>
+    <g transform="translate(270.1 447.2)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">29</text></g>
+    <g transform="translate(172.6 428.6)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">30</text></g>
+    <g transform="translate(97.5 363.8)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">31</text></g>
+    <g transform="translate(64.6 270.1)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">32</text></g>
+    <g transform="translate(81.1 171.5)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">33</text></g>
+    <g transform="translate(145.7 93.7)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">34</text></g>
+    <g transform="translate(241.5 60.0)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">35</text></g>
+    <g transform="translate(338.0 86.3)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">36</text></g>
+    <g transform="translate(411.4 150.3)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">37</text></g>
+    <g transform="translate(440.4 242.4)"><circle r="15" fill="#f0b633"/><text y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#062722">38</text></g>
   </g>
-  <path d="M256 72l18 54 57 1-46 33 17 55-46-33-46 33 17-55-46-33 57-1 18-54z" fill="#fff6cf"/>
-  <g fill="#f7e19c">
-    <circle cx="159" cy="186" r="11"/>
-    <circle cx="210" cy="245" r="9"/>
-    <circle cx="305" cy="246" r="9"/>
-    <circle cx="360" cy="190" r="11"/>
+  <circle cx="256" cy="256" r="216" fill="url(#glass)"/>
+  <circle cx="256" cy="256" r="184" fill="none" stroke="#08231f" stroke-width="24" opacity=".82"/>
+  <g fill="none" stroke-linecap="round">
+    <circle cx="256" cy="256" r="168" stroke="#93d9c4" stroke-width="8" opacity=".5"/>
+    <circle cx="256" cy="256" r="118" stroke="#93d9c4" stroke-width="6" opacity=".38"/>
+    <circle cx="256" cy="256" r="62" stroke="#fff1c8" stroke-width="5" opacity=".58"/>
+    <path d="M256 54v78M256 380v78M54 256h78M380 256h78" stroke="#c9f4e6" stroke-width="10" opacity=".86"/>
+    <path d="M256 142v42M256 328v42M142 256h42M328 256h42" stroke="#fff1c8" stroke-width="9" opacity=".92"/>
+    <path d="M111 111l38 38M363 363l38 38M401 111l-38 38M149 363l-38 38" stroke="#5fb293" stroke-width="7" opacity=".35"/>
   </g>
-  <g fill="#0e372f" opacity=".94">
-    <circle cx="212" cy="332" r="13"/>
-    <circle cx="256" cy="338" r="13"/>
-    <circle cx="300" cy="332" r="13"/>
+  <g fill="none" stroke="#f4d264" stroke-width="9" stroke-linecap="round" opacity=".62">
+    <path d="M174 68a204 204 0 0 1 164 0"/>
+    <path d="M444 174a204 204 0 0 1 0 164"/>
+    <path d="M338 444a204 204 0 0 1-164 0"/>
+    <path d="M68 338a204 204 0 0 1 0-164"/>
   </g>
+  <g filter="url(#deepShadow)">
+    <circle cx="256" cy="256" r="108" fill="url(#ballGlow)"/>
+    <circle cx="256" cy="256" r="102" fill="url(#ball)"/>
+    <circle cx="256" cy="256" r="102" fill="none" stroke="#fff4c8" stroke-width="9" opacity=".5"/>
+    <circle cx="218" cy="213" r="32" fill="#fff8d2" opacity=".68"/>
+    <text x="256" y="291" text-anchor="middle" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="92" font-weight="900" fill="#082f2a">39</text>
+  </g>
+  <path d="M86 392c78 48 262 48 340 0" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity=".14"/>
 </svg>
