@@ -51,6 +51,8 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "300"))
+BACKTEST_FALLBACK_LIMIT = 90
+BACKTEST_MIN_HISTORY = 36
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 API_RATE_LIMITS = {
@@ -1178,21 +1180,56 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
     }
 
 
+def analyze_with_stable_backtest(
+    draws: list[dict[str, Any]],
+    backtest_draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> dict[str, Any]:
+    analysis = analyze(draws, max_number=max_number, pick_count=pick_count)
+    current_backtest = analysis.get("backtest", {})
+    if current_backtest.get("testedCount") or len(backtest_draws) < BACKTEST_MIN_HISTORY:
+        return analysis
+
+    selected_profile, fallback_backtest, model_results = choose_model_profile(
+        backtest_draws[:BACKTEST_FALLBACK_LIMIT],
+        max_number=max_number,
+        pick_count=pick_count,
+    )
+    if not fallback_backtest.get("testedCount"):
+        return analysis
+
+    analysis["backtest"] = fallback_backtest
+    analysis["modelProfiles"] = model_results
+    analysis["patterns"]["selectedProfile"] = selected_profile
+    analysis["patterns"]["selectedLabel"] = MODEL_PROFILES.get(selected_profile, MODEL_PROFILES["balanced"])["label"]
+    analysis["backtest"]["method"] = (
+        f"目前選擇近 {len(draws)} 期，短期樣本不足以單獨回測；"
+        f"模型回測已自動改用近 {min(len(backtest_draws), BACKTEST_FALLBACK_LIMIT)} 期穩定樣本。"
+        f"{fallback_backtest.get('method', '')}"
+    )
+    return analysis
+
+
 def build_payload(game: str, limit: int) -> dict[str, Any]:
     if game == "tw539":
         latest = taiwan_latest()
-        history = taiwan_history(limit)
+        fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
+        history = taiwan_history(fetch_limit)
         if history and not same_draw(history[0], latest):
             history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
         draws = history[:limit]
-        analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
+        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
+        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
         return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
     if game == "ca-fantasy5":
-        history = california_history(limit)
+        fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
+        history = california_history(fetch_limit)
         if not history:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         draws = history[:limit]
-        analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
+        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
+        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
         return {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
     raise ValueError("unknown game")
 
