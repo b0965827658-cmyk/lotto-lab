@@ -10,6 +10,7 @@ import random
 import re
 import socket
 import ssl
+import sqlite3
 import threading
 import time
 import posixpath
@@ -28,6 +29,11 @@ try:
 except Exception:  # pragma: no cover - optional production dependency
     WebPushException = None
     webpush = None
+
+try:
+    import psycopg
+except Exception:  # pragma: no cover - optional when using local SQLite
+    psycopg = None
 
 _ORIGINAL_GETADDRINFO = socket.getaddrinfo
 
@@ -71,6 +77,8 @@ PUSH_CONTACT_EMAIL = os.environ.get("LOTTO_PUSH_CONTACT_EMAIL", "admin@example.c
 NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
 SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", ROOT / "data" / "push_subscriptions.json"))
 NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", ROOT / "data" / "notify_state.json"))
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+SQLITE_DATABASE_FILE = Path(os.environ.get("LOTTO_SQLITE_PATH", ROOT / "data" / "lotto.sqlite3"))
 AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "180"))
 AUTO_NOTIFY_GAMES = [
@@ -89,6 +97,169 @@ class CacheItem:
 cache: dict[str, CacheItem] = {}
 rate_limit_hits: dict[tuple[str, str], list[float]] = {}
 notify_lock = threading.Lock()
+database_ready = False
+database_lock = threading.RLock()
+
+
+def database_backend() -> str:
+    return "postgres" if DATABASE_URL else "sqlite"
+
+
+def database_connection():
+    if DATABASE_URL:
+        if psycopg is None:
+            raise RuntimeError("DATABASE_URL 已設定，但尚未安裝 psycopg")
+        return psycopg.connect(DATABASE_URL, autocommit=True)
+    SQLITE_DATABASE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(SQLITE_DATABASE_FILE, timeout=20)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def database_sql(sql: str) -> str:
+    return sql.replace("?", "%s") if DATABASE_URL else sql
+
+
+def database_execute(sql: str, params: tuple[Any, ...] = ()) -> None:
+    with database_lock:
+        connection = database_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(database_sql(sql), params)
+            if not DATABASE_URL:
+                connection.commit()
+        finally:
+            connection.close()
+
+
+def database_query(sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+    with database_lock:
+        connection = database_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(database_sql(sql), params)
+            return [tuple(row) for row in cursor.fetchall()]
+        finally:
+            connection.close()
+
+
+def init_database() -> None:
+    global database_ready
+    database_execute(
+        """
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id TEXT PRIMARY KEY,
+            subscription_json TEXT NOT NULL,
+            game TEXT NOT NULL,
+            saved_picks_json TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    database_execute(
+        """
+        CREATE TABLE IF NOT EXISTS notify_state (
+            game TEXT PRIMARY KEY,
+            draw_key TEXT NOT NULL
+        )
+        """
+    )
+    database_execute(
+        """
+        CREATE TABLE IF NOT EXISTS draw_history (
+            game TEXT NOT NULL,
+            period TEXT NOT NULL,
+            date TEXT NOT NULL,
+            name TEXT NOT NULL,
+            numbers_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (game, period, date)
+        )
+        """
+    )
+    database_ready = True
+
+
+def database_draw_key(draw: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(draw.get("game", "")).strip(),
+        str(draw.get("period", "")).strip(),
+        str(draw.get("date", "")).strip(),
+    )
+
+
+def persist_draw_history(draws: list[dict[str, Any]]) -> None:
+    if not database_ready:
+        return
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for draw in draws:
+        game, period, date = database_draw_key(draw)
+        numbers = draw.get("numbers", [])
+        if game not in ALLOWED_GAMES or not period or not date or not isinstance(numbers, list) or len(numbers) != 5:
+            continue
+        database_execute(
+            """
+            INSERT INTO draw_history (game, period, date, name, numbers_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (game, period, date) DO UPDATE SET
+                name = excluded.name,
+                numbers_json = excluded.numbers_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                game,
+                period,
+                date,
+                str(draw.get("name", "")),
+                json.dumps(numbers, ensure_ascii=False),
+                now,
+            ),
+        )
+
+
+def load_database_history(game: str, limit: int = 5000) -> list[dict[str, Any]]:
+    if not database_ready or game not in ALLOWED_GAMES:
+        return []
+    rows = database_query(
+        """
+        SELECT game, period, date, name, numbers_json
+        FROM draw_history
+        WHERE game = ?
+        ORDER BY date DESC, period DESC
+        LIMIT ?
+        """,
+        (game, max(1, min(limit, 10000))),
+    )
+    history = []
+    for row in rows:
+        try:
+            numbers = json.loads(row[4])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(numbers, list) or len(numbers) != 5:
+            continue
+        history.append(
+            {
+                "game": row[0],
+                "period": row[1],
+                "date": row[2],
+                "name": row[3],
+                "numbers": normalize_numbers(numbers),
+            }
+        )
+    return history
+
+
+def merge_draw_history(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for group in groups:
+        for draw in group:
+            key = database_draw_key(draw)
+            if all(key):
+                merged[key] = draw
+    values = list(merged.values())
+    values.sort(key=lambda item: (item.get("date", ""), str(item.get("period", ""))), reverse=True)
+    return values
 
 
 def clamp_int(value: str, default: int, minimum: int, maximum: int) -> int:
@@ -143,15 +314,61 @@ def sanitize_saved_picks(value: Any) -> list[dict[str, Any]]:
 
 def load_push_subscriptions() -> list[dict[str, Any]]:
     try:
+        if database_ready:
+            rows = database_query(
+                "SELECT id, subscription_json, game, saved_picks_json, updated_at FROM push_subscriptions"
+            )
+            if rows:
+                subscriptions = []
+                for row in rows:
+                    try:
+                        subscription = json.loads(row[1])
+                        saved_picks = json.loads(row[3])
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        continue
+                    subscriptions.append(
+                        {
+                            "id": row[0],
+                            "subscription": subscription,
+                            "game": row[2],
+                            "savedPicks": sanitize_saved_picks(saved_picks),
+                            "updatedAt": row[4],
+                        }
+                    )
+                return subscriptions
         if not SUBSCRIPTIONS_FILE.exists():
             return []
         payload = json.loads(SUBSCRIPTIONS_FILE.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, list) else []
+        subscriptions = payload if isinstance(payload, list) else []
+        if database_ready and subscriptions:
+            save_push_subscriptions(subscriptions)
+        return subscriptions
     except Exception:
         return []
 
 
 def save_push_subscriptions(subscriptions: list[dict[str, Any]]) -> None:
+    if database_ready:
+        database_execute("DELETE FROM push_subscriptions")
+        for item in subscriptions:
+            subscription = item.get("subscription", {})
+            if not isinstance(subscription, dict) or not subscription.get("endpoint"):
+                continue
+            database_execute(
+                """
+                INSERT INTO push_subscriptions
+                    (id, subscription_json, game, saved_picks_json, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    str(item.get("id", subscription_id(subscription))),
+                    json.dumps(subscription, ensure_ascii=False),
+                    str(item.get("game", "all")),
+                    json.dumps(sanitize_saved_picks(item.get("savedPicks", [])), ensure_ascii=False),
+                    str(item.get("updatedAt", datetime.now(timezone.utc).isoformat(timespec="seconds"))),
+                ),
+            )
+        return
     SUBSCRIPTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SUBSCRIPTIONS_FILE.write_text(json.dumps(subscriptions, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -208,15 +425,31 @@ def send_push_message(subscription: dict[str, Any], payload: dict[str, Any]) -> 
 
 def load_notify_state() -> dict[str, Any]:
     try:
+        if database_ready:
+            rows = database_query("SELECT game, draw_key FROM notify_state")
+            if rows:
+                return {str(row[0]): str(row[1]) for row in rows}
         if not NOTIFY_STATE_FILE.exists():
             return {}
         payload = json.loads(NOTIFY_STATE_FILE.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, dict) else {}
+        state = payload if isinstance(payload, dict) else {}
+        if database_ready and state:
+            save_notify_state(state)
+        return state
     except Exception:
         return {}
 
 
 def save_notify_state(state: dict[str, Any]) -> None:
+    if database_ready:
+        database_execute("DELETE FROM notify_state")
+        for game, draw_key in state.items():
+            if game in ALLOWED_GAMES and draw_key:
+                database_execute(
+                    "INSERT INTO notify_state (game, draw_key) VALUES (?, ?)",
+                    (game, str(draw_key)),
+                )
+        return
     NOTIFY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     NOTIFY_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -563,24 +796,31 @@ def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
     if len(fast_history) >= min(limit, 20):
         return fast_history[:limit]
     bundled = bundled_taiwan_history()
-    if bundled:
-        latest = taiwan_latest()
-        if latest and all(draw.get("period") != latest.get("period") for draw in bundled):
-            bundled = [latest, *bundled]
-        return bundled[:limit]
+    stored = load_database_history("tw539", max(limit, 5000))
+    if bundled or stored:
+        combined = merge_draw_history(bundled, stored)
+        try:
+            latest = taiwan_latest()
+        except Exception:
+            latest = None
+        if latest:
+            combined = merge_draw_history([latest], combined)
+        return combined[:limit]
     try:
         rows = taiwan_dataset_rows()
         latest_row = max(rows, key=lambda row: int(row.get("資料所屬年度", "0") or "0"))
         latest_year = int(latest_row.get("資料所屬年度", "0") or "0") + 1911
         return taiwan_year_history(latest_year)[:limit]
     except Exception:
-        return pilio_taiwan_history(limit)
+        return stored or pilio_taiwan_history(limit)
 
 
 def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", number: int | None = None, limit: int = 2000) -> dict[str, Any]:
     bundled = bundled_taiwan_history()
-    if bundled:
-        available_years = sorted({int(draw["date"][:4]) for draw in bundled if draw.get("date")})
+    stored = load_database_history("tw539", 10000)
+    combined_history = merge_draw_history(bundled, stored)
+    if combined_history:
+        available_years = sorted({int(draw["date"][:4]) for draw in combined_history if draw.get("date")})
     else:
         rows = taiwan_dataset_rows()
         available_years = sorted(int(row.get("資料所屬年度", "0") or "0") + 1911 for row in rows)
@@ -589,8 +829,8 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
     start = max(min(from_year, to_year), available_years[0])
     end = min(max(from_year, to_year), available_years[-1])
     searched_years = list(range(start, end + 1))
-    if bundled:
-        draws = [draw for draw in bundled if draw.get("date") and start <= int(draw["date"][:4]) <= end]
+    if combined_history:
+        draws = [draw for draw in combined_history if draw.get("date") and start <= int(draw["date"][:4]) <= end]
         try:
             latest = taiwan_latest()
             latest_year = int(latest["date"][:4]) if latest.get("date") else None
@@ -610,6 +850,7 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
     if query or number:
         draws = filter_history_rows(draws, query, number)
     draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    persist_draw_history(draws)
     return {
         "history": public_draws(draws[:limit]),
         "total": len(draws),
@@ -665,9 +906,13 @@ def california_history(limit: int = 180) -> list[dict[str, Any]]:
         dedup = {item["period"]: item for item in parsed}
         values = list(dedup.values())
         values.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
-        return values
+        persist_draw_history(values)
+        return merge_draw_history(values, load_database_history("ca-fantasy5", 5000))
 
-    return cached("california-history", load)[:limit]
+    try:
+        return cached("california-history", load)[:limit]
+    except Exception:
+        return load_database_history("ca-fantasy5", limit)
 
 
 def search_california_history(from_year: int, to_year: int, keyword: str = "", number: int | None = None, limit: int = 2000) -> dict[str, Any]:
@@ -681,6 +926,7 @@ def search_california_history(from_year: int, to_year: int, keyword: str = "", n
     rows = [draw for draw in draws if draw.get("date") and start <= int(draw["date"][:4]) <= end]
     rows = filter_history_rows(rows, keyword, number)
     rows.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    persist_draw_history(rows)
     return {
         "history": public_draws(rows[:limit]),
         "total": len(rows),
@@ -1289,6 +1535,7 @@ def build_payload(game: str, limit: int) -> dict[str, Any]:
         history = taiwan_history(fetch_limit)
         if history and not same_draw(history[0], latest):
             history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
+        persist_draw_history([latest, *history])
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
         analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
@@ -1298,6 +1545,7 @@ def build_payload(game: str, limit: int) -> dict[str, Any]:
         history = california_history(fetch_limit)
         if not history:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
+        persist_draw_history(history)
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
         analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
@@ -1396,6 +1644,11 @@ class Handler(SimpleHTTPRequestHandler):
                         "autoNotifyGames": AUTO_NOTIFY_GAMES,
                         "publicKey": PUSH_PUBLIC_KEY,
                         "subscriberCount": len(load_push_subscriptions()),
+                    },
+                    "storage": {
+                        "backend": database_backend() if database_ready else "file-fallback",
+                        "databaseReady": database_ready,
+                        "persistent": bool(DATABASE_URL) or not bool(os.environ.get("RENDER_SERVICE_ID")),
                     },
                 }
             )
@@ -1532,6 +1785,11 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     port = int(os.environ.get("PORT", "8787"))
     host = os.environ.get("HOST", "0.0.0.0")
+    try:
+        init_database()
+        print(f"storage enabled: {database_backend()}")
+    except Exception as exc:
+        print(f"storage unavailable, using legacy file fallback: {exc}")
     server = ThreadingHTTPServer((host, port), Handler)
     if AUTO_NOTIFY_ENABLED:
         threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
