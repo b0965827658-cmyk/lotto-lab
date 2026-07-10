@@ -306,6 +306,26 @@ select {
   color: rgba(255, 255, 255, 0.74);
 }
 
+.subscription-disclaimer,
+.plan-disclaimer {
+  margin: 12px 0 0;
+  border: 1px solid rgba(214, 152, 34, 0.42);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(214, 152, 34, 0.11);
+  color: #385148;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.55;
+}
+
+.plan-disclaimer {
+  margin-bottom: 12px;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(214, 152, 34, 0.16);
+  border-color: rgba(214, 152, 34, 0.5);
+}
+
 .plan-action {
   width: 100%;
   min-height: 40px;
