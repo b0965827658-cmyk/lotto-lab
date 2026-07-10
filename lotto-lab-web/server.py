@@ -55,6 +55,7 @@ BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
+MAX_SAVED_PICKS_PER_SUBSCRIPTION = 20
 API_RATE_LIMITS = {
     "/api/lottery": (90, 60),
     "/api/history-search": (45, 60),
@@ -114,6 +115,32 @@ def validate_push_subscription(subscription: dict[str, Any]) -> None:
         raise ValueError("缺少有效的通知金鑰")
 
 
+def sanitize_saved_picks(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    clean: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in value[:MAX_SAVED_PICKS_PER_SUBSCRIPTION]:
+        if not isinstance(item, dict):
+            continue
+        game = str(item.get("game", "")).strip()
+        raw_numbers = item.get("numbers", [])
+        if game not in ALLOWED_GAMES or not isinstance(raw_numbers, list) or len(raw_numbers) != 5:
+            continue
+        try:
+            numbers = sorted({int(number) for number in raw_numbers})
+        except (TypeError, ValueError):
+            continue
+        if len(numbers) != 5 or any(number < 1 or number > 39 for number in numbers):
+            continue
+        key = f"{game}:{','.join(str(number) for number in numbers)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        clean.append({"game": game, "numbers": numbers})
+    return clean
+
+
 def load_push_subscriptions() -> list[dict[str, Any]]:
     try:
         if not SUBSCRIPTIONS_FILE.exists():
@@ -134,7 +161,7 @@ def subscription_id(subscription: dict[str, Any]) -> str:
     return hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
 
 
-def upsert_push_subscription(subscription: dict[str, Any], game: str = "all") -> int:
+def upsert_push_subscription(subscription: dict[str, Any], game: str = "all", saved_picks: Any = None) -> int:
     if not isinstance(subscription, dict) or not subscription.get("endpoint"):
         raise ValueError("缺少有效的通知訂閱資料")
     validate_push_subscription(subscription)
@@ -143,7 +170,13 @@ def upsert_push_subscription(subscription: dict[str, Any], game: str = "all") ->
         raise ValueError("通知訂閱數已達上限")
     item_id = subscription_id(subscription)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    record = {"id": item_id, "subscription": subscription, "game": game if game in ALLOWED_GAMES else "all", "updatedAt": now}
+    record = {
+        "id": item_id,
+        "subscription": subscription,
+        "game": game if game in ALLOWED_GAMES else "all",
+        "savedPicks": sanitize_saved_picks(saved_picks),
+        "updatedAt": now,
+    }
     kept = [item for item in subscriptions if item.get("id") != item_id]
     kept.append(record)
     save_push_subscriptions(kept)
@@ -200,17 +233,51 @@ def mark_notified(game: str, draw: dict[str, Any]) -> None:
     save_notify_state(state)
 
 
-def latest_notification_message(game: str, lottery: dict[str, Any]) -> dict[str, Any]:
-    numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
+def star_hit_message(hit_numbers: list[int]) -> str:
+    numbers = "、".join(f"{number:02d}" for number in hit_numbers)
+    count = len(hit_numbers)
+    if count == 1:
+        return f"恭喜（{numbers}）摘下一星"
+    if count == 2:
+        return f"恭喜（{numbers}）摘下二星"
+    if count == 3:
+        return f"恭喜（{numbers}）太神了！摘下三星"
+    if count == 4:
+        return f"恭喜（{numbers}）你超神了！摘下四星"
+    if count == 5:
+        return f"恭喜（{numbers}）你已成為最強狙擊手！五顆通通拿下"
+    return f"本期命中 {count} 顆：{numbers}"
+
+
+def latest_notification_message(game: str, lottery: dict[str, Any], saved_picks: Any = None) -> dict[str, Any]:
+    winning_numbers = lottery.get("numbers", [])
+    numbers = "、".join(f"{number:02d}" for number in winning_numbers)
+    watched_picks = [pick for pick in sanitize_saved_picks(saved_picks) if pick.get("game") == game]
+    outcomes = []
+    for pick in watched_picks:
+        hit_numbers = [number for number in pick["numbers"] if number in winning_numbers]
+        if hit_numbers:
+            outcomes.append(star_hit_message(hit_numbers))
+    if outcomes:
+        title = f"{lottery.get('name', '摘星狙擊手')} 命中通知"
+        body = " ｜ ".join(outcomes[:3])
+        if len(outcomes) > 3:
+            body += f"；另有 {len(outcomes) - 3} 組號碼命中。"
+    elif watched_picks:
+        title = f"{lottery.get('name', '摘星狙擊手')} 對獎結果"
+        body = f"第 {lottery.get('period', '-')} 期已開獎：{numbers}；你儲存的 {len(watched_picks)} 組號碼本期未命中。"
+    else:
+        title = f"{lottery.get('name', '摘星狙擊手')} 已開獎"
+        body = f"第 {lottery.get('period', '-')} 期：{numbers}"
     return {
-        "title": f"{lottery.get('name', '摘星狙擊手')} 已開獎",
-        "body": f"第 {lottery.get('period', '-')} 期：{numbers}",
+        "title": title,
+        "body": body,
         "url": f"/?game={game}",
         "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
     }
 
 
-def broadcast_push_message(message: dict[str, Any]) -> tuple[int, int, int]:
+def broadcast_push_message(message: dict[str, Any] | None, message_factory=None) -> tuple[int, int, int]:
     subscriptions = load_push_subscriptions()
     sent = 0
     failed = 0
@@ -218,7 +285,8 @@ def broadcast_push_message(message: dict[str, Any]) -> tuple[int, int, int]:
     for item in subscriptions:
         subscription = item.get("subscription", {})
         try:
-            send_push_message(subscription, message)
+            payload = message_factory(item) if message_factory else message
+            send_push_message(subscription, payload or {})
             sent += 1
             alive.append(item)
         except Exception as exc:
@@ -241,7 +309,10 @@ def notify_latest_game(game: str) -> dict[str, Any]:
     if already_notified(game, lottery):
         return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": len(load_push_subscriptions()), "skipped": True, "message": "這一期已通知過"}
     message = latest_notification_message(game, lottery)
-    sent, failed, alive = broadcast_push_message(message)
+    sent, failed, alive = broadcast_push_message(
+        message,
+        lambda item: latest_notification_message(game, lottery, item.get("savedPicks", [])),
+    )
     if sent > 0:
         mark_notified(game, lottery)
     return {"ok": True, "game": game, "sent": sent, "failed": failed, "subscriberCount": alive, "message": message}
@@ -1380,8 +1451,12 @@ class Handler(SimpleHTTPRequestHandler):
                 payload = self.read_json_body()
                 action = payload.get("action", "subscribe")
                 subscription = payload.get("subscription", {})
-                if action == "subscribe":
-                    count = upsert_push_subscription(subscription, payload.get("game", "all"))
+                if action in {"subscribe", "sync-picks"}:
+                    count = upsert_push_subscription(
+                        subscription,
+                        payload.get("game", "all"),
+                        payload.get("savedPicks", []),
+                    )
                     self.send_json({"ok": True, "subscriberCount": count})
                     return
                 if action == "unsubscribe":
