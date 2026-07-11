@@ -1254,9 +1254,11 @@ function renderFlagshipPick() {
         .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
         .join("、")
     : "多窗口交叉驗證";
-  els.flagshipBalls.innerHTML = balls(numbers);
+  const [confidenceNumber, ...outerNumbers] = numbers;
+  els.flagshipBalls.innerHTML = `${balls(outerNumbers)}<span class="ball flagship-core-ball">${pad(confidenceNumber)}</span>`;
   els.flagshipMeta.innerHTML = `
     <span class="flagship-window-note">旗艦專屬近 ${state.analysis?.flagshipAnalysisLimit || state.flagshipLimit} 期分析</span>
+    <span class="flagship-core-note">星心主推 ${pad(confidenceNumber)}：本組最高信心號碼</span>
     <span>模型評分最高 6 碼候選池</span>
     <span>研究支持：${evidenceText}</span>
     <span>僅供統計參考，不代表保證中獎</span>

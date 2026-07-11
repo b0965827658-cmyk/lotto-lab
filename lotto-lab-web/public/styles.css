@@ -702,7 +702,7 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   pointer-events: none;
   transform: translate(-50%, -50%);
   filter: drop-shadow(0 0 10px rgba(22, 106, 82, 0.16));
-  clip-path: polygon(50% 0, 100% 86%, 0 86%);
+  clip-path: polygon(50% 0, 61.8% 35%, 97.6% 35%, 68.2% 57%, 79.4% 91%, 50% 70%, 20.6% 91%, 31.8% 57%, 2.4% 35%, 38.2% 35%);
 }
 
 .flagship-balls::before {
@@ -711,7 +711,8 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 
 .flagship-balls::after {
   background: rgba(22, 106, 82, 0.16);
-  transform: translate(-50%, -50%) rotate(180deg);
+  width: min(60%, 194px);
+  transform: translate(-50%, -50%);
 }
 
 .flagship-balls .ball {
@@ -732,29 +733,39 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 }
 
 .flagship-balls .ball:nth-child(2) {
-  right: 7%;
+  right: 5%;
   top: 46px;
 }
 
 .flagship-balls .ball:nth-child(3) {
-  right: 7%;
-  bottom: 28px;
+  right: 15%;
+  bottom: 8px;
 }
 
 .flagship-balls .ball:nth-child(4) {
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
+  left: 15%;
+  bottom: 8px;
 }
 
 .flagship-balls .ball:nth-child(5) {
-  left: 7%;
-  bottom: 28px;
+  left: 5%;
+  top: 46px;
 }
 
 .flagship-balls .ball:nth-child(6) {
-  left: 7%;
-  top: 46px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.flagship-balls .ball.flagship-core-ball {
+  width: 60px;
+  height: 60px;
+  background: var(--green);
+  color: #fff;
+  border-color: var(--gold);
+  outline-color: rgba(22, 106, 82, 0.34);
+  box-shadow: 0 0 0 5px rgba(214, 152, 34, 0.16), 0 12px 24px rgba(22, 106, 82, 0.24), inset 0 -8px 14px rgba(0, 0, 0, 0.16);
 }
 
 .flagship-meta {
@@ -762,6 +773,11 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 }
 
 .flagship-window-note {
+  font-weight: 900;
+}
+
+.flagship-core-note {
+  color: var(--green);
   font-weight: 900;
 }
 
@@ -1884,6 +1900,11 @@ th {
     width: min(100%, 350px);
     height: 224px;
     min-height: 224px;
+  }
+
+  .flagship-balls .ball.flagship-core-ball {
+    width: 54px;
+    height: 54px;
   }
 
   .save-button {
