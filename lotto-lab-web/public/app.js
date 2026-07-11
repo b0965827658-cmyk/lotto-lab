@@ -1255,11 +1255,16 @@ function renderFlagshipPick() {
         .join("、")
     : "多窗口交叉驗證";
   const [confidenceNumber, ...outerNumbers] = numbers;
-  els.flagshipBalls.innerHTML = `${balls(outerNumbers)}<span class="ball flagship-core-ball">${pad(confidenceNumber)}</span>`;
+  els.flagshipBalls.innerHTML = `
+    <div class="flagship-star-shape" role="img" aria-label="五芒星摘星六碼">
+      ${balls(outerNumbers)}
+      <span class="ball flagship-core-ball">${pad(confidenceNumber)}</span>
+    </div>
+  `;
   els.flagshipMeta.innerHTML = `
     <span class="flagship-window-note">旗艦專屬近 ${state.analysis?.flagshipAnalysisLimit || state.flagshipLimit} 期分析</span>
     <span class="flagship-core-note">星心主推 ${pad(confidenceNumber)}：本組最高信心號碼</span>
-    <span>模型評分最高 6 碼候選池</span>
+    <span>旗艦摘星六碼：模型高分候選池</span>
     <span>研究支持：${evidenceText}</span>
     <span>僅供統計參考，不代表保證中獎</span>
   `;
