@@ -1518,6 +1518,12 @@ body[data-plan="free"] .pro-required {
   text-indent: 0;
 }
 
+/* The backtest card gives all spans block layout; restore the ball's centered grid. */
+.backtest-card .mini-ball {
+  display: grid;
+  place-items: center;
+}
+
 .bar {
   height: 9px;
   border-radius: 999px;
