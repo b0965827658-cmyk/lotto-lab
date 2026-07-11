@@ -60,6 +60,9 @@ CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "300"))
 LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "30"))
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
+BACKTEST_DEFAULT_LIMIT = 24
+BACKTEST_MIN_LIMIT = 7
+BACKTEST_MAX_LIMIT = 365
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 MAX_SAVED_PICKS_PER_SUBSCRIPTION = 20
@@ -813,7 +816,7 @@ def bundled_taiwan_history() -> list[dict[str, Any]]:
 
 def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
     fast_history = pilio_taiwan_history(limit)
-    if len(fast_history) >= min(limit, 20):
+    if len(fast_history) >= limit:
         return fast_history[:limit]
     bundled = bundled_taiwan_history()
     stored = load_database_history("tw539", max(limit, 5000))
@@ -1334,9 +1337,16 @@ def model_recommendation(
     pick_count: int = 5,
     seed_label: str = "",
     profile_name: str = "balanced",
+    candidate_budget: int | None = None,
 ) -> list[int]:
     if profile_name == "classic":
-        return classic_recommendation(draws, max_number=max_number, pick_count=pick_count, seed_label=seed_label)
+        return classic_recommendation(
+            draws,
+            max_number=max_number,
+            pick_count=pick_count,
+            seed_label=seed_label,
+            candidate_budget=candidate_budget,
+        )
     model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
     profile = pattern_profile(draws, max_number)
     number_scores = {}
@@ -1347,7 +1357,7 @@ def model_recommendation(
     rng = random.Random(f"lotto-lab:{profile_name}:{seed_label}:{','.join(map(str, pool))}")
     candidates: set[tuple[int, ...]] = set()
     candidates.add(tuple(sorted(pool[:pick_count])))
-    for _ in range(420):
+    for _ in range(candidate_budget or 420):
         weighted = sorted(pool, key=lambda n: number_scores[n] + rng.random() * 0.28, reverse=True)
         candidates.add(tuple(sorted(weighted[:pick_count])))
         if len(pool) >= pick_count:
@@ -1361,7 +1371,13 @@ def model_recommendation(
     return list(best)
 
 
-def classic_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5, seed_label: str = "") -> list[int]:
+def classic_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    seed_label: str = "",
+    candidate_budget: int | None = None,
+) -> list[int]:
     stats = number_stats(draws, max_number)
     frequency = stats["frequency"]
     recent_frequency = stats["recentFrequency"]
@@ -1380,7 +1396,7 @@ def classic_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pi
     rng = random.Random(f"lotto-lab:{seed_label}:{','.join(map(str, pool))}")
     candidates: set[tuple[int, ...]] = set()
     candidates.add(tuple(sorted(pool[:pick_count])))
-    for _ in range(260):
+    for _ in range(candidate_budget or 260):
         weighted = sorted(pool, key=lambda n: number_scores[n] + rng.random() * 0.34, reverse=True)
         candidates.add(tuple(sorted(weighted[:pick_count])))
         if len(pool) >= pick_count:
@@ -1456,12 +1472,20 @@ def short_term_consensus(
     }
 
 
-def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5, profile_name: str = "balanced") -> dict[str, Any]:
+def rolling_backtest(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    profile_name: str = "balanced",
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+) -> dict[str, Any]:
     ordered = list(draws)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     distribution = {str(n): 0 for n in range(pick_count + 1)}
     rows = []
-    sample_size = min(24, max(0, len(ordered) - 25))
+    requested_limit = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
+    sample_size = min(requested_limit, max(0, len(ordered) - 25))
+    candidate_budget = 420 if requested_limit <= 35 else 220 if requested_limit <= 90 else 100 if requested_limit <= 180 else 60
     for index in range(sample_size):
         target = ordered[index]
         training = ordered[index + 1 : index + 91]
@@ -1473,6 +1497,7 @@ def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_cou
             pick_count=pick_count,
             seed_label=f"bt-{target.get('date')}-{target.get('period')}",
             profile_name=profile_name,
+            candidate_budget=candidate_budget,
         )
         hits = len(set(pick) & set(target["numbers"]))
         distribution[str(hits)] += 1
@@ -1498,6 +1523,7 @@ def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_cou
     older_average = safe_divide(sum(row["hits"] for row in older_segment), len(older_segment))
     stability = max(0.0, round(100 - abs(recent_average - older_average) * 35, 1)) if older_segment else 0.0
     return {
+        "requestedCount": requested_limit,
         "testedCount": tested,
         "averageHit": round(hit_sum / tested, 2) if tested else 0,
         "onePlusCount": one_plus,
@@ -1515,10 +1541,21 @@ def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_cou
     }
 
 
-def choose_model_profile(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
+def choose_model_profile(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
     results = []
     for profile_name, config in MODEL_PROFILES.items():
-        backtest = rolling_backtest(draws, max_number=max_number, pick_count=pick_count, profile_name=profile_name)
+        backtest = rolling_backtest(
+            draws,
+            max_number=max_number,
+            pick_count=pick_count,
+            profile_name=profile_name,
+            backtest_limit=backtest_limit,
+        )
         quality = (
             backtest["averageHit"] * 100
             + backtest["recentAverageHit"] * 22
@@ -1546,7 +1583,13 @@ def choose_model_profile(draws: list[dict[str, Any]], max_number: int = 39, pick
         )
     results.sort(key=lambda item: (-item["quality"], -item["averageHit"], -item["threePlusRate"], item["id"]))
     selected = results[0]["id"] if results else "balanced"
-    return selected, rolling_backtest(draws, max_number=max_number, pick_count=pick_count, profile_name=selected), results
+    return selected, rolling_backtest(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        profile_name=selected,
+        backtest_limit=backtest_limit,
+    ), results
 
 
 def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profile: str) -> dict[str, Any]:
@@ -1666,6 +1709,7 @@ def analyze(
     max_number: int = 39,
     pick_count: int = 5,
     reference_draws: list[dict[str, Any]] | None = None,
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
 ) -> dict[str, Any]:
     stats = number_stats(draws, max_number)
     frequency = stats["frequency"]
@@ -1681,7 +1725,12 @@ def analyze(
         score = (frequency[n] / max_freq) * 0.58 + (gaps[n] / max_gap) * 0.42
         scored.append((score, n))
     seed_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    selected_profile, backtest, model_results = choose_model_profile(draws, max_number=max_number, pick_count=pick_count)
+    selected_profile, backtest, model_results = choose_model_profile(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        backtest_limit=backtest_limit,
+    )
     recommendation = model_recommendation(
         draws,
         max_number=max_number,
@@ -1717,16 +1766,27 @@ def analyze_with_stable_backtest(
     backtest_draws: list[dict[str, Any]],
     max_number: int = 39,
     pick_count: int = 5,
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    analysis = analyze(draws, max_number=max_number, pick_count=pick_count, reference_draws=backtest_draws)
-    current_backtest = analysis.get("backtest", {})
-    if current_backtest.get("testedCount") or len(backtest_draws) < BACKTEST_MIN_HISTORY:
-        return analysis
-
-    selected_profile, fallback_backtest, model_results = choose_model_profile(
-        backtest_draws[:BACKTEST_FALLBACK_LIMIT],
+    requested_limit = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
+    analysis = analyze(
+        draws,
         max_number=max_number,
         pick_count=pick_count,
+        reference_draws=backtest_draws,
+        backtest_limit=requested_limit,
+    )
+    current_backtest = analysis.get("backtest", {})
+    needs_longer_history = len(draws) < requested_limit + 25
+    if (current_backtest.get("testedCount") and not needs_longer_history) or len(backtest_draws) < BACKTEST_MIN_HISTORY:
+        return analysis
+
+    fallback_draws = backtest_draws[: max(BACKTEST_FALLBACK_LIMIT, requested_limit + 90)]
+    selected_profile, fallback_backtest, model_results = choose_model_profile(
+        fallback_draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        backtest_limit=requested_limit,
     )
     if not fallback_backtest.get("testedCount"):
         return analysis
@@ -1741,7 +1801,7 @@ def analyze_with_stable_backtest(
         profile_name=selected_profile,
     )
     analysis["shortTermConsensus"] = short_term_consensus(
-        backtest_draws[:BACKTEST_FALLBACK_LIMIT],
+        fallback_draws,
         max_number=max_number,
         pick_count=pick_count,
         profile_name=selected_profile,
@@ -1750,33 +1810,33 @@ def analyze_with_stable_backtest(
     analysis["patterns"]["selectedLabel"] = MODEL_PROFILES.get(selected_profile, MODEL_PROFILES["balanced"])["label"]
     analysis["backtest"]["method"] = (
         f"目前選擇近 {len(draws)} 期，短期樣本不足以單獨回測；"
-        f"模型回測已自動改用近 {min(len(backtest_draws), BACKTEST_FALLBACK_LIMIT)} 期穩定樣本。"
+        f"模型回測已自動改用近 {len(fallback_draws)} 期穩定樣本。"
         f"{fallback_backtest.get('method', '')}"
     )
     return analysis
 
 
-def build_payload(game: str, limit: int) -> dict[str, Any]:
+def build_payload(game: str, limit: int, backtest_limit: int = BACKTEST_DEFAULT_LIMIT) -> dict[str, Any]:
+    requested_backtest_limit = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
+    fetch_limit = min(5000, max(limit, requested_backtest_limit + 90, BACKTEST_FALLBACK_LIMIT))
     if game == "tw539":
         latest = taiwan_latest()
-        fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
         history = taiwan_history(fetch_limit)
         if history and not same_draw(history[0], latest):
             history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
         persist_draw_history([latest, *history])
         draws = history[:limit]
-        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
-        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
+        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}"
+        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit))
         return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
     if game == "ca-fantasy5":
-        fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
         history = california_history(fetch_limit)
         if not history:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         persist_draw_history(history)
         draws = history[:limit]
-        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
-        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
+        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}"
+        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit))
         return {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
     raise ValueError("unknown game")
 
@@ -1886,7 +1946,13 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
                 limit = clamp_int(params.get("limit", ["180"])[0], 180, 10, 365)
-                payload = build_payload(game, limit)
+                backtest_limit = clamp_int(
+                    params.get("backtestLimit", [str(BACKTEST_DEFAULT_LIMIT)])[0],
+                    BACKTEST_DEFAULT_LIMIT,
+                    BACKTEST_MIN_LIMIT,
+                    BACKTEST_MAX_LIMIT,
+                )
+                payload = build_payload(game, limit, backtest_limit=backtest_limit)
                 self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
             except ValueError as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
