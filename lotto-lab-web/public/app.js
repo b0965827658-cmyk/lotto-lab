@@ -1,6 +1,7 @@
 const state = {
   game: "tw539",
   limit: 90,
+  backtestLimit: 24,
   plan: "free",
   subscription: null,
   analysisFocus: "balanced",
@@ -41,10 +42,12 @@ const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
 const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v1";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
+const BACKTEST_LIMIT_STORAGE_KEY = "lotto-lab-backtest-limit";
 const POLL_INTERVAL_MS = 30 * 1000;
 const FETCH_TIMEOUT_MS = 60000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
+const BACKTEST_PRESETS = [7, 14, 21, 24, 28, 35, 60, 90, 180, 365];
 
 const FOCUS_PRESETS = {
   balanced: {
@@ -142,6 +145,9 @@ const els = {
   crossYearSearch: $("#crossYearSearch"),
   historyScope: $("#historyScope"),
   backtestBadge: $("#backtestBadge"),
+  backtestSelect: $("#backtestLimitSelect"),
+  backtestInput: $("#backtestLimitInput"),
+  backtestApply: $("#backtestLimitApply"),
   avgHit: $("#avgHit"),
   threePlusRate: $("#threePlusRate"),
   bestHit: $("#bestHit"),
@@ -390,12 +396,36 @@ function savePlanPreview() {
   localStorage.setItem(PLAN_STORAGE_KEY, state.plan);
 }
 
+function normalizeBacktestLimit(value) {
+  const number = Number(value);
+  if (!Number.isInteger(number)) return 24;
+  return Math.max(7, Math.min(365, number));
+}
+
+function loadBacktestLimit() {
+  return normalizeBacktestLimit(localStorage.getItem(BACKTEST_LIMIT_STORAGE_KEY) || 24);
+}
+
+function saveBacktestLimit() {
+  localStorage.setItem(BACKTEST_LIMIT_STORAGE_KEY, String(state.backtestLimit));
+}
+
+function syncBacktestControls() {
+  if (!els.backtestSelect || !els.backtestInput) return;
+  const value = String(state.backtestLimit);
+  els.backtestInput.value = value;
+  els.backtestSelect.value = BACKTEST_PRESETS.includes(state.backtestLimit) ? value : "custom";
+}
+
 function applyPlanAccess() {
   document.body.dataset.plan = state.plan;
   const pro = isProPlan();
   els.proPanels.forEach((panel) => {
     panel.classList.toggle("locked", !pro);
     panel.setAttribute("aria-disabled", String(!pro));
+  });
+  [els.backtestSelect, els.backtestInput, els.backtestApply].filter(Boolean).forEach((control) => {
+    control.disabled = !pro;
   });
   Array.from(els.limit.options).forEach((option) => {
     option.disabled = !pro && Number(option.value) > 90;
@@ -1296,6 +1326,7 @@ function scheduleModelRender(message = "模型設定已更新。") {
 }
 
 function renderModelBacktest(backtest, profiles = []) {
+  syncBacktestControls();
   if (!backtest || !backtest.testedCount) {
     els.backtestBadge.textContent = "資料不足";
     els.avgHit.textContent = "-";
@@ -1305,7 +1336,8 @@ function renderModelBacktest(backtest, profiles = []) {
     els.backtestMethod.textContent = "";
     return;
   }
-  els.backtestBadge.textContent = `${backtest.testedCount} 期`;
+  const requestedCount = backtest.requestedCount || state.backtestLimit;
+  els.backtestBadge.textContent = `${backtest.testedCount}/${requestedCount} 期`;
   els.avgHit.textContent = backtest.averageHit;
   els.threePlusRate.textContent = `${backtest.onePlusRate ?? 0}%`;
   els.bestHit.textContent = `${backtest.bestHit} 中`;
@@ -1365,6 +1397,7 @@ function renderModelBacktest(backtest, profiles = []) {
     : "";
   els.backtestMethod.innerHTML = `
     ${backtest.method}
+    <span class="backtest-method-line">回測設定：近 ${requestedCount} 期（可填 7～365）；實際可測資料不足時會以現有資料計算。</span>
     <span class="backtest-method-line">命中分布：0中 ${distribution[0] || 0}、1中 ${distribution[1] || 0}、2中 ${distribution[2] || 0}、3中以上 ${backtest.threePlusCount || 0}。2中以上 ${twoPlusText}，3中以上 ${threePlusText}。</span>
   `;
   els.backtestRecent.innerHTML = backtest.recentRows
@@ -1900,7 +1933,7 @@ async function load(options = {}) {
     state.limit = 90;
     els.limit.value = "90";
   }
-  const cacheKey = `${state.game}-${state.limit}`;
+  const cacheKey = `${state.game}-${state.limit}-backtest-${state.backtestLimit}`;
   const cachedPayload = readCachedPayload(cacheKey);
   const requestId = ++state.requestId;
   if (cachedPayload) {
@@ -1912,7 +1945,9 @@ async function load(options = {}) {
   if (!silent) els.refresh.disabled = true;
   try {
     const previousSeen = readLastSeenDraw()[state.game] || "";
-    const payload = await fetchJsonWithTimeout(`/api/lottery?game=${state.game}&limit=${state.limit}&t=${Date.now()}`);
+    const payload = await fetchJsonWithTimeout(
+      `/api/lottery?game=${state.game}&limit=${state.limit}&backtestLimit=${state.backtestLimit}&t=${Date.now()}`,
+    );
     if (!payload.ok) throw new Error(payload.error || "資料讀取失敗");
     if (requestId !== state.requestId) return;
     writeCachedPayload(cacheKey, payload);
@@ -2025,6 +2060,34 @@ els.limit.addEventListener("change", () => {
   load();
 });
 
+els.backtestSelect.addEventListener("change", () => {
+  if (els.backtestSelect.value === "custom") {
+    els.backtestInput.focus();
+    return;
+  }
+  state.backtestLimit = normalizeBacktestLimit(els.backtestSelect.value);
+  saveBacktestLimit();
+  state.candidateCache.clear();
+  state.backtestCache.clear();
+  syncBacktestControls();
+  load();
+});
+
+els.backtestApply.addEventListener("click", () => {
+  const value = Number(els.backtestInput.value);
+  if (!Number.isInteger(value) || value < 7 || value > 365) {
+    setStatus("回測期數請輸入 7 到 365 的整數。", true);
+    els.backtestInput.focus();
+    return;
+  }
+  state.backtestLimit = value;
+  saveBacktestLimit();
+  state.candidateCache.clear();
+  state.backtestCache.clear();
+  syncBacktestControls();
+  load();
+});
+
 els.refresh.addEventListener("click", load);
 els.crossYearSearch.addEventListener("click", runCrossYearSearch);
 
@@ -2131,9 +2194,11 @@ window.addEventListener("load", () => {
 });
 
 state.plan = loadPlanPreview();
+state.backtestLimit = loadBacktestLimit();
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 initHistoryYears();
+syncBacktestControls();
 renderModelControls();
 applyPlanAccess();
 updateNotificationUi();
