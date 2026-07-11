@@ -1427,7 +1427,7 @@ function renderModelBacktest(backtest, profiles = []) {
   rememberModelSnapshots();
 }
 
-function renderPatterns(patterns, profiles = []) {
+function renderPatterns(patterns, profiles = [], researchEvidence = null) {
   if (!patterns) {
     els.patternModel.textContent = "-";
     els.patternRepeat.textContent = "-";
@@ -1519,6 +1519,13 @@ function renderPatterns(patterns, profiles = []) {
     .slice(0, 3)
     .map((item, index) => chip(`${item.label} 均${item.averageHit} / 高${item.bestHit}`, index === 0 ? "gold" : ""))
     .join("");
+  const evidenceRows = researchEvidence?.features || [];
+  const evidenceText = evidenceRows.length
+    ? evidenceRows
+        .slice(0, 4)
+        .map((item, index) => chip(`${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`, index < 2 ? "gold" : ""))
+        .join("")
+    : empty;
   els.patternLines.innerHTML = `
     <div class="pattern-soft">
       <span>近期熱門尾數</span>
@@ -1555,6 +1562,11 @@ function renderPatterns(patterns, profiles = []) {
     <div>
       <span>上期鄰近</span>
       <strong class="pattern-line-main">${neighborText}</strong>
+    </div>
+    <div class="pattern-soft">
+      <span>統計驗證</span>
+      <strong class="pattern-line-main">${evidenceText}</strong>
+      <em class="pattern-note">用走期回測比較隨機基準；樣本不穩定的訊號會自動降權。</em>
     </div>
     ${
       state.game === "ca-fantasy5"
@@ -1640,7 +1652,7 @@ function render(payload) {
   els.latestBalls.innerHTML = balls(latest.numbers);
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
-  renderPatterns(analysis.patterns, analysis.modelProfiles);
+  renderPatterns(analysis.patterns, analysis.modelProfiles, analysis.researchEvidence);
   els.hot.innerHTML = rankRows(analysis.hot, "count");
   els.cold.innerHTML = rankRows(analysis.cold, "count");
   els.overdue.innerHTML = rankRows(analysis.overdue, "gap");
