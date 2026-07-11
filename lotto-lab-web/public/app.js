@@ -118,6 +118,8 @@ const els = {
   countdownHint: $("#countdownHint"),
   pickBalls: $("#pickBalls"),
   pickMeta: $("#pickMeta"),
+  flagshipBalls: $("#flagshipBalls"),
+  flagshipMeta: $("#flagshipMeta"),
   note: $("#analysisNote"),
   hot: $("#hotList"),
   cold: $("#coldList"),
@@ -162,6 +164,7 @@ const els = {
   notifyToggle: $("#notifyToggleBtn"),
   notifyTest: $("#notifyTestBtn"),
   proPanels: Array.from(document.querySelectorAll('[data-tier="pro"]')),
+  flagshipPanels: Array.from(document.querySelectorAll('[data-tier="flagship"]')),
   tabButtons: Array.from(document.querySelectorAll("[data-tab]")),
   tabPanels: Array.from(document.querySelectorAll("[data-tab-panel]")),
 };
@@ -367,12 +370,23 @@ function setStatus(message, isError = false) {
 }
 
 function isProPlan() {
-  return state.plan === "pro";
+  return state.plan === "pro" || state.plan === "flagship";
+}
+
+function isFlagshipPlan() {
+  return state.plan === "flagship";
 }
 
 function requirePro(feature) {
   if (isProPlan()) return true;
   setStatus(`${feature} 是 Pro 訂閱版功能。可以先按「預覽 Pro」查看完整介面。`, true);
+  activateTab("subscription");
+  return false;
+}
+
+function requireFlagship(feature) {
+  if (isFlagshipPlan()) return true;
+  setStatus(`${feature} 是「摘星狙擊手｜量化旗艦版」專屬功能。`, true);
   activateTab("subscription");
   return false;
 }
@@ -389,7 +403,8 @@ function activateTab(tabName) {
 }
 
 function loadPlanPreview() {
-  return localStorage.getItem(PLAN_STORAGE_KEY) === "pro" ? "pro" : "free";
+  const saved = localStorage.getItem(PLAN_STORAGE_KEY);
+  return saved === "flagship" || saved === "pro" ? saved : "free";
 }
 
 function savePlanPreview() {
@@ -420,9 +435,14 @@ function syncBacktestControls() {
 function applyPlanAccess() {
   document.body.dataset.plan = state.plan;
   const pro = isProPlan();
+  const flagship = isFlagshipPlan();
   els.proPanels.forEach((panel) => {
     panel.classList.toggle("locked", !pro);
     panel.setAttribute("aria-disabled", String(!pro));
+  });
+  els.flagshipPanels.forEach((panel) => {
+    panel.classList.toggle("locked", !flagship);
+    panel.setAttribute("aria-disabled", String(!flagship));
   });
   [els.backtestSelect, els.backtestInput, els.backtestApply].filter(Boolean).forEach((control) => {
     control.disabled = !pro;
@@ -447,6 +467,7 @@ function applyPlanAccess() {
   if (state.analysis) {
     renderCandidates();
     renderModeSnapshots();
+    renderFlagshipPick();
   }
 }
 
@@ -1184,6 +1205,34 @@ function renderReferencePick() {
   `;
 }
 
+function renderFlagshipPick() {
+  if (!els.flagshipBalls || !els.flagshipMeta) return;
+  if (!isFlagshipPlan()) {
+    els.flagshipBalls.innerHTML = "";
+    els.flagshipMeta.innerHTML = "<span>量化旗艦版會員專屬</span>";
+    return;
+  }
+  const numbers = state.analysis?.flagshipRecommendation || [];
+  if (numbers.length !== 6) {
+    els.flagshipBalls.innerHTML = "";
+    els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 6 碼候選池。</span>";
+    return;
+  }
+  const evidence = state.analysis?.researchEvidence?.features || [];
+  const evidenceText = evidence.length
+    ? evidence
+        .slice(0, 3)
+        .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
+        .join("、")
+    : "多窗口交叉驗證";
+  els.flagshipBalls.innerHTML = balls(numbers);
+  els.flagshipMeta.innerHTML = `
+    <span>模型評分最高 6 碼候選池</span>
+    <span>研究支持：${evidenceText}</span>
+    <span>僅供統計參考，不代表保證中獎</span>
+  `;
+}
+
 function savePick(numbers) {
   const normalized = [...numbers].sort((a, b) => a - b);
   const picks = loadSavedPicks();
@@ -1660,6 +1709,7 @@ function render(payload) {
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderSavedPicks();
   renderReferencePick();
+  renderFlagshipPick();
   renderCandidates();
   renderModeSnapshots();
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
@@ -1668,13 +1718,14 @@ function render(payload) {
 function renderPlans(subscription) {
   if (!subscription?.plans?.length) return;
   state.subscription = subscription;
-  const proPlans = subscription.plans.filter((plan) => plan.id === "pro");
-  els.plans.innerHTML = proPlans
+  const plans = subscription.plans.filter((plan) => plan.id === "pro" || plan.id === "flagship");
+  els.plans.innerHTML = plans
     .map((plan) => {
-      const active = state.plan === "pro";
-      const action = active ? "目前使用" : subscription.enabled ? "訂閱 Pro" : "預覽 Pro";
+      const active = state.plan === plan.id;
+      const paymentLink = plan.paymentLink || (plan.id === "pro" ? subscription.paymentLink : subscription.flagshipPaymentLink);
+      const action = active ? "目前使用" : subscription.enabled && paymentLink ? `訂閱 ${plan.id === "flagship" ? "旗艦版" : "Pro"}` : `預覽 ${plan.id === "flagship" ? "旗艦版" : "Pro"}`;
       return `
-        <div class="plan pro ${active ? "active" : ""}">
+        <div class="plan ${plan.id} ${active ? "active" : ""}">
           <div class="plan-title">
             <h3>${plan.name}</h3>
             <span>${active ? "使用中" : "升級"}</span>
@@ -1684,7 +1735,7 @@ function renderPlans(subscription) {
             ${plan.features.map((feature) => `<li>${feature}</li>`).join("")}
           </ul>
           <p class="plan-disclaimer">本訂閱附加功能只輔助提高中獎機率，並非百發百中；所有選號仍以統計參考為主。請理性投注，賽事每天有，祝您中獎。</p>
-          <button class="plan-action" data-plan="pro" ${active ? "disabled" : ""}>${action}</button>
+          <button class="plan-action" data-plan="${plan.id}" ${active ? "disabled" : ""}>${action}</button>
         </div>
       `;
     })
@@ -1692,15 +1743,17 @@ function renderPlans(subscription) {
 
   els.plans.querySelectorAll("[data-plan]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (subscription.enabled && subscription.paymentLink) {
-        window.open(subscription.paymentLink, "_blank", "noopener,noreferrer");
+      const selectedPlan = plans.find((plan) => plan.id === button.dataset.plan);
+      const paymentLink = selectedPlan?.paymentLink || (button.dataset.plan === "pro" ? subscription.paymentLink : subscription.flagshipPaymentLink);
+      if (subscription.enabled && paymentLink) {
+        window.open(paymentLink, "_blank", "noopener,noreferrer");
         return;
       }
-      state.plan = "pro";
+      state.plan = button.dataset.plan;
       savePlanPreview();
       renderPlans(subscription);
       applyPlanAccess();
-      setStatus("已切到 Pro 預覽：進階回測、版路、跨年查詢、通知與高分組合已解鎖。");
+      setStatus(state.plan === "flagship" ? "已切到量化旗艦版預覽：每期 6 碼高分候選池已解鎖。" : "已切到 Pro 預覽：進階回測、版路、跨年查詢、通知與高分組合已解鎖。");
     });
   });
   applyPlanAccess();
