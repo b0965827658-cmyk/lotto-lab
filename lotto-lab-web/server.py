@@ -1030,6 +1030,8 @@ MODEL_PROFILES = {
     },
 }
 
+SHORT_TERM_WINDOWS = (10, 20, 36)
+
 
 def safe_divide(value: float, total: float) -> float:
     return value / total if total else 0
@@ -1392,6 +1394,68 @@ def classic_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pi
     return list(best)
 
 
+def short_term_consensus(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    profile_name: str = "balanced",
+) -> dict[str, Any]:
+    """Compare short windows so a recent cluster can be seen without hiding longer context."""
+    ordered = list(draws)
+    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    views = []
+    weighted_votes: dict[int, float] = {n: 0.0 for n in range(1, max_number + 1)}
+    weights = {10: 0.50, 20: 0.30, 36: 0.20}
+    for window in SHORT_TERM_WINDOWS:
+        rows = ordered[:window]
+        if len(rows) < 5:
+            continue
+        profile = pattern_profile(rows, max_number)
+        model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
+        ranked = sorted(
+            range(1, max_number + 1),
+            key=lambda number: (-score_number(number, profile, model), number),
+        )
+        leaders = ranked[: min(8, max_number)]
+        for rank, number in enumerate(leaders):
+            weighted_votes[number] += weights[window] * (1.0 - rank / max(8, len(leaders)))
+        views.append(
+            {
+                "window": window,
+                "drawCount": len(rows),
+                "leaders": leaders,
+                "recommendation": model_recommendation(
+                    rows,
+                    max_number=max_number,
+                    pick_count=pick_count,
+                    seed_label=f"short-{window}",
+                    profile_name=profile_name,
+                ),
+            }
+        )
+    if not views:
+        return {"windows": [], "leaders": [], "recommendations": []}
+    leaders = sorted(
+        (number for number in range(1, max_number + 1)),
+        key=lambda number: (-weighted_votes[number], number),
+    )[: min(10, max_number)]
+    return {
+        "windows": views,
+        "leaders": [
+            {
+                "number": number,
+                "agreement": sum(1 for view in views if number in view["leaders"]),
+                "score": round(weighted_votes[number] * 100),
+            }
+            for number in leaders
+        ],
+        "recommendations": [
+            {"window": view["window"], "numbers": view["recommendation"]}
+            for view in views
+        ],
+    }
+
+
 def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5, profile_name: str = "balanced") -> dict[str, Any]:
     ordered = list(draws)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
@@ -1597,7 +1661,12 @@ def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profi
     }
 
 
-def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+def analyze(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    reference_draws: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     stats = number_stats(draws, max_number)
     frequency = stats["frequency"]
     gaps = stats["gaps"]
@@ -1621,6 +1690,12 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
         profile_name=selected_profile,
     )
     patterns = pattern_summary(draws, max_number, selected_profile)
+    short_consensus = short_term_consensus(
+        reference_draws or draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        profile_name=selected_profile,
+    )
 
     return {
         "drawCount": len(draws),
@@ -1632,6 +1707,7 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
         "backtest": backtest,
         "modelProfiles": model_results,
         "patterns": patterns,
+        "shortTermConsensus": short_consensus,
         "note": "這是用多視窗熱度、近期動能、遺漏週期、尾數動能、區間集中、奇偶大小、總和版路、拖牌連莊、鄰近號與穩定度回測做的交叉統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
     }
 
@@ -1642,7 +1718,7 @@ def analyze_with_stable_backtest(
     max_number: int = 39,
     pick_count: int = 5,
 ) -> dict[str, Any]:
-    analysis = analyze(draws, max_number=max_number, pick_count=pick_count)
+    analysis = analyze(draws, max_number=max_number, pick_count=pick_count, reference_draws=backtest_draws)
     current_backtest = analysis.get("backtest", {})
     if current_backtest.get("testedCount") or len(backtest_draws) < BACKTEST_MIN_HISTORY:
         return analysis
@@ -1657,6 +1733,19 @@ def analyze_with_stable_backtest(
 
     analysis["backtest"] = fallback_backtest
     analysis["modelProfiles"] = model_results
+    analysis["recommendation"] = model_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        seed_label=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        profile_name=selected_profile,
+    )
+    analysis["shortTermConsensus"] = short_term_consensus(
+        backtest_draws[:BACKTEST_FALLBACK_LIMIT],
+        max_number=max_number,
+        pick_count=pick_count,
+        profile_name=selected_profile,
+    )
     analysis["patterns"]["selectedProfile"] = selected_profile
     analysis["patterns"]["selectedLabel"] = MODEL_PROFILES.get(selected_profile, MODEL_PROFILES["balanced"])["label"]
     analysis["backtest"]["method"] = (
