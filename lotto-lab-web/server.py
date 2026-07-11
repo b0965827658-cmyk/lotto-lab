@@ -2140,6 +2140,7 @@ def analyze_with_stable_backtest(
     max_number: int = 39,
     pick_count: int = 5,
     backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+    recommendation_draws: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     draws = canonical_analysis_draws(draws)
     backtest_draws = canonical_analysis_draws(backtest_draws)
@@ -2166,6 +2167,7 @@ def analyze_with_stable_backtest(
     if not fallback_backtest.get("testedCount"):
         return analysis
 
+    display_draws = canonical_analysis_draws(recommendation_draws or fallback_draws)
     research_evidence = research_feature_evidence(fallback_draws, max_number=max_number)
     evidence_map = {
         item["id"]: item["multiplier"] for item in research_evidence.get("features", [])
@@ -2174,7 +2176,7 @@ def analyze_with_stable_backtest(
     analysis["modelProfiles"] = model_results
     analysis["researchEvidence"] = research_evidence
     analysis["recommendation"] = model_recommendation(
-        fallback_draws,
+        display_draws,
         max_number=max_number,
         pick_count=pick_count,
         seed_label=stable_analysis_seed(fallback_draws, f"fallback-window-{len(draws)}-backtest-{requested_limit}"),
@@ -2182,14 +2184,14 @@ def analyze_with_stable_backtest(
         evidence=evidence_map,
     )
     analysis["flagshipRecommendation"] = flagship_recommendation(
-        fallback_draws,
+        display_draws,
         max_number=max_number,
         pick_count=6,
         profile_name=selected_profile,
         evidence=evidence_map,
     )
     analysis["shortTermConsensus"] = short_term_consensus(
-        fallback_draws,
+        display_draws,
         max_number=max_number,
         pick_count=pick_count,
         profile_name=selected_profile,
@@ -2204,20 +2206,66 @@ def analyze_with_stable_backtest(
     return analysis
 
 
-def build_payload(game: str, limit: int, backtest_limit: int = BACKTEST_DEFAULT_LIMIT) -> dict[str, Any]:
+def attach_flagship_analysis(
+    game: str,
+    latest: dict[str, Any],
+    flagship_limit: int,
+    history: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    flagship_analysis: dict[str, Any],
+) -> dict[str, Any]:
+    flagship_numbers, snapshot = freeze_flagship_recommendation(
+        game,
+        latest,
+        flagship_limit,
+        flagship_analysis,
+        history,
+    )
+    result = dict(analysis)
+    result["flagshipRecommendation"] = flagship_numbers
+    result["flagshipSnapshot"] = snapshot
+    result["flagshipAnalysisLimit"] = flagship_limit
+    result["flagshipProfile"] = (flagship_analysis.get("patterns") or {}).get("selectedProfile", "balanced")
+    result["flagshipResearchEvidence"] = flagship_analysis.get("researchEvidence", {})
+    return result
+
+
+def build_payload(
+    game: str,
+    limit: int,
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+    flagship_limit: int | None = None,
+) -> dict[str, Any]:
     requested_backtest_limit = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
-    fetch_limit = min(5000, max(limit, requested_backtest_limit + 90, BACKTEST_FALLBACK_LIMIT))
+    requested_flagship_limit = max(10, min(BACKTEST_MAX_LIMIT, int(flagship_limit if flagship_limit is not None else limit)))
+    fetch_limit = min(5000, max(limit, requested_flagship_limit, requested_backtest_limit + 90, BACKTEST_FALLBACK_LIMIT))
     if game == "tw539":
         latest = taiwan_latest()
         history = canonical_analysis_draws([latest, *taiwan_history(fetch_limit)])
         persist_draw_history([latest, *history])
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}"
-        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit))
-        flagship_numbers, snapshot = freeze_flagship_recommendation(game, latest, limit, analysis, history)
-        analysis["flagshipRecommendation"] = flagship_numbers
-        analysis["flagshipSnapshot"] = snapshot
-        return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
+        analysis = dict(cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit)))
+        flagship_draws = history[:requested_flagship_limit]
+        flagship_key = f"{cache_key_for_draws('flagship-analysis', game, requested_flagship_limit, history)}-backtest-{BACKTEST_DEFAULT_LIMIT}"
+        flagship_analysis = analysis if (
+            requested_flagship_limit == limit and requested_backtest_limit == BACKTEST_DEFAULT_LIMIT
+        ) else cached(
+            flagship_key,
+            lambda: analyze_with_stable_backtest(
+                flagship_draws,
+                history,
+                backtest_limit=BACKTEST_DEFAULT_LIMIT,
+                recommendation_draws=flagship_draws,
+            ),
+        )
+        analysis = attach_flagship_analysis(game, latest, requested_flagship_limit, history, analysis, flagship_analysis)
+        return {
+            "latest": public_draw(latest),
+            "history": public_draws(draws),
+            "flagshipLimit": requested_flagship_limit,
+            "analysis": analysis,
+        }
     if game == "ca-fantasy5":
         history = canonical_analysis_draws(california_history(fetch_limit))
         if not history:
@@ -2225,12 +2273,28 @@ def build_payload(game: str, limit: int, backtest_limit: int = BACKTEST_DEFAULT_
         persist_draw_history(history)
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}"
-        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit))
         latest = history[0]
-        flagship_numbers, snapshot = freeze_flagship_recommendation(game, latest, limit, analysis, history)
-        analysis["flagshipRecommendation"] = flagship_numbers
-        analysis["flagshipSnapshot"] = snapshot
-        return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
+        analysis = dict(cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit)))
+        flagship_draws = history[:requested_flagship_limit]
+        flagship_key = f"{cache_key_for_draws('flagship-analysis', game, requested_flagship_limit, history)}-backtest-{BACKTEST_DEFAULT_LIMIT}"
+        flagship_analysis = analysis if (
+            requested_flagship_limit == limit and requested_backtest_limit == BACKTEST_DEFAULT_LIMIT
+        ) else cached(
+            flagship_key,
+            lambda: analyze_with_stable_backtest(
+                flagship_draws,
+                history,
+                backtest_limit=BACKTEST_DEFAULT_LIMIT,
+                recommendation_draws=flagship_draws,
+            ),
+        )
+        analysis = attach_flagship_analysis(game, latest, requested_flagship_limit, history, analysis, flagship_analysis)
+        return {
+            "latest": public_draw(latest),
+            "history": public_draws(draws),
+            "flagshipLimit": requested_flagship_limit,
+            "analysis": analysis,
+        }
     raise ValueError("unknown game")
 
 
@@ -2378,7 +2442,18 @@ class Handler(SimpleHTTPRequestHandler):
                     BACKTEST_MIN_LIMIT,
                     BACKTEST_MAX_LIMIT,
                 )
-                payload = build_payload(game, limit, backtest_limit=backtest_limit)
+                flagship_limit = clamp_int(
+                    params.get("flagshipLimit", [str(limit)])[0],
+                    limit,
+                    10,
+                    BACKTEST_MAX_LIMIT,
+                )
+                payload = build_payload(
+                    game,
+                    limit,
+                    backtest_limit=backtest_limit,
+                    flagship_limit=flagship_limit,
+                )
                 self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
             except ValueError as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
