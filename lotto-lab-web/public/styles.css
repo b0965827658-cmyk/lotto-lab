@@ -511,6 +511,21 @@ select {
   color: #1e2722;
 }
 
+.plan.flagship {
+  border-color: rgba(214, 152, 34, 0.72);
+  background: #4b3b18;
+  color: #fff;
+}
+
+.plan.flagship .features {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.plan.flagship .plan-action {
+  background: #e1a62a;
+  color: #1e2722;
+}
+
 .plan-action.secondary {
   border: 1px solid var(--line);
   background: #fff;
@@ -542,6 +557,10 @@ select {
 }
 
 [data-tier="pro"] {
+  position: relative;
+}
+
+[data-tier="flagship"] {
   position: relative;
 }
 
@@ -583,9 +602,60 @@ body[data-plan="free"] .pro-required {
   color: #6c4b13;
 }
 
+body:not([data-plan="flagship"]) [data-tier="flagship"].locked {
+  overflow: hidden;
+}
+
+body:not([data-plan="flagship"]) [data-tier="flagship"].locked::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: 8px;
+  background: rgba(248, 241, 227, 0.82);
+  backdrop-filter: blur(1.5px);
+}
+
+body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
+  content: attr(data-lock-title) "\A" attr(data-lock-text);
+  white-space: pre-line;
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 18px;
+  z-index: 5;
+  border: 1px solid rgba(214, 152, 34, 0.48);
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #6c4b13;
+  padding: 14px;
+  box-shadow: 0 12px 28px rgba(93, 70, 27, 0.14);
+  font-weight: 900;
+  line-height: 1.45;
+}
+
 .pick-panel {
   background: #173f38;
   color: #fff;
+}
+
+.flagship-panel {
+  border-color: rgba(214, 152, 34, 0.62);
+  background: #f8f1e3;
+}
+
+.flagship-balls {
+  min-height: 74px;
+}
+
+.flagship-balls .ball {
+  background: #d69822;
+  color: #1e2722;
+  box-shadow: 0 8px 16px rgba(133, 91, 14, 0.18);
+}
+
+.flagship-meta {
+  color: #5e512f;
 }
 
 .pick-panel .label,

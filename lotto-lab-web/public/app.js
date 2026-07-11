@@ -10,6 +10,7 @@ const state = {
   history: [],
   displayHistory: [],
   requestId: 0,
+  latestRequestId: 0,
   apiCache: new Map(),
   candidateCache: new Map(),
   backtestCache: new Map(),
@@ -44,6 +45,7 @@ const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v1";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const BACKTEST_LIMIT_STORAGE_KEY = "lotto-lab-backtest-limit";
 const POLL_INTERVAL_MS = 30 * 1000;
+const LATEST_FETCH_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 60000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
@@ -558,12 +560,13 @@ function writeLastSeenDraw(game, latest) {
 }
 
 async function fetchJsonWithTimeout(url, options = {}) {
+  const { timeoutMs = FETCH_TIMEOUT_MS, ...fetchOptions } = options;
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       cache: "no-store",
-      ...options,
+      ...fetchOptions,
       signal: controller.signal,
       headers: {
         "Cache-Control": "no-cache",
@@ -1715,6 +1718,16 @@ function render(payload) {
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
 }
 
+function renderLatestCard(latest) {
+  if (!latest) return;
+  state.latest = latest;
+  els.dashboard.hidden = false;
+  els.gameName.textContent = latest.name || gameLabel(state.game);
+  els.period.textContent = `期別 ${latest.period || "-"}`;
+  els.date.textContent = `日期 ${latest.date || "-"}`;
+  els.latestBalls.innerHTML = balls(latest.numbers || []);
+}
+
 function renderPlans(subscription) {
   if (!subscription?.plans?.length) return;
   state.subscription = subscription;
@@ -1999,7 +2012,7 @@ async function load(options = {}) {
     els.limit.value = "90";
   }
   const cacheKey = `${state.game}-${state.limit}-backtest-${state.backtestLimit}`;
-  const cachedPayload = readCachedPayload(cacheKey);
+  const cachedPayload = options.skipCache ? null : readCachedPayload(cacheKey);
   const requestId = ++state.requestId;
   if (cachedPayload) {
     render(cachedPayload);
@@ -2024,7 +2037,7 @@ async function load(options = {}) {
       if (!silent) setStatus("目前使用暫存資料；背景更新暫時失敗。", true);
       return;
     }
-    els.dashboard.hidden = true;
+    if (!state.latest) els.dashboard.hidden = true;
     if (!silent) setStatus(error.name === "AbortError" ? "讀取逾時，請稍後再試。" : error.message, true);
   } finally {
     if (requestId === state.requestId) {
@@ -2033,15 +2046,40 @@ async function load(options = {}) {
   }
 }
 
+async function refreshLatest(options = {}) {
+  const requestId = ++state.latestRequestId;
+  try {
+    const payload = await fetchJsonWithTimeout(
+      `/api/latest?game=${state.game}&t=${Date.now()}`,
+      { timeoutMs: LATEST_FETCH_TIMEOUT_MS },
+    );
+    if (!payload.ok || requestId !== state.latestRequestId) return;
+    const nextLatest = payload.latest;
+    const previousKey = readLastSeenDraw()[state.game] || "";
+    const changed = drawKey(nextLatest) !== drawKey(state.latest);
+    if (!changed) return;
+
+    renderLatestCard(nextLatest);
+    await notifyIfLatestChanged(nextLatest, previousKey).catch(() => {});
+    writeLastSeenDraw(state.game, nextLatest);
+    setStatus("最新開獎號碼已更新，正在同步模型分析...");
+    await load({ silent: true, skipCache: true });
+  } catch (error) {
+    if (!options.silent) {
+      setStatus(error.name === "AbortError" ? "最新開獎讀取逾時，請稍後再試。" : "最新開獎暫時無法讀取。", true);
+    }
+  }
+}
+
 function startAutoRefresh() {
   window.setInterval(() => {
     if (document.visibilityState === "visible") {
-      load({ silent: true });
+      refreshLatest({ silent: true });
     }
   }, POLL_INTERVAL_MS);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      load({ silent: true });
+      refreshLatest({ silent: true });
     }
   });
 }
