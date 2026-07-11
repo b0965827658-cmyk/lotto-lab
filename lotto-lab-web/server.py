@@ -57,7 +57,7 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "300"))
-LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "30"))
+LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "10"))
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 BACKTEST_DEFAULT_LIMIT = 24
@@ -67,6 +67,7 @@ MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 MAX_SAVED_PICKS_PER_SUBSCRIPTION = 20
 API_RATE_LIMITS = {
+    "/api/latest": (120, 60),
     "/api/lottery": (90, 60),
     "/api/history-search": (45, 60),
     "/api/config": (120, 60),
@@ -2158,6 +2159,31 @@ class Handler(SimpleHTTPRequestHandler):
                     },
                 }
             )
+            return
+        if parsed.path == "/api/latest":
+            params = parse_qs(parsed.query)
+            try:
+                game = clean_game(params.get("game", ["tw539"])[0])
+                if game == "tw539":
+                    latest = taiwan_latest()
+                elif game == "ca-fantasy5":
+                    history = california_history(1)
+                    if not history:
+                        raise RuntimeError("加州天天樂資料頁目前沒有可解析的最新開獎資料")
+                    latest = history[0]
+                else:
+                    raise ValueError("不支援的遊戲種類")
+                self.send_json(
+                    {
+                        "ok": True,
+                        "latest": public_draw(latest),
+                        "updatedAt": datetime.now().isoformat(timespec="seconds"),
+                    }
+                )
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=502)
             return
         if parsed.path == "/api/lottery":
             params = parse_qs(parsed.query)
