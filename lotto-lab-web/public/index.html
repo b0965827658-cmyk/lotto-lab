@@ -10,9 +10,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>摘星狙擊手</title>
     <link rel="manifest" href="/manifest.webmanifest?v=40" />
-    <link rel="icon" href="/logo-sniper-star.svg?v=42" type="image/svg+xml" />
-    <link rel="icon" href="/logo-sniper-star-192.png?v=42" type="image/png" sizes="192x192" />
-    <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=42" />
+    <link rel="icon" href="/logo-sniper-star.svg?v=43" type="image/svg+xml" />
+    <link rel="icon" href="/logo-sniper-star-192.png?v=43" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=43" />
     <link rel="stylesheet" href="/styles.css?v=40" />
   </head>
   <body>
@@ -20,7 +20,7 @@
       <header class="topbar">
         <div class="topbar-copy">
           <div class="brand-lockup">
-            <img class="brand-logo" src="/logo-sniper-star-192.png?v=42" alt="" width="64" height="64" />
+            <img class="brand-logo" src="/logo-sniper-star-192.png?v=43" alt="" width="64" height="64" />
             <div class="brand-copy">
               <div class="brand-line">
                 <p class="eyebrow">摘星狙擊手</p>
@@ -112,6 +112,24 @@
             <div>
               <p class="label">模型回測</p>
               <h2>最近表現</h2>
+            </div>
+            <div class="backtest-tools" aria-label="回測期數設定">
+              <label for="backtestLimitSelect">回測</label>
+              <select id="backtestLimitSelect">
+                <option value="7">7 期</option>
+                <option value="14">14 期</option>
+                <option value="21">21 期</option>
+                <option value="24">24 期</option>
+                <option value="28">28 期</option>
+                <option value="35">35 期</option>
+                <option value="60">60 期</option>
+                <option value="90">90 期</option>
+                <option value="180">180 期</option>
+                <option value="365">365 期</option>
+                <option value="custom">自訂</option>
+              </select>
+              <input id="backtestLimitInput" type="number" min="7" max="365" step="1" inputmode="numeric" aria-label="自訂回測期數" />
+              <button id="backtestLimitApply" class="text-button" type="button">套用</button>
             </div>
             <span id="backtestBadge" class="count-pill">-</span>
           </div>
@@ -325,6 +343,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=42"></script>
+    <script src="/app.js?v=43"></script>
   </body>
 </html>
