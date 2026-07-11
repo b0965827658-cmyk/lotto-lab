@@ -674,7 +674,7 @@ def parse_pilio_date(value: str) -> str:
     return f"{year_number:04d}-{int(month):02d}-{int(day):02d}"
 
 
-def pilio_taiwan_history(limit: int = 90) -> list[dict[str, Any]]:
+def pilio_taiwan_history(limit: int = 90, ttl_seconds: int | None = None) -> list[dict[str, Any]]:
     def load():
         draws = []
         page_count = max(1, min(8, (limit + 22) // 23))
@@ -707,31 +707,43 @@ def pilio_taiwan_history(limit: int = 90) -> list[dict[str, Any]]:
         draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
         return draws[:limit]
 
-    return cached(f"pilio-taiwan-history-{limit}", load)
+    return cached(f"pilio-taiwan-history-{limit}", load, ttl_seconds)
 
 
 def taiwan_latest() -> dict[str, Any]:
     def load():
+        candidates: list[dict[str, Any]] = []
         try:
             payload = json.loads(fetch_text(TAIWAN_LAST_URL, timeout=10))
             entries = payload.get("content", {}).get("lastNumberList", [])
             daily_cash = next((item for item in entries if item.get("gameCode") == 5120), None)
             if not daily_cash:
                 raise RuntimeError("台灣彩券 API 目前沒有回傳今彩 539 最新資料")
-            return {
-                "game": "tw539",
-                "name": "今彩 539",
-                "period": daily_cash.get("period", ""),
-                "date": parse_date(daily_cash.get("drawDate", "")),
-                "numbers": normalize_numbers(daily_cash.get("lotNumber", [])),
-                "source": "台灣彩券 LastNumber API",
-                "sourceUrl": TAIWAN_LAST_URL,
-            }
+            candidates.append(
+                {
+                    "game": "tw539",
+                    "name": "今彩 539",
+                    "period": daily_cash.get("period", ""),
+                    "date": parse_date(daily_cash.get("drawDate", "")),
+                    "numbers": normalize_numbers(daily_cash.get("lotNumber", [])),
+                    "source": "台灣彩券 LastNumber API",
+                    "sourceUrl": TAIWAN_LAST_URL,
+                }
+            )
         except Exception:
-            history = pilio_taiwan_history(1)
-            if history:
-                return history[0]
-            raise
+            pass
+
+        # The official endpoint can lag after the evening draw. Check the
+        # lightweight history source and use whichever candidate has the newer date.
+        try:
+            candidates.extend(pilio_taiwan_history(1, ttl_seconds=LATEST_CACHE_TTL_SECONDS))
+        except Exception:
+            pass
+
+        candidates = [item for item in candidates if item.get("date") and len(item.get("numbers", [])) >= 5]
+        if candidates:
+            return max(candidates, key=lambda item: (item.get("date", ""), str(item.get("period", ""))))
+        raise RuntimeError("目前沒有回傳今彩 539 最新資料")
 
     return cached("taiwan-latest", load, LATEST_CACHE_TTL_SECONDS)
 
