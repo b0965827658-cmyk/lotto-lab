@@ -677,6 +677,40 @@ body[data-plan="free"] .pro-required {
   grid-column: span 1;
 }
 
+.backtest-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.backtest-tools select,
+.backtest-tools input {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.backtest-tools input {
+  width: 64px;
+  text-align: center;
+}
+
+.backtest-tools .text-button {
+  min-height: 34px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
 .text-button {
   min-height: 36px;
   border: 1px solid var(--line);
@@ -1630,6 +1664,17 @@ th {
 
   .saved-form {
     grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .backtest-panel .panel-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .backtest-tools {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
   }
 
   .save-button {
