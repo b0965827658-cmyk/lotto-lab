@@ -721,10 +721,12 @@ function scorePick(numbers, backtest) {
   const intervalBonus = Math.min(5, Math.max(0, ...intervalHits) * 1.6);
   const multiWindowNumbers = new Set((state.analysis?.patterns?.multiWindowNumbers || []).slice(0, 8).map((item) => item.number));
   const signalLeaders = new Set((state.analysis?.patterns?.signalLeaders || []).slice(0, 8).map((item) => item.number));
+  const shortTermLeaders = new Set((state.analysis?.shortTermConsensus?.leaders || []).slice(0, 8).map((item) => item.number));
   const crossSignalBonus = Math.min(
     6,
     numbers.filter((number) => multiWindowNumbers.has(number)).length * 0.8 +
-      numbers.filter((number) => signalLeaders.has(number)).length * 0.65,
+      numbers.filter((number) => signalLeaders.has(number)).length * 0.65 +
+      numbers.filter((number) => shortTermLeaders.has(number)).length * 0.55,
   );
   const shortCycleBonus =
     state.game === "ca-fantasy5"
@@ -850,8 +852,9 @@ function patternHints() {
   ];
   const windowNumbers = (patterns.multiWindowNumbers || []).slice(0, 8).map((item) => item.number);
   const signalNumbers = (patterns.signalLeaders || []).slice(0, 8).map((item) => item.number);
+  const shortTermNumbers = (state.analysis?.shortTermConsensus?.leaders || []).slice(0, 8).map((item) => item.number);
   const shortCycle = shortCycleProfile();
-  return { pairs, dragTargets, intervalNumbers, intervals, repeatNumbers, windowNumbers, signalNumbers, shortCycle };
+  return { pairs, dragTargets, intervalNumbers, intervals, repeatNumbers, windowNumbers, signalNumbers, shortTermNumbers, shortCycle };
 }
 
 function candidatePool() {
@@ -884,6 +887,7 @@ function candidatePool() {
     ...hints.repeatNumbers,
     ...hints.windowNumbers,
     ...hints.signalNumbers,
+    ...hints.shortTermNumbers,
     ...shortCycleNumbers,
   ];
   const pool = [...new Set([...hot, ...overdue, ...balanced, ...patternNumbers, ...tailFilteredUniverse])].filter(numberAllowed);
@@ -1129,11 +1133,19 @@ function renderReferencePick() {
   const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
   const tailProfile = hotTailProfile();
   const shortCycle = shortCycleProfile();
+  const shortTermLeaders = state.analysis?.shortTermConsensus?.leaders || [];
+  const shortTermText = shortTermLeaders.length
+    ? shortTermLeaders
+        .slice(0, 5)
+        .map((item) => `${pad(item.number)}（${item.agreement}/${state.analysis.shortTermConsensus.windows.length}窗）`)
+        .join("、")
+    : "資料不足";
   els.pickBalls.innerHTML = balls(candidate.numbers);
   els.pickMeta.innerHTML = `
     <span>${focus.label}</span>
     <span>${focus.description}</span>
     <span>熱尾 ${tailProfile.label}</span>
+    <span>短期共識 ${shortTermText}</span>
     ${state.game === "ca-fantasy5" ? `<span>${shortCycle.label}</span>` : ""}
     <span>分數 ${candidate.score.total}</span>
     <span>版路 +${candidate.score.pattern || 0}</span>
@@ -1587,7 +1599,7 @@ function render(payload) {
   state.analysis = analysis;
   state.history = history;
   state.displayHistory = history;
-  els.historyScope.textContent = "目前顯示本次載入的分析期數。";
+  els.historyScope.textContent = `目前使用近 ${analysis.drawCount} 期分析；短期可切換近 10、20、36 期。`;
   els.dashboard.hidden = false;
   els.gameName.textContent = latest.name;
   els.period.textContent = `期別 ${latest.period || "-"}`;
