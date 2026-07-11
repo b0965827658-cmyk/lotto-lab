@@ -75,6 +75,7 @@ API_RATE_LIMITS = {
 }
 ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
 STRIPE_PAYMENT_LINK = os.environ.get("LOTTO_STRIPE_PAYMENT_LINK", "").strip()
+STRIPE_FLAGSHIP_PAYMENT_LINK = os.environ.get("LOTTO_STRIPE_FLAGSHIP_PAYMENT_LINK", "").strip()
 PUSH_PUBLIC_KEY = os.environ.get("LOTTO_VAPID_PUBLIC_KEY", "").strip()
 PUSH_PRIVATE_KEY = os.environ.get("LOTTO_VAPID_PRIVATE_KEY", "").strip().replace("\\n", "\n")
 PUSH_CONTACT_EMAIL = os.environ.get("LOTTO_PUSH_CONTACT_EMAIL", "admin@example.com").strip()
@@ -1499,6 +1500,27 @@ def model_recommendation(
     return list(best)
 
 
+def flagship_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 6,
+    profile_name: str = "balanced",
+    evidence: dict[str, float] | None = None,
+) -> list[int]:
+    """Return the highest-ranked number pool for the flagship tier.
+
+    This is a six-number candidate pool, not a claim that any number has a
+    guaranteed higher physical lottery probability.
+    """
+    profile = pattern_profile(draws, max_number)
+    model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
+    ranked = sorted(
+        range(1, max_number + 1),
+        key=lambda number: (-score_number(number, profile, model, evidence=evidence), number),
+    )
+    return ranked[: min(pick_count, max_number)]
+
+
 def classic_recommendation(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -1904,6 +1926,13 @@ def analyze(
         profile_name=selected_profile,
         evidence=evidence_map,
     )
+    flagship_numbers = flagship_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=6,
+        profile_name=selected_profile,
+        evidence=evidence_map,
+    )
     patterns = pattern_summary(draws, max_number, selected_profile)
     short_consensus = short_term_consensus(
         reference_draws or draws,
@@ -1919,6 +1948,7 @@ def analyze(
         "overdue": [{"number": n, "gap": gaps[n]} for n in overdue],
         "frequency": [{"number": n, "count": frequency[n], "gap": gaps[n]} for n in frequency],
         "recommendation": recommendation,
+        "flagshipRecommendation": flagship_numbers,
         "backtest": backtest,
         "modelProfiles": model_results,
         "patterns": patterns,
@@ -1970,6 +2000,13 @@ def analyze_with_stable_backtest(
         max_number=max_number,
         pick_count=pick_count,
         seed_label=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        profile_name=selected_profile,
+        evidence=evidence_map,
+    )
+    analysis["flagshipRecommendation"] = flagship_recommendation(
+        fallback_draws,
+        max_number=max_number,
+        pick_count=6,
         profile_name=selected_profile,
         evidence=evidence_map,
     )
@@ -2086,7 +2123,7 @@ class Handler(SimpleHTTPRequestHandler):
                 {
                     "ok": True,
                     "subscription": {
-                        "enabled": bool(STRIPE_PAYMENT_LINK),
+                        "enabled": bool(STRIPE_PAYMENT_LINK or STRIPE_FLAGSHIP_PAYMENT_LINK),
                         "paymentLink": STRIPE_PAYMENT_LINK,
                         "plans": [
                             {
@@ -2095,7 +2132,15 @@ class Handler(SimpleHTTPRequestHandler):
                                 "price": "$9 / 月起",
                                 "features": ["120-365 期進階分析", "跨年歷史查詢", "模型回測與版路模式", "高分組合排序"],
                             },
+                            {
+                                "id": "flagship",
+                                "name": "摘星狙擊手｜量化旗艦版",
+                                "price": "高階會員",
+                                "paymentLink": STRIPE_FLAGSHIP_PAYMENT_LINK,
+                                "features": ["每期模型高分 6 碼候選池", "訊號證據與穩定度校準", "短中長期多窗口交叉排名", "優先查看研究版路分析"],
+                            },
                         ],
+                        "flagshipPaymentLink": STRIPE_FLAGSHIP_PAYMENT_LINK,
                     },
                     "notifications": {
                         "supported": bool(PUSH_PUBLIC_KEY),
