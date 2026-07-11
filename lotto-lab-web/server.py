@@ -101,6 +101,8 @@ class CacheItem:
 
 
 cache: dict[str, CacheItem] = {}
+flagship_snapshot_memory: dict[str, list[int]] = {}
+flagship_snapshot_lock = threading.RLock()
 rate_limit_hits: dict[tuple[str, str], list[float]] = {}
 notify_lock = threading.Lock()
 database_ready = False
@@ -197,6 +199,21 @@ def init_database() -> None:
         )
         """
     )
+    database_execute(
+        """
+        CREATE TABLE IF NOT EXISTS analysis_snapshots (
+            snapshot_key TEXT PRIMARY KEY,
+            game TEXT NOT NULL,
+            latest_period TEXT NOT NULL,
+            latest_date TEXT NOT NULL,
+            selected_limit INTEGER NOT NULL,
+            numbers_json TEXT NOT NULL,
+            profile_name TEXT NOT NULL,
+            history_fingerprint TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     database_ready = True
 
 
@@ -284,6 +301,58 @@ def merge_draw_history(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     values = list(merged.values())
     values.sort(key=lambda item: (item.get("date", ""), str(item.get("period", ""))), reverse=True)
     return values
+
+
+def draw_source_priority(draw: dict[str, Any]) -> int:
+    source = str(draw.get("source", ""))
+    if "台灣彩券" in source or "政府資料" in source:
+        return 3
+    if "Pilio" in source or "樂透彩" in source:
+        return 2
+    return 1
+
+
+def canonical_analysis_draws(draws: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize and deterministically order rows before any model calculation."""
+    merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for draw in draws:
+        if not isinstance(draw, dict):
+            continue
+        game, period, date = database_draw_key(draw)
+        numbers = normalize_numbers(draw.get("numbers", []))
+        if game not in ALLOWED_GAMES or not period or not date or len(numbers) != 5 or len(set(numbers)) != 5:
+            continue
+        clean = dict(draw)
+        clean.update({"game": game, "period": period, "date": date, "numbers": numbers})
+        key = (game, period, date)
+        existing = merged.get(key)
+        if existing is None or (
+            draw_source_priority(clean), tuple(clean["numbers"])
+        ) > (
+            draw_source_priority(existing), tuple(existing["numbers"])
+        ):
+            merged[key] = clean
+    values = list(merged.values())
+    values.sort(key=lambda item: (item.get("date", ""), str(item.get("period", ""))), reverse=True)
+    return values
+
+
+def draw_fingerprint(draws: list[dict[str, Any]]) -> str:
+    rows = canonical_analysis_draws(draws)
+    value = "|".join(
+        f"{item.get('game', '')}:{item.get('date', '')}:{item.get('period', '')}:{','.join(map(str, item.get('numbers', [])))}"
+        for item in rows
+    )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:20]
+
+
+def stable_analysis_seed(draws: list[dict[str, Any]], label: str = "") -> str:
+    rows = canonical_analysis_draws(draws)
+    latest = rows[0] if rows else {}
+    return (
+        f"{label}|{latest.get('date', '')}|{latest.get('period', '')}|"
+        f"{len(rows)}|{draw_fingerprint(rows)}"
+    )
 
 
 def clamp_int(value: str, default: int, minimum: int, maximum: int) -> int:
@@ -611,7 +680,111 @@ def cached(key: str, loader, ttl_seconds: int | None = None):
 
 def cache_key_for_draws(prefix: str, game: str, limit: int, draws: list[dict[str, Any]]) -> str:
     latest = draws[0] if draws else {}
-    return f"{prefix}-{game}-{limit}-{latest.get('date', '')}-{latest.get('period', '')}"
+    return (
+        f"{prefix}-{game}-{limit}-{latest.get('date', '')}-"
+        f"{latest.get('period', '')}-{draw_fingerprint(draws)}"
+    )
+
+
+def _freeze_flagship_recommendation(
+    game: str,
+    latest: dict[str, Any],
+    selected_limit: int,
+    analysis: dict[str, Any],
+    history: list[dict[str, Any]],
+) -> tuple[list[int], dict[str, Any]]:
+    """Publish one flagship pool per draw/window so every visitor sees the same result."""
+    snapshot_key = (
+        f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:"
+        f"window-{selected_limit}:pick-6"
+    )
+    if snapshot_key in flagship_snapshot_memory:
+        numbers = list(flagship_snapshot_memory[snapshot_key])
+        return numbers, {"key": snapshot_key, "status": "published"}
+
+    if database_ready:
+        try:
+            rows = database_query(
+                "SELECT numbers_json, profile_name, history_fingerprint, created_at FROM analysis_snapshots WHERE snapshot_key = ?",
+                (snapshot_key,),
+            )
+            if rows:
+                numbers = json.loads(rows[0][0])
+                if isinstance(numbers, list) and len(numbers) == 6:
+                    numbers = [int(number) for number in numbers]
+                    flagship_snapshot_memory[snapshot_key] = numbers
+                    return numbers, {
+                        "key": snapshot_key,
+                        "status": "published",
+                        "profile": rows[0][1],
+                        "historyFingerprint": rows[0][2],
+                        "createdAt": rows[0][3],
+                    }
+        except Exception:
+            pass
+
+    numbers = [int(number) for number in (analysis.get("flagshipRecommendation") or [])[:6]]
+    if len(numbers) != 6:
+        return numbers, {"key": snapshot_key, "status": "unavailable"}
+    profile_name = str((analysis.get("patterns") or {}).get("selectedProfile", "balanced"))
+    fingerprint = draw_fingerprint(history)
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    if database_ready:
+        try:
+            database_execute(
+                """
+                INSERT INTO analysis_snapshots
+                    (snapshot_key, game, latest_period, latest_date, selected_limit,
+                     numbers_json, profile_name, history_fingerprint, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (snapshot_key) DO NOTHING
+                """,
+                (
+                    snapshot_key,
+                    game,
+                    str(latest.get("period", "")),
+                    str(latest.get("date", "")),
+                    int(selected_limit),
+                    json.dumps(numbers),
+                    profile_name,
+                    fingerprint,
+                    created_at,
+                ),
+            )
+            rows = database_query(
+                "SELECT numbers_json, profile_name, history_fingerprint, created_at FROM analysis_snapshots WHERE snapshot_key = ?",
+                (snapshot_key,),
+            )
+            if rows:
+                stored_numbers = json.loads(rows[0][0])
+                if isinstance(stored_numbers, list) and len(stored_numbers) == 6:
+                    numbers = [int(number) for number in stored_numbers]
+                    profile_name = rows[0][1]
+                    fingerprint = rows[0][2]
+                    created_at = rows[0][3]
+        except Exception:
+            pass
+
+    flagship_snapshot_memory[snapshot_key] = numbers
+    return numbers, {
+        "key": snapshot_key,
+        "status": "published",
+        "profile": profile_name,
+        "historyFingerprint": fingerprint,
+        "createdAt": created_at,
+    }
+
+
+def freeze_flagship_recommendation(
+    game: str,
+    latest: dict[str, Any],
+    selected_limit: int,
+    analysis: dict[str, Any],
+    history: list[dict[str, Any]],
+) -> tuple[list[int], dict[str, Any]]:
+    with flagship_snapshot_lock:
+        return _freeze_flagship_recommendation(game, latest, selected_limit, analysis, history)
 
 
 def fetch_text(url: str, timeout: int = 25) -> str:
@@ -1895,6 +2068,8 @@ def analyze(
     reference_draws: list[dict[str, Any]] | None = None,
     backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
 ) -> dict[str, Any]:
+    draws = canonical_analysis_draws(draws)
+    reference_draws = canonical_analysis_draws(reference_draws or draws)
     stats = number_stats(draws, max_number)
     frequency = stats["frequency"]
     gaps = stats["gaps"]
@@ -1908,14 +2083,14 @@ def analyze(
     for n in frequency:
         score = (frequency[n] / max_freq) * 0.58 + (gaps[n] / max_gap) * 0.42
         scored.append((score, n))
-    seed_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    seed_label = stable_analysis_seed(draws, f"analysis-window-{len(draws)}")
     selected_profile, backtest, model_results = choose_model_profile(
         draws,
         max_number=max_number,
         pick_count=pick_count,
         backtest_limit=backtest_limit,
     )
-    research_evidence = research_feature_evidence(reference_draws or draws, max_number=max_number)
+    research_evidence = research_feature_evidence(reference_draws, max_number=max_number)
     evidence_map = {
         item["id"]: item["multiplier"] for item in research_evidence.get("features", [])
     }
@@ -1936,7 +2111,7 @@ def analyze(
     )
     patterns = pattern_summary(draws, max_number, selected_profile)
     short_consensus = short_term_consensus(
-        reference_draws or draws,
+        reference_draws,
         max_number=max_number,
         pick_count=pick_count,
         profile_name=selected_profile,
@@ -1966,6 +2141,8 @@ def analyze_with_stable_backtest(
     pick_count: int = 5,
     backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
 ) -> dict[str, Any]:
+    draws = canonical_analysis_draws(draws)
+    backtest_draws = canonical_analysis_draws(backtest_draws)
     requested_limit = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
     analysis = analyze(
         draws,
@@ -2000,7 +2177,7 @@ def analyze_with_stable_backtest(
         fallback_draws,
         max_number=max_number,
         pick_count=pick_count,
-        seed_label=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        seed_label=stable_analysis_seed(fallback_draws, f"fallback-window-{len(draws)}-backtest-{requested_limit}"),
         profile_name=selected_profile,
         evidence=evidence_map,
     )
@@ -2032,23 +2209,28 @@ def build_payload(game: str, limit: int, backtest_limit: int = BACKTEST_DEFAULT_
     fetch_limit = min(5000, max(limit, requested_backtest_limit + 90, BACKTEST_FALLBACK_LIMIT))
     if game == "tw539":
         latest = taiwan_latest()
-        history = taiwan_history(fetch_limit)
-        if history and not same_draw(history[0], latest):
-            history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
+        history = canonical_analysis_draws([latest, *taiwan_history(fetch_limit)])
         persist_draw_history([latest, *history])
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}"
         analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit))
+        flagship_numbers, snapshot = freeze_flagship_recommendation(game, latest, limit, analysis, history)
+        analysis["flagshipRecommendation"] = flagship_numbers
+        analysis["flagshipSnapshot"] = snapshot
         return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
     if game == "ca-fantasy5":
-        history = california_history(fetch_limit)
+        history = canonical_analysis_draws(california_history(fetch_limit))
         if not history:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         persist_draw_history(history)
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}"
         analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit))
-        return {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
+        latest = history[0]
+        flagship_numbers, snapshot = freeze_flagship_recommendation(game, latest, limit, analysis, history)
+        analysis["flagshipRecommendation"] = flagship_numbers
+        analysis["flagshipSnapshot"] = snapshot
+        return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
     raise ValueError("unknown game")
 
 
