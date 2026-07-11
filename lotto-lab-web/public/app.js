@@ -2,6 +2,7 @@ const state = {
   game: "tw539",
   limit: 90,
   backtestLimit: 24,
+  flagshipLimit: 90,
   plan: "free",
   subscription: null,
   analysisFocus: "balanced",
@@ -41,9 +42,10 @@ const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
-const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v2";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v3";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const BACKTEST_LIMIT_STORAGE_KEY = "lotto-lab-backtest-limit";
+const FLAGSHIP_LIMIT_STORAGE_KEY = "lotto-lab-flagship-limit";
 const POLL_INTERVAL_MS = 30 * 1000;
 const LATEST_FETCH_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 60000;
@@ -152,6 +154,8 @@ const els = {
   backtestSelect: $("#backtestLimitSelect"),
   backtestInput: $("#backtestLimitInput"),
   backtestApply: $("#backtestLimitApply"),
+  flagshipLimitSelect: $("#flagshipLimitSelect"),
+  flagshipLimitApply: $("#flagshipLimitApply"),
   avgHit: $("#avgHit"),
   threePlusRate: $("#threePlusRate"),
   bestHit: $("#bestHit"),
@@ -427,11 +431,30 @@ function saveBacktestLimit() {
   localStorage.setItem(BACKTEST_LIMIT_STORAGE_KEY, String(state.backtestLimit));
 }
 
+function normalizeFlagshipLimit(value) {
+  const number = Number(value);
+  if (!Number.isInteger(number)) return 90;
+  return Math.max(10, Math.min(365, number));
+}
+
+function loadFlagshipLimit() {
+  return normalizeFlagshipLimit(localStorage.getItem(FLAGSHIP_LIMIT_STORAGE_KEY) || 90);
+}
+
+function saveFlagshipLimit() {
+  localStorage.setItem(FLAGSHIP_LIMIT_STORAGE_KEY, String(state.flagshipLimit));
+}
+
 function syncBacktestControls() {
   if (!els.backtestSelect || !els.backtestInput) return;
   const value = String(state.backtestLimit);
   els.backtestInput.value = value;
   els.backtestSelect.value = BACKTEST_PRESETS.includes(state.backtestLimit) ? value : "custom";
+}
+
+function syncFlagshipControls() {
+  if (!els.flagshipLimitSelect) return;
+  els.flagshipLimitSelect.value = String(state.flagshipLimit);
 }
 
 function applyPlanAccess() {
@@ -448,6 +471,9 @@ function applyPlanAccess() {
   });
   [els.backtestSelect, els.backtestInput, els.backtestApply].filter(Boolean).forEach((control) => {
     control.disabled = !pro;
+  });
+  [els.flagshipLimitSelect, els.flagshipLimitApply].filter(Boolean).forEach((control) => {
+    control.disabled = !flagship;
   });
   Array.from(els.limit.options).forEach((option) => {
     option.disabled = !pro && Number(option.value) > 90;
@@ -1221,7 +1247,7 @@ function renderFlagshipPick() {
     els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 6 碼候選池。</span>";
     return;
   }
-  const evidence = state.analysis?.researchEvidence?.features || [];
+  const evidence = state.analysis?.flagshipResearchEvidence?.features || state.analysis?.researchEvidence?.features || [];
   const evidenceText = evidence.length
     ? evidence
         .slice(0, 3)
@@ -1230,6 +1256,7 @@ function renderFlagshipPick() {
     : "多窗口交叉驗證";
   els.flagshipBalls.innerHTML = balls(numbers);
   els.flagshipMeta.innerHTML = `
+    <span class="flagship-window-note">旗艦專屬近 ${state.analysis?.flagshipAnalysisLimit || state.flagshipLimit} 期分析</span>
     <span>模型評分最高 6 碼候選池</span>
     <span>研究支持：${evidenceText}</span>
     <span>僅供統計參考，不代表保證中獎</span>
@@ -2011,7 +2038,7 @@ async function load(options = {}) {
     state.limit = 90;
     els.limit.value = "90";
   }
-  const cacheKey = `${state.game}-${state.limit}-backtest-${state.backtestLimit}`;
+  const cacheKey = `${state.game}-${state.limit}-backtest-${state.backtestLimit}-flagship-${state.flagshipLimit}`;
   const cachedPayload = options.skipCache ? null : readCachedPayload(cacheKey);
   const requestId = ++state.requestId;
   if (cachedPayload) {
@@ -2024,7 +2051,7 @@ async function load(options = {}) {
   try {
     const previousSeen = readLastSeenDraw()[state.game] || "";
     const payload = await fetchJsonWithTimeout(
-      `/api/lottery?game=${state.game}&limit=${state.limit}&backtestLimit=${state.backtestLimit}&t=${Date.now()}`,
+      `/api/lottery?game=${state.game}&limit=${state.limit}&backtestLimit=${state.backtestLimit}&flagshipLimit=${state.flagshipLimit}&t=${Date.now()}`,
     );
     if (!payload.ok) throw new Error(payload.error || "資料讀取失敗");
     if (requestId !== state.requestId) return;
@@ -2191,6 +2218,14 @@ els.backtestApply.addEventListener("click", () => {
   load();
 });
 
+els.flagshipLimitApply.addEventListener("click", () => {
+  if (!requireFlagship("旗艦專屬期數分析")) return;
+  state.flagshipLimit = normalizeFlagshipLimit(els.flagshipLimitSelect.value);
+  saveFlagshipLimit();
+  syncFlagshipControls();
+  load();
+});
+
 els.refresh.addEventListener("click", load);
 els.crossYearSearch.addEventListener("click", runCrossYearSearch);
 
@@ -2298,10 +2333,12 @@ window.addEventListener("load", () => {
 
 state.plan = loadPlanPreview();
 state.backtestLimit = loadBacktestLimit();
+state.flagshipLimit = loadFlagshipLimit();
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 initHistoryYears();
 syncBacktestControls();
+syncFlagshipControls();
 renderModelControls();
 applyPlanAccess();
 updateNotificationUi();

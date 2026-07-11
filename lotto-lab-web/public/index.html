@@ -13,7 +13,7 @@
     <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
     <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
-    <link rel="stylesheet" href="/styles.css?v=49" />
+    <link rel="stylesheet" href="/styles.css?v=50" />
   </head>
   <body>
     <main class="shell">
@@ -113,7 +113,20 @@
               <p class="label">摘星狙擊手｜量化旗艦版</p>
               <h2>每期高分 6 碼</h2>
             </div>
-            <span class="count-pill">旗艦</span>
+            <div class="flagship-tools" aria-label="旗艦分析期數設定">
+              <label for="flagshipLimitSelect">旗艦分析</label>
+              <select id="flagshipLimitSelect">
+                <option value="10">近 10 期</option>
+                <option value="20">近 20 期</option>
+                <option value="36">近 36 期</option>
+                <option value="60">近 60 期</option>
+                <option value="90" selected>近 90 期</option>
+                <option value="120">近 120 期</option>
+                <option value="180">近 180 期</option>
+                <option value="365">近 365 期</option>
+              </select>
+              <button id="flagshipLimitApply" class="text-button" type="button">套用</button>
+            </div>
           </div>
           <div class="balls flagship-balls" id="flagshipBalls"></div>
           <div class="pick-meta flagship-meta" id="flagshipMeta"></div>
@@ -355,6 +368,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=49"></script>
+    <script src="/app.js?v=50"></script>
   </body>
 </html>
