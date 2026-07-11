@@ -684,38 +684,44 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 .flagship-balls {
   position: relative;
   width: min(100%, 380px);
-  height: 252px;
-  min-height: 252px;
+  height: 276px;
+  min-height: 276px;
   margin: 16px auto 6px;
   isolation: isolate;
 }
 
-.flagship-balls::before,
-.flagship-balls::after {
+.flagship-star-shape {
+  --star-size: min(68%, 220px);
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  top: 50%;
+  width: var(--star-size);
+  height: var(--star-size);
+  transform: translate(-50%, -50%);
+}
+
+.flagship-star-shape::before,
+.flagship-star-shape::after {
   content: "";
   position: absolute;
   z-index: 0;
-  left: 50%;
-  top: 50%;
-  width: min(68%, 220px);
-  aspect-ratio: 1;
+  inset: 0;
   pointer-events: none;
-  transform: translate(-50%, -50%);
   filter: drop-shadow(0 0 10px rgba(22, 106, 82, 0.16));
   clip-path: polygon(50% 0, 61.8% 35%, 97.6% 35%, 68.2% 57%, 79.4% 91%, 50% 70%, 20.6% 91%, 31.8% 57%, 2.4% 35%, 38.2% 35%);
 }
 
-.flagship-balls::before {
+.flagship-star-shape::before {
   background: rgba(214, 152, 34, 0.28);
 }
 
-.flagship-balls::after {
+.flagship-star-shape::after {
   background: rgba(22, 106, 82, 0.16);
-  width: min(60%, 194px);
-  transform: translate(-50%, -50%);
+  inset: 8%;
 }
 
-.flagship-balls .ball {
+.flagship-star-shape .ball {
   position: absolute;
   z-index: 2;
   margin: 0;
@@ -726,39 +732,43 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   box-shadow: 0 8px 16px rgba(133, 91, 14, 0.18);
 }
 
-.flagship-balls .ball:nth-child(1) {
+.flagship-star-shape .ball:nth-child(1) {
   left: 50%;
-  top: 2px;
-  transform: translateX(-50%);
+  top: 0;
+  transform: translate(-50%, -50%);
 }
 
-.flagship-balls .ball:nth-child(2) {
-  right: 5%;
-  top: 46px;
+.flagship-star-shape .ball:nth-child(2) {
+  left: 97.6%;
+  top: 35%;
+  transform: translate(-50%, -50%);
 }
 
-.flagship-balls .ball:nth-child(3) {
-  right: 15%;
-  bottom: 8px;
+.flagship-star-shape .ball:nth-child(3) {
+  left: 79.4%;
+  top: 91%;
+  transform: translate(-50%, -50%);
 }
 
-.flagship-balls .ball:nth-child(4) {
-  left: 15%;
-  bottom: 8px;
+.flagship-star-shape .ball:nth-child(4) {
+  left: 20.6%;
+  top: 91%;
+  transform: translate(-50%, -50%);
 }
 
-.flagship-balls .ball:nth-child(5) {
-  left: 5%;
-  top: 46px;
+.flagship-star-shape .ball:nth-child(5) {
+  left: 2.4%;
+  top: 35%;
+  transform: translate(-50%, -50%);
 }
 
-.flagship-balls .ball:nth-child(6) {
+.flagship-star-shape .ball:nth-child(6) {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
 }
 
-.flagship-balls .ball.flagship-core-ball {
+.flagship-star-shape .ball.flagship-core-ball {
   width: 60px;
   height: 60px;
   background: var(--green);
@@ -769,7 +779,23 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 }
 
 .flagship-meta {
-  color: #5e512f;
+  color: #49675a;
+}
+
+.flagship-panel .flagship-meta span {
+  border-color: rgba(22, 106, 82, 0.2);
+  background: rgba(22, 106, 82, 0.08);
+  color: #49675a;
+}
+
+.flagship-panel .flagship-meta .flagship-window-note {
+  color: var(--green);
+}
+
+.flagship-panel .flagship-meta .flagship-core-note {
+  border-color: rgba(214, 152, 34, 0.32);
+  background: rgba(214, 152, 34, 0.13);
+  color: #8b6418;
 }
 
 .flagship-window-note {
@@ -1898,11 +1924,11 @@ th {
 
   .flagship-balls {
     width: min(100%, 350px);
-    height: 224px;
-    min-height: 224px;
+    height: 276px;
+    min-height: 276px;
   }
 
-  .flagship-balls .ball.flagship-core-ball {
+  .flagship-star-shape .ball.flagship-core-ball {
     width: 54px;
     height: 54px;
   }
