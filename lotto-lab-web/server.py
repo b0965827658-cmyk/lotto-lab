@@ -1046,6 +1046,38 @@ MODEL_PROFILES = {
 }
 
 SHORT_TERM_WINDOWS = (10, 20, 36)
+RESEARCH_FEATURE_KEYS = (
+    "heat",
+    "recent",
+    "trend",
+    "gap",
+    "neighbor",
+    "tail",
+    "pair",
+    "drag",
+    "repeatSignal",
+    "interval",
+    "multiWindow",
+    "tailMomentum",
+    "streak",
+    "momentum",
+)
+RESEARCH_FEATURE_LABELS = {
+    "heat": "長期熱度",
+    "recent": "近期熱度",
+    "trend": "趨勢動能",
+    "gap": "遺漏週期",
+    "neighbor": "鄰近號",
+    "tail": "尾數熱度",
+    "pair": "哥倆好",
+    "drag": "拖牌",
+    "repeatSignal": "連莊",
+    "interval": "區間",
+    "multiWindow": "多窗口",
+    "tailMomentum": "尾數動能",
+    "streak": "連續開出",
+    "momentum": "近期差值",
+}
 
 
 def safe_divide(value: float, total: float) -> float:
@@ -1287,6 +1319,75 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
     }
 
 
+def research_feature_evidence(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    lookback: int = 60,
+) -> dict[str, Any]:
+    """Measure each signal with walk-forward data before letting it affect a pick.
+
+    The target draw is never included in its own feature profile.  Precision is
+    compared with the uniform 5/39 single-number baseline and shrunk toward 1
+    when the sample is small or unstable between recent and older rows.
+    """
+    ordered = list(draws)
+    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    target_count = min(max(0, int(lookback)), max(0, len(ordered) - 36))
+    evidence_rows: dict[str, list[float]] = {key: [] for key in RESEARCH_FEATURE_KEYS}
+    for index in range(target_count):
+        target = ordered[index]
+        training = ordered[index + 1 : index + 91]
+        if len(training) < 36:
+            continue
+        profile = pattern_profile(training, max_number)
+        actual = set(target["numbers"])
+        for feature in RESEARCH_FEATURE_KEYS:
+            ranked = sorted(
+                range(1, max_number + 1),
+                key=lambda number: (-profile["numberScores"][number].get(feature, 0.0), number),
+            )
+            top_five = ranked[:5]
+            top_eight = ranked[:8]
+            precision = (len(actual & set(top_five)) / 5) * 0.75 + (len(actual & set(top_eight)) / 8) * 0.25
+            evidence_rows[feature].append(precision)
+
+    baseline_precision = 5 / max_number
+    feature_rows = []
+    for feature in RESEARCH_FEATURE_KEYS:
+        values = evidence_rows[feature]
+        midpoint = max(1, len(values) // 2)
+        recent_values = values[:midpoint]
+        older_values = values[midpoint:]
+        recent_precision = safe_divide(sum(recent_values), len(recent_values))
+        older_precision = safe_divide(sum(older_values), len(older_values)) if older_values else recent_precision
+        blended_precision = recent_precision * 0.65 + older_precision * 0.35
+        raw_lift = safe_divide(blended_precision - baseline_precision, baseline_precision)
+        sample_shrink = len(values) / (len(values) + 24)
+        stability = max(
+            0.0,
+            1.0 - safe_divide(abs(recent_precision - older_precision), baseline_precision * 1.5),
+        )
+        multiplier = 1.0 + max(-0.30, min(0.30, raw_lift * 0.45 * sample_shrink * (0.7 + stability * 0.3)))
+        feature_rows.append(
+            {
+                "id": feature,
+                "label": RESEARCH_FEATURE_LABELS.get(feature, feature),
+                "multiplier": round(multiplier, 3),
+                "lift": round(raw_lift * 100, 1),
+                "recentPrecision": round(recent_precision * 100, 1),
+                "olderPrecision": round(older_precision * 100, 1),
+                "testedCount": len(values),
+                "stability": round(stability * 100, 1),
+            }
+        )
+    feature_rows.sort(key=lambda item: (-item["multiplier"], -item["stability"], item["id"]))
+    return {
+        "baselinePrecision": round(baseline_precision * 100, 1),
+        "testedCount": max((len(values) for values in evidence_rows.values()), default=0),
+        "features": feature_rows,
+    }
+
+
 def combo_spread_score(numbers: list[int], max_number: int = 39) -> float:
     sorted_numbers = sorted(numbers)
     span = sorted_numbers[-1] - sorted_numbers[0]
@@ -1337,10 +1438,23 @@ def combo_pattern_score(numbers: list[int], profile: dict[str, Any], model: dict
     return base * 0.86 + pair_score * 0.14
 
 
-def score_number(n: int, profile: dict[str, Any], model: dict[str, Any]) -> float:
+def score_number(
+    n: int,
+    profile: dict[str, Any],
+    model: dict[str, Any],
+    evidence: dict[str, float] | None = None,
+) -> float:
     features = profile["numberScores"][n]
     weights = model["number"]
-    return sum(features[key] * weights.get(key, 0) for key in features)
+    base_score = sum(features[key] * weights.get(key, 0) for key in features)
+    if not evidence:
+        return base_score
+    weighted_total = sum(abs(weights.get(key, 0)) for key in features) or 1.0
+    evidence_score = sum(
+        features[key] * weights.get(key, 0) * evidence.get(key, 1.0)
+        for key in features
+    ) / weighted_total
+    return base_score * 0.84 + evidence_score * 0.16
 
 
 def model_recommendation(
@@ -1350,6 +1464,7 @@ def model_recommendation(
     seed_label: str = "",
     profile_name: str = "balanced",
     candidate_budget: int | None = None,
+    evidence: dict[str, float] | None = None,
 ) -> list[int]:
     if profile_name == "classic":
         return classic_recommendation(
@@ -1358,12 +1473,13 @@ def model_recommendation(
             pick_count=pick_count,
             seed_label=seed_label,
             candidate_budget=candidate_budget,
+            evidence=evidence,
         )
     model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
     profile = pattern_profile(draws, max_number)
     number_scores = {}
     for n in range(1, max_number + 1):
-        number_scores[n] = score_number(n, profile, model) + random.Random(f"{seed_label}:{profile_name}:{n}").random() * 0.035
+        number_scores[n] = score_number(n, profile, model, evidence=evidence) + random.Random(f"{seed_label}:{profile_name}:{n}").random() * 0.035
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(24, max_number)]
     rng = random.Random(f"lotto-lab:{profile_name}:{seed_label}:{','.join(map(str, pool))}")
@@ -1389,6 +1505,7 @@ def classic_recommendation(
     pick_count: int = 5,
     seed_label: str = "",
     candidate_budget: int | None = None,
+    evidence: dict[str, float] | None = None,
 ) -> list[int]:
     stats = number_stats(draws, max_number)
     frequency = stats["frequency"]
@@ -1397,12 +1514,21 @@ def classic_recommendation(
     max_freq = max(frequency.values()) or 1
     max_recent = max(recent_frequency.values()) or 1
     max_gap = max(gaps.values()) or 1
+    research_profile = pattern_profile(draws, max_number) if evidence else None
     number_scores = {}
     for n in range(1, max_number + 1):
         heat = frequency[n] / max_freq
         recent = recent_frequency[n] / max_recent
         overdue = gaps[n] / max_gap
-        number_scores[n] = heat * 0.45 + recent * 0.18 + overdue * 0.27 + random.Random(f"{seed_label}:{n}").random() * 0.10
+        base_score = heat * 0.45 + recent * 0.18 + overdue * 0.27
+        if research_profile:
+            features = research_profile["numberScores"][n]
+            research_score = sum(
+                features[key] * evidence.get(key, 1.0)
+                for key in RESEARCH_FEATURE_KEYS
+            ) / len(RESEARCH_FEATURE_KEYS)
+            base_score = base_score * 0.84 + research_score * 0.16
+        number_scores[n] = base_score + random.Random(f"{seed_label}:{n}").random() * 0.10
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(22, max_number)]
     rng = random.Random(f"lotto-lab:{seed_label}:{','.join(map(str, pool))}")
@@ -1553,6 +1679,20 @@ def rolling_backtest(
     }
 
 
+def model_quality(backtest: dict[str, Any]) -> float:
+    """Score a backtest while rewarding repeatability over one lucky hit."""
+    return (
+        backtest["averageHit"] * 100
+        + backtest["recentAverageHit"] * 22
+        + backtest["onePlusRate"] * 0.45
+        + backtest["twoPlusRate"] * 1.25
+        + backtest["threePlusRate"] * 2.5
+        + backtest["bestHit"] * 10
+        + backtest["distribution"].get("2", 0) * 1.7
+        + backtest["stability"] * 0.22
+    )
+
+
 def choose_model_profile(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -1560,6 +1700,9 @@ def choose_model_profile(
     backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
 ) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
     results = []
+    validation_limit = max(requested := int(backtest_limit), BACKTEST_MIN_LIMIT)
+    if validation_limit < 90 and len(draws) >= 85:
+        validation_limit = min(90, max(60, validation_limit * 2))
     for profile_name, config in MODEL_PROFILES.items():
         backtest = rolling_backtest(
             draws,
@@ -1568,16 +1711,18 @@ def choose_model_profile(
             profile_name=profile_name,
             backtest_limit=backtest_limit,
         )
-        quality = (
-            backtest["averageHit"] * 100
-            + backtest["recentAverageHit"] * 22
-            + backtest["onePlusRate"] * 0.45
-            + backtest["twoPlusRate"] * 1.25
-            + backtest["threePlusRate"] * 2.5
-            + backtest["bestHit"] * 10
-            + backtest["distribution"].get("2", 0) * 1.7
-            + backtest["stability"] * 0.22
-        )
+        validation = backtest
+        if validation_limit > max(requested, BACKTEST_MIN_LIMIT) and len(draws) >= validation_limit + 25:
+            validation = rolling_backtest(
+                draws,
+                max_number=max_number,
+                pick_count=pick_count,
+                profile_name=profile_name,
+                backtest_limit=validation_limit,
+            )
+        primary_quality = model_quality(backtest)
+        validation_quality = model_quality(validation)
+        quality = primary_quality * 0.70 + validation_quality * 0.30
         results.append(
             {
                 "id": profile_name,
@@ -1591,6 +1736,10 @@ def choose_model_profile(
                 "testedCount": backtest["testedCount"],
                 "recentAverageHit": backtest["recentAverageHit"],
                 "stability": backtest["stability"],
+                "validationCount": validation["testedCount"],
+                "validationAverageHit": validation["averageHit"],
+                "validationTwoPlusRate": validation["twoPlusRate"],
+                "validationThreePlusRate": validation["threePlusRate"],
             }
         )
     results.sort(key=lambda item: (-item["quality"], -item["averageHit"], -item["threePlusRate"], item["id"]))
@@ -1743,12 +1892,17 @@ def analyze(
         pick_count=pick_count,
         backtest_limit=backtest_limit,
     )
+    research_evidence = research_feature_evidence(reference_draws or draws, max_number=max_number)
+    evidence_map = {
+        item["id"]: item["multiplier"] for item in research_evidence.get("features", [])
+    }
     recommendation = model_recommendation(
         draws,
         max_number=max_number,
         pick_count=pick_count,
         seed_label=seed_label,
         profile_name=selected_profile,
+        evidence=evidence_map,
     )
     patterns = pattern_summary(draws, max_number, selected_profile)
     short_consensus = short_term_consensus(
@@ -1768,6 +1922,7 @@ def analyze(
         "backtest": backtest,
         "modelProfiles": model_results,
         "patterns": patterns,
+        "researchEvidence": research_evidence,
         "shortTermConsensus": short_consensus,
         "note": "這是用多視窗熱度、近期動能、遺漏週期、尾數動能、區間集中、奇偶大小、總和版路、拖牌連莊、鄰近號與穩定度回測做的交叉統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
     }
@@ -1803,14 +1958,20 @@ def analyze_with_stable_backtest(
     if not fallback_backtest.get("testedCount"):
         return analysis
 
+    research_evidence = research_feature_evidence(fallback_draws, max_number=max_number)
+    evidence_map = {
+        item["id"]: item["multiplier"] for item in research_evidence.get("features", [])
+    }
     analysis["backtest"] = fallback_backtest
     analysis["modelProfiles"] = model_results
+    analysis["researchEvidence"] = research_evidence
     analysis["recommendation"] = model_recommendation(
-        draws,
+        fallback_draws,
         max_number=max_number,
         pick_count=pick_count,
         seed_label=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         profile_name=selected_profile,
+        evidence=evidence_map,
     )
     analysis["shortTermConsensus"] = short_term_consensus(
         fallback_draws,
