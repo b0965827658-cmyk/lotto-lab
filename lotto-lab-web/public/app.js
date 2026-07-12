@@ -12,6 +12,7 @@ const state = {
   displayHistory: [],
   requestId: 0,
   latestRequestId: 0,
+  activeTab: "latest",
   apiCache: new Map(),
   candidateCache: new Map(),
   backtestCache: new Map(),
@@ -398,6 +399,7 @@ function requireFlagship(feature) {
 }
 
 function activateTab(tabName) {
+  state.activeTab = tabName;
   els.tabButtons.forEach((button) => {
     const active = button.dataset.tab === tabName;
     button.classList.toggle("active", active);
@@ -406,6 +408,9 @@ function activateTab(tabName) {
   els.tabPanels.forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
   });
+  if (tabName === "model" && state.analysis) {
+    renderModelOutput({ heavy: true });
+  }
 }
 
 function loadPlanPreview() {
@@ -493,9 +498,8 @@ function applyPlanAccess() {
   els.crossYearSearch.classList.toggle("pro-required", !pro);
   updateNotificationUi();
   if (state.analysis) {
-    renderCandidates();
-    renderModeSnapshots();
     renderFlagshipPick();
+    renderModelOutput({ heavy: state.activeTab === "model" });
   }
 }
 
@@ -1392,11 +1396,16 @@ function renderModeSnapshots() {
   });
 }
 
-function renderModelOutput() {
+function renderModelOutput({ heavy = state.activeTab === "model" } = {}) {
   renderSavedPicks();
   renderReferencePick();
-  renderCandidates();
-  renderModeSnapshots();
+  if (heavy || !isProPlan()) {
+    renderCandidates();
+    renderModeSnapshots();
+    return;
+  }
+  els.candidates.innerHTML = `<div class="empty-state">開啟「模型」分頁後產生高分候選組合。</div>`;
+  els.modeSnapshots.innerHTML = `<div class="empty-state">開啟「模型」分頁後產生各模式候選快照。</div>`;
 }
 
 function scheduleModelRender(message = "模型設定已更新。") {
@@ -1510,7 +1519,6 @@ function renderModelBacktest(backtest, profiles = []) {
   if (validationHtml || ranking || warning) {
     els.backtestRecent.insertAdjacentHTML("afterbegin", `${validationHtml}${warning}<div class="model-rank-list">${ranking}</div>`);
   }
-  rememberModelSnapshots();
 }
 
 function renderPatterns(patterns, profiles = [], researchEvidence = null) {
@@ -1744,11 +1752,8 @@ function render(payload) {
   els.overdue.innerHTML = rankRows(analysis.overdue, "gap");
   renderHistory();
   els.drawCount.textContent = `${analysis.drawCount} 期`;
-  renderSavedPicks();
-  renderReferencePick();
   renderFlagshipPick();
-  renderCandidates();
-  renderModeSnapshots();
+  renderModelOutput({ heavy: state.activeTab === "model" });
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
 }
 
@@ -2053,6 +2058,16 @@ async function load(options = {}) {
     if (!silent) setStatus("已先顯示暫存資料，正在背景確認最新開獎...");
   } else {
     if (!silent) setStatus("正在讀取資料...");
+    if (!state.latest) {
+      fetchJsonWithTimeout(`/api/latest?game=${state.game}&t=${Date.now()}`, { timeoutMs: LATEST_FETCH_TIMEOUT_MS })
+        .then((latestPayload) => {
+          if (latestPayload.ok && requestId === state.requestId && !state.latest) {
+            renderLatestCard(latestPayload.latest);
+            setStatus("最新開獎已顯示，正在載入完整分析...");
+          }
+        })
+        .catch(() => {});
+    }
   }
   if (!silent) els.refresh.disabled = true;
   try {
