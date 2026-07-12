@@ -2055,7 +2055,7 @@ async function load(options = {}) {
     render(cachedPayload);
     if (!silent) setStatus("已先顯示暫存資料，正在背景確認最新開獎...");
   } else {
-    if (!silent) setStatus("正在讀取資料...");
+    if (!silent) setStatus("數據分析中...");
     if (!state.latest) {
       fetchJsonWithTimeout(`/api/latest?game=${state.game}&t=${Date.now()}`, { timeoutMs: LATEST_FETCH_TIMEOUT_MS })
         .then((latestPayload) => {
