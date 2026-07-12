@@ -437,13 +437,11 @@ function saveBacktestLimit() {
 }
 
 function normalizeFlagshipLimit(value) {
-  const number = Number(value);
-  if (!Number.isInteger(number)) return 90;
-  return Math.max(10, Math.min(365, number));
+  return 90;
 }
 
 function loadFlagshipLimit() {
-  return normalizeFlagshipLimit(localStorage.getItem(FLAGSHIP_LIMIT_STORAGE_KEY) || 90);
+  return 90;
 }
 
 function saveFlagshipLimit() {
@@ -1266,7 +1264,7 @@ function renderFlagshipPick() {
     </div>
   `;
   els.flagshipMeta.innerHTML = `
-    <span class="flagship-window-note">旗艦專屬近 ${state.analysis?.flagshipAnalysisLimit || state.flagshipLimit} 期分析</span>
+    <span class="flagship-window-note">近期強勢版路：近 10／20／36 期交叉分析</span>
     <span class="flagship-core-note">星心主推 ${pad(confidenceNumber)}：本組最高信心號碼</span>
     <span>旗艦摘星六碼：模型高分候選池</span>
     <span>研究支持：${evidenceText}</span>
@@ -2240,13 +2238,15 @@ els.backtestApply.addEventListener("click", () => {
   load();
 });
 
-els.flagshipLimitApply.addEventListener("click", () => {
-  if (!requireFlagship("旗艦專屬期數分析")) return;
-  state.flagshipLimit = normalizeFlagshipLimit(els.flagshipLimitSelect.value);
-  saveFlagshipLimit();
-  syncFlagshipControls();
-  load();
-});
+if (els.flagshipLimitApply) {
+  els.flagshipLimitApply.addEventListener("click", () => {
+    if (!requireFlagship("旗艦專屬期數分析")) return;
+    state.flagshipLimit = normalizeFlagshipLimit(els.flagshipLimitSelect.value);
+    saveFlagshipLimit();
+    syncFlagshipControls();
+    load();
+  });
+}
 
 els.refresh.addEventListener("click", load);
 els.crossYearSearch.addEventListener("click", runCrossYearSearch);
