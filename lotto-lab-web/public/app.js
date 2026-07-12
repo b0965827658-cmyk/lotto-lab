@@ -345,8 +345,8 @@ function historyRows(draws) {
     .map(
       (draw) => `
         <tr>
-          <td>${draw.date || "-"}</td>
-          <td>${draw.period || "-"}</td>
+          <td class="history-date">${draw.date || "-"}</td>
+          <td class="history-period">${draw.period || "-"}</td>
           <td class="number-text">
             <div class="history-balls" aria-label="開獎號碼 ${draw.numbers.map(pad).join("、")}">
               ${draw.numbers.map((number) => `<span class="mini-ball history-ball">${pad(number)}</span>`).join("")}
