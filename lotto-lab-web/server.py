@@ -101,6 +101,8 @@ class CacheItem:
 
 
 cache: dict[str, CacheItem] = {}
+cache_lock = threading.RLock()
+cache_inflight: dict[str, threading.Event] = {}
 flagship_snapshot_memory: dict[str, list[int]] = {}
 flagship_snapshot_lock = threading.RLock()
 rate_limit_hits: dict[tuple[str, str], list[float]] = {}
@@ -669,12 +671,31 @@ def auto_notify_loop() -> None:
 
 
 def cached(key: str, loader, ttl_seconds: int | None = None):
-    hit = cache.get(key)
     ttl = CACHE_TTL_SECONDS if ttl_seconds is None else max(1, ttl_seconds)
-    if hit and time.time() - hit.created_at < ttl:
-        return hit.value
-    value = loader()
-    cache[key] = CacheItem(value=value, created_at=time.time())
+    while True:
+        with cache_lock:
+            hit = cache.get(key)
+            if hit and time.time() - hit.created_at < ttl:
+                return hit.value
+            pending = cache_inflight.get(key)
+            if pending is None:
+                pending = threading.Event()
+                cache_inflight[key] = pending
+                break
+        pending.wait(timeout=120)
+
+    try:
+        value = loader()
+    except Exception:
+        with cache_lock:
+            cache_inflight.pop(key, None)
+            pending.set()
+        raise
+
+    with cache_lock:
+        cache[key] = CacheItem(value=value, created_at=time.time())
+        cache_inflight.pop(key, None)
+        pending.set()
     return value
 
 
@@ -1660,7 +1681,7 @@ def model_recommendation(
     rng = random.Random(f"lotto-lab:{profile_name}:{seed_label}:{','.join(map(str, pool))}")
     candidates: set[tuple[int, ...]] = set()
     candidates.add(tuple(sorted(pool[:pick_count])))
-    for _ in range(candidate_budget or 420):
+    for _ in range(candidate_budget or 220):
         weighted = sorted(pool, key=lambda n: number_scores[n] + rng.random() * 0.28, reverse=True)
         candidates.add(tuple(sorted(weighted[:pick_count])))
         if len(pool) >= pick_count:
@@ -1730,7 +1751,7 @@ def classic_recommendation(
     rng = random.Random(f"lotto-lab:{seed_label}:{','.join(map(str, pool))}")
     candidates: set[tuple[int, ...]] = set()
     candidates.add(tuple(sorted(pool[:pick_count])))
-    for _ in range(candidate_budget or 260):
+    for _ in range(candidate_budget or 140):
         weighted = sorted(pool, key=lambda n: number_scores[n] + rng.random() * 0.34, reverse=True)
         candidates.add(tuple(sorted(weighted[:pick_count])))
         if len(pool) >= pick_count:
@@ -1819,7 +1840,7 @@ def rolling_backtest(
     rows = []
     requested_limit = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
     sample_size = min(requested_limit, max(0, len(ordered) - 25))
-    candidate_budget = 420 if requested_limit <= 35 else 220 if requested_limit <= 90 else 100 if requested_limit <= 180 else 60
+    candidate_budget = 180 if requested_limit <= 35 else 120 if requested_limit <= 90 else 80 if requested_limit <= 180 else 50
     for index in range(sample_size):
         target = ordered[index]
         training = ordered[index + 1 : index + 91]
