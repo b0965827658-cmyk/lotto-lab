@@ -1827,6 +1827,37 @@ def short_term_consensus(
     }
 
 
+def recent_flagship_selection(
+    base_numbers: list[int],
+    patterns: dict[str, Any],
+    consensus: dict[str, Any],
+    max_number: int = 39,
+    pick_count: int = 6,
+) -> list[int]:
+    """Blend the existing model with the 10/20/36-period recent consensus."""
+    scores = {number: 0.0 for number in range(1, max_number + 1)}
+    for item in consensus.get("leaders", []):
+        number = int(item.get("number", 0))
+        if number in scores:
+            scores[number] += float(item.get("score", 0)) + int(item.get("agreement", 0)) * 16
+    for view in consensus.get("windows", []):
+        for rank, number in enumerate(view.get("leaders", [])[:8]):
+            if number in scores:
+                scores[number] += max(0, 8 - rank) * 2.2
+        for rank, number in enumerate(view.get("recommendation", [])[:6]):
+            if number in scores:
+                scores[number] += max(0, 6 - rank) * 3.2
+    for item in patterns.get("signalLeaders", [])[:8]:
+        number = int(item.get("number", 0))
+        if number in scores:
+            scores[number] += float(item.get("score", 0)) * 0.5 + int(item.get("support", 0)) * 5
+    for number in base_numbers:
+        if number in scores:
+            scores[number] += 14
+    ranked = sorted(scores, key=lambda number: (-scores[number], number))
+    return ranked[: min(pick_count, max_number)]
+
+
 def rolling_backtest(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -2137,6 +2168,7 @@ def analyze(
         pick_count=pick_count,
         profile_name=selected_profile,
     )
+    flagship_numbers = recent_flagship_selection(flagship_numbers, patterns, short_consensus, max_number=max_number)
 
     return {
         "drawCount": len(draws),
@@ -2219,6 +2251,12 @@ def analyze_with_stable_backtest(
     )
     analysis["patterns"]["selectedProfile"] = selected_profile
     analysis["patterns"]["selectedLabel"] = MODEL_PROFILES.get(selected_profile, MODEL_PROFILES["balanced"])["label"]
+    analysis["flagshipRecommendation"] = recent_flagship_selection(
+        analysis["flagshipRecommendation"],
+        analysis["patterns"],
+        analysis["shortTermConsensus"],
+        max_number=max_number,
+    )
     analysis["backtest"]["method"] = (
         f"目前選擇近 {len(draws)} 期，短期樣本不足以單獨回測；"
         f"模型回測已自動改用近 {len(fallback_draws)} 期穩定樣本。"
