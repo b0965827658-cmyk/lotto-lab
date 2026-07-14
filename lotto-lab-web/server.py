@@ -70,6 +70,7 @@ MAX_SAVED_PICKS_PER_SUBSCRIPTION = 20
 API_RATE_LIMITS = {
     "/api/latest": (120, 60),
     "/api/lottery": (90, 60),
+    "/api/flagship-history": (60, 60),
     "/api/history-search": (45, 60),
     "/api/config": (120, 60),
     "/api/push-subscription": (20, 60),
@@ -217,6 +218,29 @@ def init_database() -> None:
         )
         """
     )
+    database_execute(
+        """
+        CREATE TABLE IF NOT EXISTS flagship_analysis_history (
+            snapshot_key TEXT PRIMARY KEY,
+            game TEXT NOT NULL,
+            latest_period TEXT NOT NULL,
+            latest_date TEXT NOT NULL,
+            selected_limit INTEGER NOT NULL,
+            numbers_json TEXT NOT NULL,
+            method TEXT NOT NULL,
+            components_json TEXT NOT NULL,
+            reasoning_json TEXT NOT NULL,
+            profile_name TEXT NOT NULL,
+            history_fingerprint TEXT NOT NULL,
+            actual_period TEXT NOT NULL DEFAULT '',
+            actual_date TEXT NOT NULL DEFAULT '',
+            actual_numbers_json TEXT NOT NULL DEFAULT '[]',
+            hit_count INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     database_ready = True
 
 
@@ -292,6 +316,217 @@ def load_database_history(game: str, limit: int = 5000) -> list[dict[str, Any]]:
             }
         )
     return history
+
+
+def flagship_reasoning_summary(
+    analysis: dict[str, Any],
+    numbers: list[int],
+    selected_limit: int,
+) -> dict[str, Any]:
+    """Keep a compact, readable explanation beside each published flagship pick."""
+    patterns = analysis.get("patterns") or {}
+    backtest = analysis.get("backtest") or {}
+    support = backtest.get("numberSupport") or {}
+    top_support = sorted(
+        (
+            {"number": int(number), "score": round(float(value), 4)}
+            for number, value in support.items()
+            if str(number).isdigit()
+        ),
+        key=lambda item: (-item["score"], item["number"]),
+    )[:8]
+    selected_support = [
+        {"number": number, "score": round(float(support.get(str(number), support.get(number, 0))), 4)}
+        for number in numbers
+    ]
+    return {
+        "analysisLimit": int(selected_limit),
+        "selectedNumbers": list(numbers),
+        "recentHot": (analysis.get("hot") or [])[:8],
+        "intervals": (patterns.get("intervals") or [])[:3],
+        "pairCombos": (patterns.get("pairCombos") or [])[:3],
+        "dragCards": (patterns.get("dragCards") or [])[:3],
+        "repeatCandidates": (patterns.get("repeatCandidates") or [])[:3],
+        "multiWindowNumbers": (patterns.get("multiWindowNumbers") or [])[:8],
+        "tailMomentum": (patterns.get("tailMomentum") or [])[:3],
+        "backtestSummary": {
+            "testedCount": backtest.get("testedCount", 0),
+            "averageHit": backtest.get("averageHit", 0),
+            "onePlusRate": backtest.get("onePlusRate", 0),
+            "twoPlusRate": backtest.get("twoPlusRate", 0),
+            "threePlusRate": backtest.get("threePlusRate", 0),
+            "bestHit": backtest.get("bestHit", 0),
+        },
+        "backtestLeaders": top_support,
+        "selectedBacktestSupport": selected_support,
+    }
+
+
+def load_flagship_analysis_history(game: str, limit: int = 30) -> list[dict[str, Any]]:
+    if not database_ready or game not in ALLOWED_GAMES:
+        return []
+    rows = database_query(
+        """
+        SELECT snapshot_key, game, latest_period, latest_date, selected_limit,
+               numbers_json, method, components_json, reasoning_json,
+               profile_name, history_fingerprint, actual_period, actual_date,
+               actual_numbers_json, hit_count, created_at, updated_at
+        FROM flagship_analysis_history
+        WHERE game = ?
+        ORDER BY latest_date DESC, latest_period DESC, created_at DESC
+        LIMIT ?
+        """,
+        (game, max(1, min(int(limit), 100))),
+    )
+    history = []
+    for row in rows:
+        try:
+            numbers = json.loads(row[5])
+            components = json.loads(row[7])
+            reasoning = json.loads(row[8])
+            actual_numbers = json.loads(row[13])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(numbers, list) or len(numbers) != 6:
+            continue
+        if not isinstance(actual_numbers, list):
+            actual_numbers = []
+        history.append(
+            {
+                "snapshotKey": row[0],
+                "game": row[1],
+                "latestPeriod": row[2],
+                "latestDate": row[3],
+                "selectedLimit": row[4],
+                "numbers": normalize_numbers(numbers),
+                "method": row[6],
+                "components": components if isinstance(components, list) else [],
+                "reasoning": reasoning if isinstance(reasoning, dict) else {},
+                "profile": row[9],
+                "historyFingerprint": row[10],
+                "actualPeriod": row[11] or "",
+                "actualDate": row[12] or "",
+                "actualNumbers": normalize_numbers(actual_numbers) if actual_numbers else [],
+                "hitCount": row[14],
+                "createdAt": row[15],
+                "updatedAt": row[16],
+            }
+        )
+    return history
+
+
+def persist_flagship_analysis_history(
+    game: str,
+    latest: dict[str, Any],
+    selected_limit: int,
+    history: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    snapshot: dict[str, Any],
+) -> None:
+    """Persist the flagship reasoning and fill outcomes when the next draw arrives."""
+    if not database_ready or game not in ALLOWED_GAMES:
+        return
+    snapshot_key = str(snapshot.get("key", "")).strip()
+    numbers = [int(number) for number in (analysis.get("flagshipRecommendation") or [])[:6]]
+    if not snapshot_key or len(numbers) != 6:
+        return
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    components = analysis.get("flagshipComponents") or [
+        {"id": "recent", "label": "近期熱牌", "weight": 34},
+        {"id": "interval", "label": "區間", "weight": 24},
+        {"id": "backtest", "label": "回測", "weight": 22},
+        {"id": "pattern", "label": "版路", "weight": 20},
+    ]
+    reasoning = flagship_reasoning_summary(analysis, numbers, selected_limit)
+    profile_name = str((analysis.get("patterns") or {}).get("selectedProfile", "balanced"))
+    fingerprint = str(snapshot.get("historyFingerprint") or draw_fingerprint(history))
+    database_execute(
+        """
+        INSERT INTO flagship_analysis_history
+            (snapshot_key, game, latest_period, latest_date, selected_limit,
+             numbers_json, method, components_json, reasoning_json, profile_name,
+             history_fingerprint, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (snapshot_key) DO UPDATE SET
+            selected_limit = excluded.selected_limit,
+            numbers_json = excluded.numbers_json,
+            method = excluded.method,
+            components_json = excluded.components_json,
+            reasoning_json = excluded.reasoning_json,
+            profile_name = excluded.profile_name,
+            history_fingerprint = excluded.history_fingerprint,
+            updated_at = excluded.updated_at
+        """,
+        (
+            snapshot_key,
+            game,
+            str(latest.get("period", "")),
+            str(latest.get("date", "")),
+            int(selected_limit),
+            json.dumps(numbers, ensure_ascii=False),
+            str(analysis.get("flagshipMethod", "")),
+            json.dumps(components, ensure_ascii=False),
+            json.dumps(reasoning, ensure_ascii=False),
+            profile_name,
+            fingerprint,
+            now,
+            now,
+        ),
+    )
+
+    ordered_history = canonical_analysis_draws(history)
+    if not ordered_history:
+        return
+    current_key = (str(latest.get("date", "")), str(latest.get("period", "")))
+    open_rows = database_query(
+        """
+        SELECT snapshot_key, latest_date, latest_period, numbers_json
+        FROM flagship_analysis_history
+        WHERE game = ? AND actual_period = ''
+        ORDER BY latest_date DESC, latest_period DESC
+        LIMIT 100
+        """,
+        (game,),
+    )
+    for row in open_rows:
+        snapshot_draw_key = (str(row[1]), str(row[2]))
+        if snapshot_draw_key >= current_key:
+            continue
+        newer_draws = [
+            draw
+            for draw in ordered_history
+            if (str(draw.get("date", "")), str(draw.get("period", ""))) > snapshot_draw_key
+        ]
+        if not newer_draws:
+            continue
+        actual = min(
+            newer_draws,
+            key=lambda draw: (str(draw.get("date", "")), str(draw.get("period", ""))),
+        )
+        try:
+            stored_numbers = json.loads(row[3])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(stored_numbers, list) or len(stored_numbers) != 6:
+            continue
+        actual_numbers = normalize_numbers(actual.get("numbers", []))
+        hits = len(set(int(number) for number in stored_numbers) & set(actual_numbers))
+        database_execute(
+            """
+            UPDATE flagship_analysis_history
+            SET actual_period = ?, actual_date = ?, actual_numbers_json = ?,
+                hit_count = ?, updated_at = ?
+            WHERE snapshot_key = ? AND actual_period = ''
+            """,
+            (
+                str(actual.get("period", "")),
+                str(actual.get("date", "")),
+                json.dumps(actual_numbers, ensure_ascii=False),
+                hits,
+                now,
+                row[0],
+            ),
+        )
 
 
 def merge_draw_history(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2417,6 +2652,16 @@ def attach_flagship_analysis(
     result["flagshipAnalysisLimit"] = flagship_limit
     result["flagshipProfile"] = (flagship_analysis.get("patterns") or {}).get("selectedProfile", "balanced")
     result["flagshipResearchEvidence"] = flagship_analysis.get("researchEvidence", {})
+    history_analysis = dict(flagship_analysis)
+    history_analysis["flagshipRecommendation"] = flagship_numbers
+    persist_flagship_analysis_history(
+        game,
+        latest,
+        flagship_limit,
+        history,
+        history_analysis,
+        snapshot,
+    )
     return result
 
 
@@ -2645,6 +2890,25 @@ class Handler(SimpleHTTPRequestHandler):
                     flagship_limit=flagship_limit,
                 )
                 self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=502)
+            return
+        if parsed.path == "/api/flagship-history":
+            params = parse_qs(parsed.query)
+            try:
+                game = clean_game(params.get("game", ["tw539"])[0])
+                limit = clamp_int(params.get("limit", ["30"])[0], 30, 1, 100)
+                if game not in ALLOWED_GAMES:
+                    raise ValueError("不支援的遊戲種類")
+                self.send_json(
+                    {
+                        "ok": True,
+                        "game": game,
+                        "history": load_flagship_analysis_history(game, limit),
+                    }
+                )
             except ValueError as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
             except Exception as exc:
