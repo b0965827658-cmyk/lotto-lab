@@ -10,6 +10,9 @@ const state = {
   analysis: null,
   history: [],
   displayHistory: [],
+  flagshipHistory: [],
+  flagshipHistoryLoading: false,
+  flagshipHistoryLatestKey: "",
   requestId: 0,
   latestRequestId: 0,
   activeTab: "latest",
@@ -139,6 +142,8 @@ const els = {
   generate: $("#generateBtn"),
   candidates: $("#candidateList"),
   modeSnapshots: $("#modeSnapshotList"),
+  flagshipHistoryList: $("#flagshipHistoryList"),
+  flagshipHistoryRefresh: $("#flagshipHistoryRefresh"),
   modelInputs: Array.from(document.querySelectorAll("[data-weight]")),
   focusButtons: Array.from(document.querySelectorAll("[data-focus]")),
   modelSummary: $("#modelSummary"),
@@ -375,6 +380,101 @@ function renderHistory() {
   els.historyCount.textContent = `${rows.length} / ${state.displayHistory.length} 期`;
 }
 
+function flagshipHistoryNumbers(items = []) {
+  return items.map((item) => pad(item)).join("、") || "資料不足";
+}
+
+function renderFlagshipHistory() {
+  if (!els.flagshipHistoryList) return;
+  if (!isFlagshipPlan()) {
+    els.flagshipHistoryList.innerHTML = `<div class="empty-state">升級量化旗艦版後可查看歷史推理紀錄。</div>`;
+    return;
+  }
+  if (state.flagshipHistoryLoading) {
+    els.flagshipHistoryList.innerHTML = `<div class="empty-state">正在載入旗艦分析紀錄...</div>`;
+    return;
+  }
+  if (!state.flagshipHistory.length) {
+    els.flagshipHistoryList.innerHTML = `<div class="empty-state">目前還沒有保存的旗艦分析；完成一次數據分析後會自動建立紀錄。</div>`;
+    return;
+  }
+  els.flagshipHistoryList.innerHTML = state.flagshipHistory
+    .map((record) => {
+      const reasoning = record.reasoning || {};
+      const summary = reasoning.backtestSummary || {};
+      const components = (record.components || [])
+        .map((item) => `${item.label || item.id} ${item.weight || 0}%`)
+        .join(" · ");
+      const actualAvailable = record.actualPeriod && Array.isArray(record.actualNumbers) && record.actualNumbers.length;
+      const outcome = record.hitCount === null || record.hitCount === undefined ? "待下一期開獎" : `${record.hitCount} 中`;
+      const recentHot = (reasoning.recentHot || []).slice(0, 5).map((item) => item.number);
+      const intervals = (reasoning.intervals || []).slice(0, 2).map((item) => item.label || `${item.start}-${item.end}`);
+      const pairs = (reasoning.pairCombos || [])
+        .slice(0, 2)
+        .map((item) => (item.numbers || []).map(pad).join("+") )
+        .filter(Boolean);
+      const backtestText = summary.testedCount
+        ? `回測 ${summary.testedCount} 期 · 均中 ${summary.averageHit ?? 0} · 最高 ${summary.bestHit ?? 0} 中`
+        : "回測資料累積中";
+      return `
+        <article class="flagship-history-item">
+          <div class="flagship-history-head">
+            <div>
+              <strong>${record.latestDate || "-"}</strong>
+              <span>分析期 ${record.latestPeriod || "-"} · 近 ${record.selectedLimit || "-"} 期</span>
+            </div>
+            <span class="flagship-history-result ${actualAvailable ? "completed" : "pending"}">${outcome}</span>
+          </div>
+          <div class="flagship-history-balls">${miniBalls(record.numbers, actualAvailable ? record.actualNumbers : [])}</div>
+          <div class="flagship-history-meta">
+            <span>${record.method || "四維綜合推理"}</span>
+            <span>模型 ${record.profile || "綜合"}</span>
+            <span>${components || "近期熱牌 34% · 區間 24% · 回測 22% · 版路 20%"}</span>
+          </div>
+          <div class="flagship-history-reasoning">
+            <span>熱牌：${flagshipHistoryNumbers(recentHot)}</span>
+            <span>區間：${intervals.join("、") || "資料累積中"}</span>
+            <span>版路：${pairs.join("、") || "綜合版路"}</span>
+            <span>${backtestText}</span>
+          </div>
+          ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：${miniBalls(record.actualNumbers)}</div>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function loadFlagshipHistory(options = {}) {
+  if (!els.flagshipHistoryList || !isFlagshipPlan()) {
+    renderFlagshipHistory();
+    return;
+  }
+  const force = Boolean(options.force);
+  const latestKey = drawKey(state.latest);
+  if (!force && state.flagshipHistoryLatestKey === latestKey && state.flagshipHistory.length) return;
+  state.flagshipHistoryLoading = true;
+  renderFlagshipHistory();
+  if (els.flagshipHistoryRefresh) els.flagshipHistoryRefresh.disabled = true;
+  try {
+    const payload = await fetchJsonWithTimeout(
+      `/api/flagship-history?game=${state.game}&limit=30&t=${Date.now()}`,
+      { timeoutMs: 15000 },
+    );
+    if (!payload.ok) throw new Error(payload.error || "旗艦歷史載入失敗");
+    state.flagshipHistory = Array.isArray(payload.history) ? payload.history : [];
+    state.flagshipHistoryLatestKey = latestKey;
+    renderFlagshipHistory();
+    if (!options.silent) setStatus(`已載入 ${state.flagshipHistory.length} 筆旗艦分析紀錄。`);
+  } catch (error) {
+    renderFlagshipHistory();
+    if (!options.silent) setStatus(error.name === "AbortError" ? "旗艦歷史載入逾時，請稍後再試。" : error.message, true);
+  } finally {
+    state.flagshipHistoryLoading = false;
+    if (els.flagshipHistoryRefresh) els.flagshipHistoryRefresh.disabled = false;
+    renderFlagshipHistory();
+  }
+}
+
 function setStatus(message, isError = false) {
   els.status.textContent = message;
   els.status.classList.toggle("error", isError);
@@ -414,6 +514,7 @@ function activateTab(tabName) {
   });
   if (tabName === "model" && state.analysis) {
     renderModelOutput({ heavy: true });
+    loadFlagshipHistory({ silent: true });
   }
 }
 
@@ -501,7 +602,9 @@ function applyPlanAccess() {
   updateNotificationUi();
   if (state.analysis) {
     renderFlagshipPick();
+    renderFlagshipHistory();
     renderModelOutput({ heavy: state.activeTab === "model" });
+    if (flagship && state.activeTab === "model") loadFlagshipHistory({ silent: true });
   }
 }
 
@@ -1756,6 +1859,8 @@ function render(payload) {
   renderHistory();
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderFlagshipPick();
+  renderFlagshipHistory();
+  if (state.activeTab === "model" && isFlagshipPlan()) loadFlagshipHistory({ silent: true });
   renderModelOutput({ heavy: state.activeTab === "model" });
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
 }
@@ -2255,6 +2360,13 @@ if (els.flagshipLimitApply) {
 
 els.refresh.addEventListener("click", load);
 els.crossYearSearch.addEventListener("click", runCrossYearSearch);
+
+if (els.flagshipHistoryRefresh) {
+  els.flagshipHistoryRefresh.addEventListener("click", () => {
+    if (!requireFlagship("旗艦分析紀錄")) return;
+    loadFlagshipHistory({ force: true });
+  });
+}
 
 els.savedForm.addEventListener("submit", (event) => {
   event.preventDefault();
