@@ -627,13 +627,13 @@ def sanitize_saved_picks(value: Any) -> list[dict[str, Any]]:
             continue
         game = str(item.get("game", "")).strip()
         raw_numbers = item.get("numbers", [])
-        if game not in ALLOWED_GAMES or not isinstance(raw_numbers, list) or len(raw_numbers) != 5:
+        if game not in ALLOWED_GAMES or not isinstance(raw_numbers, list) or not 5 <= len(raw_numbers) <= 8:
             continue
         try:
             numbers = sorted({int(number) for number in raw_numbers})
         except (TypeError, ValueError):
             continue
-        if len(numbers) != 5 or any(number < 1 or number > 39 for number in numbers):
+        if not 5 <= len(numbers) <= 8 or any(number < 1 or number > 39 for number in numbers):
             continue
         key = f"{game}:{','.join(str(number) for number in numbers)}"
         if key in seen:
