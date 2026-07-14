@@ -13,7 +13,7 @@
     <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
     <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
-    <link rel="stylesheet" href="/styles.css?v=54" />
+    <link rel="stylesheet" href="/styles.css?v=55" />
   </head>
   <body>
     <main class="shell">
@@ -272,6 +272,18 @@
           <p class="fineprint" id="modelSummary">目前模型：熱度 30%、遺漏 25%、分散 25%、回測 20%。</p>
         </article>
 
+        <article class="panel flagship-history-panel" data-tier="flagship" data-lock-title="旗艦分析紀錄" data-lock-text="升級量化旗艦版後，可查看每期保存的六碼與完整推理摘要。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">量化旗艦版</p>
+              <h2>旗艦分析紀錄</h2>
+            </div>
+            <button id="flagshipHistoryRefresh" class="text-button" type="button">重新載入</button>
+          </div>
+          <p class="fineprint">每期保存旗艦六碼、近期熱牌、區間、回測與版路摘要；下一期開獎後會自動補上命中結果。</p>
+          <div id="flagshipHistoryList" class="flagship-history-list"></div>
+        </article>
+
         <article class="panel mode-snapshot-panel" data-tier="pro" data-lock-title="Pro 模式版路" data-lock-text="訂閱後可查看每個模式各自產生的候選組合。">
           <div class="panel-head compact">
             <div>
@@ -355,6 +367,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=58"></script>
+    <script src="/app.js?v=59"></script>
   </body>
 </html>
