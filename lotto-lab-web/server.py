@@ -4,6 +4,7 @@ import csv
 import hashlib
 import html
 import io
+import itertools
 import json
 import os
 import random
@@ -1701,19 +1702,131 @@ def flagship_recommendation(
     pick_count: int = 6,
     profile_name: str = "balanced",
     evidence: dict[str, float] | None = None,
+    backtest: dict[str, Any] | None = None,
 ) -> list[int]:
-    """Return the highest-ranked number pool for the flagship tier.
+    """Return the flagship pool from four deterministic evidence groups.
 
-    This is a six-number candidate pool, not a claim that any number has a
-    guaranteed higher physical lottery probability.
+    The groups are recent hot numbers, interval concentration, walk-forward
+    backtest support, and pattern signals.  This is a six-number candidate
+    pool, not a claim that any number has a guaranteed higher physical lottery
+    probability.
     """
-    profile = pattern_profile(draws, max_number)
+    ordered = list(draws)
+    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
-    ranked = sorted(
-        range(1, max_number + 1),
-        key=lambda number: (-score_number(number, profile, model, evidence=evidence), number),
+    current_profile = pattern_profile(ordered, max_number)
+
+    def normalize(values: dict[int, float]) -> dict[int, float]:
+        if not values:
+            return {number: 0.5 for number in range(1, max_number + 1)}
+        low = min(values.values())
+        high = max(values.values())
+        if high <= low:
+            return {number: 0.5 for number in values}
+        return {number: (value - low) / (high - low) for number, value in values.items()}
+
+    # 1) Recent hot numbers: the short windows get explicit votes so a fresh
+    # cluster can move the flagship result without discarding the full sample.
+    recent_raw = {number: 0.0 for number in range(1, max_number + 1)}
+    recent_weights = ((10, 0.50), (20, 0.30), (36, 0.20))
+    for window_size, window_weight in recent_weights:
+        rows = ordered[:window_size]
+        if not rows:
+            continue
+        counts = number_stats(rows, max_number)["frequency"]
+        max_count = max(counts.values()) or 1
+        for number in recent_raw:
+            recent_raw[number] += window_weight * safe_divide(counts[number], max_count)
+    recent_scores = normalize(recent_raw)
+
+    # 2) Interval concentration: reward numbers in the strongest recent
+    # 1-15 / 10-20 / ... interval bands, while keeping existing overlap data.
+    interval_focus = current_profile["intervalFocusCounts"]
+    interval_hits = current_profile["intervalHitCounts"]
+    max_focus = max(interval_focus.values()) or 1
+    max_hits = max(interval_hits.values()) or 1
+    interval_strengths = {
+        window: safe_divide(interval_focus.get(window, 0), max_focus) * 0.70
+        + safe_divide(interval_hits.get(window, 0), max_hits) * 0.30
+        for window in interval_windows(max_number)
+    }
+    strongest_intervals = sorted(
+        interval_strengths,
+        key=lambda window: (-interval_strengths[window], window[0], window[1]),
+    )[:3]
+    interval_raw = {
+        number: current_profile["numberScores"][number].get("interval", 0.0) * 0.30
+        for number in range(1, max_number + 1)
+    }
+    for rank, window in enumerate(strongest_intervals):
+        rank_weight = max(0.55, 1.0 - rank * 0.18)
+        start, end = window
+        for number in range(start, end + 1):
+            interval_raw[number] += interval_strengths[window] * rank_weight
+    interval_scores = normalize(interval_raw)
+
+    # 3) Walk-forward backtest support: only numbers selected by historical
+    # training windows contribute, so the target draw never leaks into the pick.
+    backtest_support = (backtest or {}).get("numberSupport", {})
+    backtest_raw = {
+        number: float(backtest_support.get(str(number), backtest_support.get(number, 0.0)))
+        for number in range(1, max_number + 1)
+    }
+    backtest_scores = normalize(backtest_raw)
+
+    # 4) Pattern signals: pair/drag/repeat, tails, neighbours and multi-window
+    # agreement form the版路 component; interval is kept separate above.
+    pattern_keys = (
+        "tail",
+        "pair",
+        "drag",
+        "repeatSignal",
+        "neighbor",
+        "multiWindow",
+        "tailMomentum",
+        "streak",
+        "momentum",
     )
-    return ranked[: min(pick_count, max_number)]
+    pattern_raw = {}
+    for number in range(1, max_number + 1):
+        features = current_profile["numberScores"][number]
+        pattern_raw[number] = sum(
+            features.get(key, 0.0) * (float((evidence or {}).get(key, 1.0)) if evidence else 1.0)
+            for key in pattern_keys
+        ) / len(pattern_keys)
+    pattern_scores = normalize(pattern_raw)
+
+    component_scores = {
+        number: recent_scores[number] * 0.34
+        + interval_scores[number] * 0.24
+        + backtest_scores[number] * 0.22
+        + pattern_scores[number] * 0.20
+        for number in range(1, max_number + 1)
+    }
+    candidate_pool = sorted(
+        component_scores,
+        key=lambda number: (-component_scores[number], number),
+    )[: min(18, max_number)]
+    if len(candidate_pool) <= pick_count:
+        return sorted(candidate_pool)
+
+    # Select the best six-number shape from the top pool.  The small search is
+    # deterministic and lets the interval/pattern evidence affect the group,
+    # not only each number independently.
+    best_combo: tuple[int, ...] | None = None
+    best_score = float("-inf")
+    for combo in itertools.combinations(candidate_pool, pick_count):
+        sorted_combo = tuple(sorted(combo))
+        combo_score = sum(component_scores[number] for number in sorted_combo) / pick_count
+        combo_score = combo_score * 0.76 + combo_pattern_score(
+            list(sorted_combo), current_profile, model, max_number
+        ) * 0.24
+        if combo_score > best_score or (
+            combo_score == best_score and (best_combo is None or sorted_combo < best_combo)
+        ):
+            best_score = combo_score
+            best_combo = sorted_combo
+    return list(best_combo or tuple(candidate_pool[:pick_count]))
 
 
 def classic_recommendation(
@@ -1902,6 +2015,18 @@ def rolling_backtest(
     two_plus = sum(1 for row in rows if row["hits"] >= 2)
     three_plus = sum(1 for row in rows if row["hits"] >= 3)
     best_hit = max((row["hits"] for row in rows), default=0)
+    number_support: dict[int, float] = {number: 0.0 for number in range(1, max_number + 1)}
+    for row in rows:
+        pick = row.get("pick") or []
+        actual = set(row.get("actual") or [])
+        for rank, number in enumerate(pick[:pick_count]):
+            # A historical pick that also appeared in the target gets the
+            # strongest support; non-hit selections retain a small signal so
+            # a number is not discarded only because of one miss.
+            rank_weight = 1.0 - (rank / max(1, pick_count))
+            hit_weight = 1.0 if number in actual else 0.25
+            number_support[int(number)] += rank_weight * hit_weight
+    support_scale = max(number_support.values()) or 1.0
     midpoint = max(1, tested // 2)
     recent_segment = rows[:midpoint]
     older_segment = rows[midpoint:]
@@ -1922,6 +2047,10 @@ def rolling_backtest(
         "recentAverageHit": round(recent_average, 2),
         "stability": stability,
         "distribution": distribution,
+        "numberSupport": {
+            str(number): round(value / support_scale, 5)
+            for number, value in number_support.items()
+        },
         "recentRows": rows[:10],
         "method": f"每一期只用該期以前的歷史資料產生推薦，再與實際開獎比對；採用多視窗、版路支持度與近期穩定度；目前採用「{MODEL_PROFILES.get(profile_name, MODEL_PROFILES['balanced'])['label']}」。",
     }
@@ -2160,6 +2289,7 @@ def analyze(
         pick_count=6,
         profile_name=selected_profile,
         evidence=evidence_map,
+        backtest=backtest,
     )
     patterns = pattern_summary(draws, max_number, selected_profile)
     short_consensus = short_term_consensus(
@@ -2168,7 +2298,6 @@ def analyze(
         pick_count=pick_count,
         profile_name=selected_profile,
     )
-    flagship_numbers = recent_flagship_selection(flagship_numbers, patterns, short_consensus, max_number=max_number)
 
     return {
         "drawCount": len(draws),
@@ -2178,6 +2307,13 @@ def analyze(
         "frequency": [{"number": n, "count": frequency[n], "gap": gaps[n]} for n in frequency],
         "recommendation": recommendation,
         "flagshipRecommendation": flagship_numbers,
+        "flagshipMethod": "近期熱牌 34%・區間 24%・回測 22%・版路 20%",
+        "flagshipComponents": [
+            {"id": "recent", "label": "近期熱牌", "weight": 34},
+            {"id": "interval", "label": "區間", "weight": 24},
+            {"id": "backtest", "label": "回測", "weight": 22},
+            {"id": "pattern", "label": "版路", "weight": 20},
+        ],
         "backtest": backtest,
         "modelProfiles": model_results,
         "patterns": patterns,
@@ -2242,6 +2378,7 @@ def analyze_with_stable_backtest(
         pick_count=6,
         profile_name=selected_profile,
         evidence=evidence_map,
+        backtest=fallback_backtest,
     )
     analysis["shortTermConsensus"] = short_term_consensus(
         display_draws,
@@ -2251,12 +2388,6 @@ def analyze_with_stable_backtest(
     )
     analysis["patterns"]["selectedProfile"] = selected_profile
     analysis["patterns"]["selectedLabel"] = MODEL_PROFILES.get(selected_profile, MODEL_PROFILES["balanced"])["label"]
-    analysis["flagshipRecommendation"] = recent_flagship_selection(
-        analysis["flagshipRecommendation"],
-        analysis["patterns"],
-        analysis["shortTermConsensus"],
-        max_number=max_number,
-    )
     analysis["backtest"]["method"] = (
         f"目前選擇近 {len(draws)} 期，短期樣本不足以單獨回測；"
         f"模型回測已自動改用近 {len(fallback_draws)} 期穩定樣本。"
