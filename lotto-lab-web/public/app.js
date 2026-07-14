@@ -1260,6 +1260,7 @@ function renderFlagshipPick() {
         .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
         .join("、")
     : "多窗口交叉驗證";
+  const flagshipMethod = state.analysis?.flagshipMethod || "近期熱牌 34%・區間 24%・回測 22%・版路 20%";
   const [confidenceNumber, ...outerNumbers] = numbers;
   els.flagshipBalls.innerHTML = `
     <div class="flagship-star-shape" role="img" aria-label="五芒星摘星六碼">
@@ -1268,9 +1269,9 @@ function renderFlagshipPick() {
     </div>
   `;
   els.flagshipMeta.innerHTML = `
-    <span class="flagship-window-note">近期強勢版路：近 10／20／36 期交叉分析</span>
+    <span class="flagship-window-note">${flagshipMethod}</span>
     <span class="flagship-core-note">星心主推 ${pad(confidenceNumber)}：本組最高信心號碼</span>
-    <span>旗艦摘星六碼：模型高分候選池</span>
+    <span>旗艦摘星六碼：四維訊號綜合推理</span>
     <span>研究支持：${evidenceText}</span>
     <span>僅供統計參考，不代表保證中獎</span>
   `;
