@@ -48,6 +48,7 @@ const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
 const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v3";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
+const DAILY_COMPARISON_STORAGE_KEY = "lotto-lab-daily-comparison-v1";
 const BACKTEST_LIMIT_STORAGE_KEY = "lotto-lab-backtest-limit";
 const FLAGSHIP_LIMIT_STORAGE_KEY = "lotto-lab-flagship-limit";
 const POLL_INTERVAL_MS = 30 * 1000;
@@ -676,6 +677,63 @@ function drawKey(draw) {
   return `${draw.name || state.game}|${draw.period || ""}|${draw.date || ""}|${(draw.numbers || []).join(".")}`;
 }
 
+function taiwanDayKey(value = new Date()) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (typeof value === "string" && !value.trim()) return "";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(value);
+    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    return values.year && values.month && values.day ? `${values.year}-${values.month}-${values.day}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function readDailyComparison() {
+  try {
+    const value = JSON.parse(localStorage.getItem(DAILY_COMPARISON_STORAGE_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function ensureDailyComparisonReset() {
+  const today = taiwanDayKey();
+  const current = readDailyComparison();
+  if (current.day === today && current.games && typeof current.games === "object") return false;
+  try {
+    localStorage.setItem(DAILY_COMPARISON_STORAGE_KEY, JSON.stringify({ day: today, games: {} }));
+  } catch {
+    // Ignore blocked storage; the page can still compare while it remains open.
+  }
+  return true;
+}
+
+function markDailyComparison(latest) {
+  ensureDailyComparisonReset();
+  if (!latest || taiwanDayKey(latest.date) !== taiwanDayKey()) return;
+  const current = readDailyComparison();
+  const games = current.games && typeof current.games === "object" ? current.games : {};
+  games[state.game] = drawKey(latest);
+  try {
+    localStorage.setItem(DAILY_COMPARISON_STORAGE_KEY, JSON.stringify({ day: taiwanDayKey(), games }));
+  } catch {
+    // Ignore blocked storage; the current render still has the latest draw.
+  }
+}
+
+function dailyComparisonReady(latest) {
+  if (!latest || taiwanDayKey(latest.date) !== taiwanDayKey()) return false;
+  const current = readDailyComparison();
+  return current.day === taiwanDayKey() && current.games?.[state.game] === drawKey(latest);
+}
+
 function readLastSeenDraw() {
   try {
     return JSON.parse(localStorage.getItem(LAST_SEEN_DRAW_STORAGE_KEY) || "{}");
@@ -769,13 +827,17 @@ function gameLabel(game) {
 }
 
 function parseSavedInputs() {
-  const numbers = els.savedInputs.map((input) => Number(input.value));
+  const values = els.savedInputs.map((input) => input.value.trim()).filter(Boolean);
+  if (values.length < 5 || values.length > 8) {
+    throw new Error("請輸入 5 到 8 個號碼。");
+  }
+  const numbers = values.map((value) => Number(value));
   if (numbers.some((n) => !Number.isInteger(n) || n < 1 || n > 39)) {
-    throw new Error("請輸入 1 到 39 的五個號碼。");
+    throw new Error("號碼請輸入 1 到 39。");
   }
   const unique = new Set(numbers);
-  if (unique.size !== 5) {
-    throw new Error("五個號碼不能重複。");
+  if (unique.size !== numbers.length) {
+    throw new Error("輸入的號碼不能重複。");
   }
   return [...unique].sort((a, b) => a - b);
 }
@@ -1786,7 +1848,9 @@ function renderPatterns(patterns, profiles = [], researchEvidence = null) {
 
 function renderSavedPicks() {
   const picks = loadSavedPicks().filter((pick) => pick.game === state.game);
-  const latestNumbers = state.latest?.numbers || [];
+  ensureDailyComparisonReset();
+  const comparisonReady = dailyComparisonReady(state.latest);
+  const latestNumbers = comparisonReady ? state.latest?.numbers || [] : [];
   if (!picks.length) {
     els.savedList.innerHTML = `<div class="empty-state">還沒有儲存號碼。</div>`;
     return;
@@ -1802,7 +1866,7 @@ function renderSavedPicks() {
         <div class="saved-item">
           <div>
             <div class="saved-balls">${miniBalls(pick.numbers, latestNumbers)}</div>
-            <p class="saved-meta">${gameLabel(pick.game)} · ${savedAt} · 回測 ${backtest.testedCount} 期</p>
+            <p class="saved-meta">${gameLabel(pick.game)} · ${savedAt} · 回測 ${backtest.testedCount} 期${comparisonReady ? "" : " · 等待今日開獎"}</p>
             <div class="score-card">
               <div class="score-main">
                 <strong>${score.total}</strong>
@@ -1818,8 +1882,8 @@ function renderSavedPicks() {
             <div class="backtest-bars">${backtestBars(backtest.distribution, backtest.testedCount)}</div>
           </div>
           <div class="saved-result">
-            <strong>${hits}</strong>
-            <span>中</span>
+            <strong>${comparisonReady ? hits : "-"}</strong>
+            <span>${comparisonReady ? "中" : "待開獎"}</span>
             <button class="delete-button" data-delete-pick="${pick.id}" aria-label="刪除">×</button>
           </div>
         </div>
@@ -1841,6 +1905,7 @@ function renderSavedPicks() {
 function render(payload) {
   const { latest, history, analysis, updatedAt } = payload;
   state.latest = latest;
+  markDailyComparison(latest);
   state.analysis = analysis;
   state.history = history;
   state.displayHistory = history;
@@ -2154,6 +2219,8 @@ async function loadConfig() {
 
 async function load(options = {}) {
   const silent = Boolean(options.silent);
+  const dailyReset = ensureDailyComparisonReset();
+  if (dailyReset && state.latest) renderSavedPicks();
   if (!isProPlan() && state.limit > 90) {
     state.limit = 90;
     els.limit.value = "90";
@@ -2204,6 +2271,8 @@ async function load(options = {}) {
 }
 
 async function refreshLatest(options = {}) {
+  const dailyReset = ensureDailyComparisonReset();
+  if (dailyReset && state.latest) renderSavedPicks();
   const requestId = ++state.latestRequestId;
   try {
     const payload = await fetchJsonWithTimeout(
