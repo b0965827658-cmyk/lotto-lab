@@ -1076,7 +1076,7 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 
 .saved-form {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(8, minmax(0, 1fr)) auto;
   gap: 8px;
   margin: 14px 0;
 }
@@ -2065,7 +2065,11 @@ th {
   }
 
   .saved-form {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .saved-form .save-button {
+    grid-column: 1 / -1;
   }
 
   .backtest-panel .panel-head {
