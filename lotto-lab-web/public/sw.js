@@ -1,9 +1,9 @@
-const CACHE_NAME = "lotto-lab-v64";
+const CACHE_NAME = "lotto-lab-v65";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=55",
-  "/app.js?v=59",
+  "/styles.css?v=56",
+  "/app.js?v=60",
   "/manifest.webmanifest?v=45",
   "/logo-sniper-star.svg?v=45",
   "/logo-sniper-star-192.png?v=45",
