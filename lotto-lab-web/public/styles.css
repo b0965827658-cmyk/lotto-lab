@@ -762,22 +762,6 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   transform: translate(-50%, -50%);
 }
 
-.flagship-star-shape .ball:nth-child(6) {
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.flagship-star-shape .ball.flagship-core-ball {
-  width: 60px;
-  height: 60px;
-  background: var(--green);
-  color: #fff;
-  border-color: var(--gold);
-  outline-color: rgba(22, 106, 82, 0.34);
-  box-shadow: 0 0 0 5px rgba(214, 152, 34, 0.16), 0 12px 24px rgba(22, 106, 82, 0.24), inset 0 -8px 14px rgba(0, 0, 0, 0.16);
-}
-
 .flagship-meta {
   color: #49675a;
 }
@@ -792,18 +776,7 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   color: var(--green);
 }
 
-.flagship-panel .flagship-meta .flagship-core-note {
-  border-color: rgba(214, 152, 34, 0.32);
-  background: rgba(214, 152, 34, 0.13);
-  color: #8b6418;
-}
-
 .flagship-window-note {
-  font-weight: 900;
-}
-
-.flagship-core-note {
-  color: var(--green);
   font-weight: 900;
 }
 
@@ -2104,11 +2077,6 @@ th {
     width: min(100%, 350px);
     height: 276px;
     min-height: 276px;
-  }
-
-  .flagship-star-shape .ball.flagship-core-ball {
-    width: 54px;
-    height: 54px;
   }
 
   .flagship-history-head {
