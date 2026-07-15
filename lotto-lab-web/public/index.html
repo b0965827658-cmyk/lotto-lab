@@ -13,7 +13,7 @@
     <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
     <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
-    <link rel="stylesheet" href="/styles.css?v=57" />
+    <link rel="stylesheet" href="/styles.css?v=58" />
   </head>
   <body>
     <main class="shell">
@@ -107,7 +107,7 @@
           <p class="fineprint" id="analysisNote"></p>
         </article>
 
-        <article class="panel flagship-panel" data-tier="flagship" data-lock-title="量化旗艦版專屬" data-lock-text="升級後可查看每期的旗艦摘星五碼。">
+        <article class="panel flagship-panel" data-tier="flagship" data-lock-title="量化旗艦版專屬" data-lock-text="升級後可查看每期的旗艦摘星五碼與自適應集成五碼。">
           <div class="panel-head compact">
             <div>
               <p class="label">摘星狙擊手｜量化旗艦版</p>
@@ -117,6 +117,17 @@
           </div>
           <div class="balls flagship-balls" id="flagshipBalls" aria-label="旗艦摘星五碼五芒星配置"></div>
           <div class="pick-meta flagship-meta" id="flagshipMeta"></div>
+          <div class="adaptive-pick-block">
+            <div class="adaptive-pick-head">
+              <div>
+                <p class="label">自適應集成</p>
+                <strong>自適應集成五碼</strong>
+              </div>
+              <span class="adaptive-badge">獨立模型</span>
+            </div>
+            <div class="balls adaptive-balls" id="adaptiveBalls" aria-label="自適應集成五碼"></div>
+            <div class="pick-meta adaptive-meta" id="adaptiveMeta"></div>
+          </div>
         </article>
 
         <article class="panel backtest-panel" data-tier="pro" data-lock-title="Pro 模型回測" data-lock-text="訂閱後可查看近期命中表現與模型排名。">
@@ -283,7 +294,7 @@
             </div>
             <button id="flagshipHistoryRefresh" class="text-button" type="button">重新載入</button>
           </div>
-          <p class="fineprint">每期保存旗艦五碼、近期熱牌、區間、回測、版路、拖牌與尾數摘要；下一期開獎後會自動補上命中結果。</p>
+          <p class="fineprint">每期保存旗艦五碼與自適應集成五碼，並保留近期熱牌、區間、回測、版路、拖牌與尾數摘要；下一期開獎後會自動補上命中結果。</p>
           <div id="flagshipHistoryList" class="flagship-history-list"></div>
         </article>
 
@@ -370,6 +381,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=61"></script>
+    <script src="/app.js?v=62"></script>
   </body>
 </html>
