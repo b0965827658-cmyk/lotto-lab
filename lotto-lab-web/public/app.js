@@ -414,6 +414,14 @@ function renderFlagshipHistory() {
         .slice(0, 2)
         .map((item) => (item.numbers || []).map(pad).join("+") )
         .filter(Boolean);
+      const drags = (reasoning.dragCards || [])
+        .slice(0, 2)
+        .map((item) => `${pad(item.base)}拖${pad(item.follow)}`)
+        .filter(Boolean);
+      const tails = (reasoning.tailMomentum || [])
+        .slice(0, 3)
+        .map((item) => `${item.tail}尾`)
+        .filter(Boolean);
       const backtestText = summary.testedCount
         ? `回測 ${summary.testedCount} 期 · 均中 ${summary.averageHit ?? 0} · 最高 ${summary.bestHit ?? 0} 中`
         : "回測資料累積中";
@@ -428,14 +436,16 @@ function renderFlagshipHistory() {
           </div>
           <div class="flagship-history-balls">${miniBalls(record.numbers, actualAvailable ? record.actualNumbers : [])}</div>
           <div class="flagship-history-meta">
-            <span>${record.method || "四維綜合推理"}</span>
+            <span>${record.method || "六維綜合推理"}</span>
             <span>模型 ${record.profile || "綜合"}</span>
-            <span>${components || "近期熱牌 34% · 區間 24% · 回測 22% · 版路 20%"}</span>
+            <span>${components || "近期熱牌 26% · 區間 20% · 回測 18% · 版路 16% · 拖牌 10% · 尾數 10%"}</span>
           </div>
           <div class="flagship-history-reasoning">
             <span>熱牌：${flagshipHistoryNumbers(recentHot)}</span>
             <span>區間：${intervals.join("、") || "資料累積中"}</span>
             <span>版路：${pairs.join("、") || "綜合版路"}</span>
+            <span>拖牌：${drags.join("、") || "資料累積中"}</span>
+            <span>尾數：${tails.join("、") || "資料累積中"}</span>
             <span>${backtestText}</span>
           </div>
           ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：${miniBalls(record.actualNumbers)}</div>` : ""}
@@ -1413,9 +1423,9 @@ function renderFlagshipPick() {
     return;
   }
   const numbers = state.analysis?.flagshipRecommendation || [];
-  if (numbers.length !== 6) {
+  if (numbers.length !== 5) {
     els.flagshipBalls.innerHTML = "";
-    els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 6 碼候選池。</span>";
+    els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 5 碼候選池。</span>";
     return;
   }
   const evidence = state.analysis?.flagshipResearchEvidence?.features || state.analysis?.researchEvidence?.features || [];
@@ -1425,18 +1435,15 @@ function renderFlagshipPick() {
         .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
         .join("、")
     : "多窗口交叉驗證";
-  const flagshipMethod = state.analysis?.flagshipMethod || "近期熱牌 34%・區間 24%・回測 22%・版路 20%";
-  const [confidenceNumber, ...outerNumbers] = numbers;
+  const flagshipMethod = state.analysis?.flagshipMethod || "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%";
   els.flagshipBalls.innerHTML = `
-    <div class="flagship-star-shape" role="img" aria-label="五芒星摘星六碼">
-      ${balls(outerNumbers)}
-      <span class="ball flagship-core-ball">${pad(confidenceNumber)}</span>
+    <div class="flagship-star-shape" role="img" aria-label="五芒星摘星五碼">
+      ${balls(numbers)}
     </div>
   `;
   els.flagshipMeta.innerHTML = `
     <span class="flagship-window-note">${flagshipMethod}</span>
-    <span class="flagship-core-note">星心主推 ${pad(confidenceNumber)}：本組最高信心號碼</span>
-    <span>旗艦摘星六碼：四維訊號綜合推理</span>
+    <span>旗艦摘星五碼：近期熱牌、區間、回測、版路、拖牌與尾數綜合推理</span>
     <span>研究支持：${evidenceText}</span>
     <span>僅供統計參考，不代表保證中獎</span>
   `;
@@ -1978,7 +1985,7 @@ function renderPlans(subscription) {
       savePlanPreview();
       renderPlans(subscription);
       applyPlanAccess();
-      setStatus(state.plan === "flagship" ? "已切到量化旗艦版預覽：每期 6 碼高分候選池已解鎖。" : "已切到 Pro 預覽：進階回測、版路、跨年查詢、通知與高分組合已解鎖。");
+      setStatus(state.plan === "flagship" ? "已切到量化旗艦版預覽：每期 5 碼高分候選池與拖牌、尾數訊號已解鎖。" : "已切到 Pro 預覽：進階回測、版路、跨年查詢、通知與高分組合已解鎖。");
     });
   });
   applyPlanAccess();
