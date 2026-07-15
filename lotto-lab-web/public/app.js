@@ -129,6 +129,8 @@ const els = {
   pickMeta: $("#pickMeta"),
   flagshipBalls: $("#flagshipBalls"),
   flagshipMeta: $("#flagshipMeta"),
+  adaptiveBalls: $("#adaptiveBalls"),
+  adaptiveMeta: $("#adaptiveMeta"),
   note: $("#analysisNote"),
   hot: $("#hotList"),
   cold: $("#coldList"),
@@ -422,6 +424,7 @@ function renderFlagshipHistory() {
         .slice(0, 3)
         .map((item) => `${item.tail}尾`)
         .filter(Boolean);
+      const adaptiveNumbers = (reasoning.adaptiveNumbers || []).slice(0, 5);
       const backtestText = summary.testedCount
         ? `回測 ${summary.testedCount} 期 · 均中 ${summary.averageHit ?? 0} · 最高 ${summary.bestHit ?? 0} 中`
         : "回測資料累積中";
@@ -446,6 +449,7 @@ function renderFlagshipHistory() {
             <span>版路：${pairs.join("、") || "綜合版路"}</span>
             <span>拖牌：${drags.join("、") || "資料累積中"}</span>
             <span>尾數：${tails.join("、") || "資料累積中"}</span>
+            <span>自適應集成：${adaptiveNumbers.length === 5 ? adaptiveNumbers.map(pad).join("、") : "資料累積中"}</span>
             <span>${backtestText}</span>
           </div>
           ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：${miniBalls(record.actualNumbers)}</div>` : ""}
@@ -1416,37 +1420,52 @@ function renderReferencePick() {
 }
 
 function renderFlagshipPick() {
-  if (!els.flagshipBalls || !els.flagshipMeta) return;
+  if (!els.flagshipBalls || !els.flagshipMeta || !els.adaptiveBalls || !els.adaptiveMeta) return;
   if (!isFlagshipPlan()) {
     els.flagshipBalls.innerHTML = "";
     els.flagshipMeta.innerHTML = "<span>量化旗艦版會員專屬</span>";
+    els.adaptiveBalls.innerHTML = "";
+    els.adaptiveMeta.innerHTML = "<span>量化旗艦版會員專屬</span>";
     return;
   }
   const numbers = state.analysis?.flagshipRecommendation || [];
+  const adaptiveNumbers = state.analysis?.adaptiveRecommendation || [];
   if (numbers.length !== 5) {
     els.flagshipBalls.innerHTML = "";
     els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 5 碼候選池。</span>";
-    return;
+  } else {
+    const evidence = state.analysis?.flagshipResearchEvidence?.features || state.analysis?.researchEvidence?.features || [];
+    const evidenceText = evidence.length
+      ? evidence
+          .slice(0, 3)
+          .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
+          .join("、")
+      : "多窗口交叉驗證";
+    const flagshipMethod = state.analysis?.flagshipMethod || "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%";
+    els.flagshipBalls.innerHTML = `
+      <div class="flagship-star-shape" role="img" aria-label="五芒星摘星五碼">
+        ${balls(numbers)}
+      </div>
+    `;
+    els.flagshipMeta.innerHTML = `
+      <span class="flagship-window-note">${flagshipMethod}</span>
+      <span>旗艦摘星五碼：近期熱牌、區間、回測、版路、拖牌與尾數綜合推理</span>
+      <span>研究支持：${evidenceText}</span>
+      <span>僅供統計參考，不代表保證中獎</span>
+    `;
   }
-  const evidence = state.analysis?.flagshipResearchEvidence?.features || state.analysis?.researchEvidence?.features || [];
-  const evidenceText = evidence.length
-    ? evidence
-        .slice(0, 3)
-        .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
-        .join("、")
-    : "多窗口交叉驗證";
-  const flagshipMethod = state.analysis?.flagshipMethod || "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%";
-  els.flagshipBalls.innerHTML = `
-    <div class="flagship-star-shape" role="img" aria-label="五芒星摘星五碼">
-      ${balls(numbers)}
-    </div>
-  `;
-  els.flagshipMeta.innerHTML = `
-    <span class="flagship-window-note">${flagshipMethod}</span>
-    <span>旗艦摘星五碼：近期熱牌、區間、回測、版路、拖牌與尾數綜合推理</span>
-    <span>研究支持：${evidenceText}</span>
-    <span>僅供統計參考，不代表保證中獎</span>
-  `;
+  if (adaptiveNumbers.length !== 5) {
+    els.adaptiveBalls.innerHTML = "";
+    els.adaptiveMeta.innerHTML = "<span>資料累積中，暫時無法產生自適應集成五碼。</span>";
+  } else {
+    const adaptiveMethod = state.analysis?.adaptiveMethod || "自適應集成：多特徵加權與回測校準";
+    els.adaptiveBalls.innerHTML = balls(adaptiveNumbers);
+    els.adaptiveMeta.innerHTML = `
+      <span class="adaptive-window-note">${adaptiveMethod}</span>
+      <span>獨立採用自適應模型，不覆蓋上方旗艦摘星五碼</span>
+      <span>同一期固定發布，方便兩組候選交叉比較</span>
+    `;
+  }
 }
 
 function savePick(numbers) {
@@ -1985,7 +2004,7 @@ function renderPlans(subscription) {
       savePlanPreview();
       renderPlans(subscription);
       applyPlanAccess();
-      setStatus(state.plan === "flagship" ? "已切到量化旗艦版預覽：每期 5 碼高分候選池與拖牌、尾數訊號已解鎖。" : "已切到 Pro 預覽：進階回測、版路、跨年查詢、通知與高分組合已解鎖。");
+      setStatus(state.plan === "flagship" ? "已切到量化旗艦版預覽：旗艦摘星五碼與自適應集成五碼已解鎖。" : "已切到 Pro 預覽：進階回測、版路、跨年查詢、通知與高分組合已解鎖。");
     });
   });
   applyPlanAccess();
