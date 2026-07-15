@@ -339,9 +339,13 @@ def flagship_reasoning_summary(
         {"number": number, "score": round(float(support.get(str(number), support.get(number, 0))), 4)}
         for number in numbers
     ]
+    adaptive_numbers = [
+        int(number) for number in (analysis.get("adaptiveRecommendation") or [])[:5]
+    ]
     return {
         "analysisLimit": int(selected_limit),
         "selectedNumbers": list(numbers),
+        "adaptiveNumbers": adaptive_numbers if len(adaptive_numbers) == 5 else [],
         "recentHot": (analysis.get("hot") or [])[:8],
         "intervals": (patterns.get("intervals") or [])[:3],
         "pairCombos": (patterns.get("pairCombos") or [])[:3],
@@ -951,11 +955,13 @@ def _freeze_flagship_recommendation(
     selected_limit: int,
     analysis: dict[str, Any],
     history: list[dict[str, Any]],
+    recommendation_key: str = "flagshipRecommendation",
+    snapshot_tag: str = "pick-5",
 ) -> tuple[list[int], dict[str, Any]]:
     """Publish one flagship pool per draw/window so every visitor sees the same result."""
     snapshot_key = (
         f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:"
-        f"window-{selected_limit}:pick-5"
+        f"window-{selected_limit}:{snapshot_tag}"
     )
     if snapshot_key in flagship_snapshot_memory:
         numbers = list(flagship_snapshot_memory[snapshot_key])
@@ -982,7 +988,7 @@ def _freeze_flagship_recommendation(
         except Exception:
             pass
 
-    numbers = [int(number) for number in (analysis.get("flagshipRecommendation") or [])[:5]]
+    numbers = [int(number) for number in (analysis.get(recommendation_key) or [])[:5]]
     if len(numbers) != 5:
         return numbers, {"key": snapshot_key, "status": "unavailable"}
     profile_name = str((analysis.get("patterns") or {}).get("selectedProfile", "balanced"))
@@ -1041,9 +1047,19 @@ def freeze_flagship_recommendation(
     selected_limit: int,
     analysis: dict[str, Any],
     history: list[dict[str, Any]],
+    recommendation_key: str = "flagshipRecommendation",
+    snapshot_tag: str = "pick-5",
 ) -> tuple[list[int], dict[str, Any]]:
     with flagship_snapshot_lock:
-        return _freeze_flagship_recommendation(game, latest, selected_limit, analysis, history)
+        return _freeze_flagship_recommendation(
+            game,
+            latest,
+            selected_limit,
+            analysis,
+            history,
+            recommendation_key=recommendation_key,
+            snapshot_tag=snapshot_tag,
+        )
 
 
 def fetch_text(url: str, timeout: int = 25) -> str:
@@ -2559,6 +2575,14 @@ def analyze(
         evidence=evidence_map,
         backtest=backtest,
     )
+    adaptive_numbers = model_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=5,
+        seed_label=f"{seed_label}:adaptive-ensemble",
+        profile_name="adaptive",
+        evidence=evidence_map,
+    )
     patterns = pattern_summary(draws, max_number, selected_profile)
     short_consensus = short_term_consensus(
         reference_draws,
@@ -2575,6 +2599,8 @@ def analyze(
         "frequency": [{"number": n, "count": frequency[n], "gap": gaps[n]} for n in frequency],
         "recommendation": recommendation,
         "flagshipRecommendation": flagship_numbers,
+        "adaptiveRecommendation": adaptive_numbers,
+        "adaptiveMethod": "自適應集成：熱度、近期、趨勢、遺漏、版路、拖牌、連莊、區間與尾數動能加權",
         "flagshipMethod": "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%",
         "flagshipComponents": [
             {"id": "recent", "label": "近期熱牌", "weight": 26},
@@ -2650,6 +2676,14 @@ def analyze_with_stable_backtest(
         evidence=evidence_map,
         backtest=fallback_backtest,
     )
+    analysis["adaptiveRecommendation"] = model_recommendation(
+        display_draws,
+        max_number=max_number,
+        pick_count=5,
+        seed_label=f"{stable_analysis_seed(fallback_draws, f'fallback-window-{len(draws)}-backtest-{requested_limit}')}:adaptive-ensemble",
+        profile_name="adaptive",
+        evidence=evidence_map,
+    )
     analysis["shortTermConsensus"] = short_term_consensus(
         display_draws,
         max_number=max_number,
@@ -2681,14 +2715,30 @@ def attach_flagship_analysis(
         flagship_analysis,
         history,
     )
+    adaptive_numbers, adaptive_snapshot = freeze_flagship_recommendation(
+        game,
+        latest,
+        flagship_limit,
+        flagship_analysis,
+        history,
+        recommendation_key="adaptiveRecommendation",
+        snapshot_tag="adaptive-pick-5",
+    )
     result = dict(analysis)
     result["flagshipRecommendation"] = flagship_numbers
     result["flagshipSnapshot"] = snapshot
     result["flagshipAnalysisLimit"] = flagship_limit
+    result["adaptiveRecommendation"] = adaptive_numbers
+    result["adaptiveSnapshot"] = adaptive_snapshot
+    result["adaptiveMethod"] = flagship_analysis.get(
+        "adaptiveMethod",
+        "自適應集成：熱度、近期、趨勢、遺漏、版路、拖牌、連莊、區間與尾數動能加權",
+    )
     result["flagshipProfile"] = (flagship_analysis.get("patterns") or {}).get("selectedProfile", "balanced")
     result["flagshipResearchEvidence"] = flagship_analysis.get("researchEvidence", {})
     history_analysis = dict(flagship_analysis)
     history_analysis["flagshipRecommendation"] = flagship_numbers
+    history_analysis["adaptiveRecommendation"] = adaptive_numbers
     persist_flagship_analysis_history(
         game,
         latest,
