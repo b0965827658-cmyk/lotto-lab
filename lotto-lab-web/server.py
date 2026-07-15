@@ -387,7 +387,7 @@ def load_flagship_analysis_history(game: str, limit: int = 30) -> list[dict[str,
             actual_numbers = json.loads(row[13])
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        if not isinstance(numbers, list) or len(numbers) != 6:
+        if not isinstance(numbers, list) or len(numbers) not in (5, 6):
             continue
         if not isinstance(actual_numbers, list):
             actual_numbers = []
@@ -427,15 +427,17 @@ def persist_flagship_analysis_history(
     if not database_ready or game not in ALLOWED_GAMES:
         return
     snapshot_key = str(snapshot.get("key", "")).strip()
-    numbers = [int(number) for number in (analysis.get("flagshipRecommendation") or [])[:6]]
-    if not snapshot_key or len(numbers) != 6:
+    numbers = [int(number) for number in (analysis.get("flagshipRecommendation") or [])[:5]]
+    if not snapshot_key or len(numbers) != 5:
         return
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     components = analysis.get("flagshipComponents") or [
-        {"id": "recent", "label": "近期熱牌", "weight": 34},
-        {"id": "interval", "label": "區間", "weight": 24},
-        {"id": "backtest", "label": "回測", "weight": 22},
-        {"id": "pattern", "label": "版路", "weight": 20},
+        {"id": "recent", "label": "近期熱牌", "weight": 26},
+        {"id": "interval", "label": "區間", "weight": 20},
+        {"id": "backtest", "label": "回測", "weight": 18},
+        {"id": "pattern", "label": "版路", "weight": 16},
+        {"id": "drag", "label": "拖牌", "weight": 10},
+        {"id": "tail", "label": "尾數", "weight": 10},
     ]
     reasoning = flagship_reasoning_summary(analysis, numbers, selected_limit)
     profile_name = str((analysis.get("patterns") or {}).get("selectedProfile", "balanced"))
@@ -507,7 +509,7 @@ def persist_flagship_analysis_history(
             stored_numbers = json.loads(row[3])
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        if not isinstance(stored_numbers, list) or len(stored_numbers) != 6:
+        if not isinstance(stored_numbers, list) or len(stored_numbers) not in (5, 6):
             continue
         actual_numbers = normalize_numbers(actual.get("numbers", []))
         hits = len(set(int(number) for number in stored_numbers) & set(actual_numbers))
@@ -953,7 +955,7 @@ def _freeze_flagship_recommendation(
     """Publish one flagship pool per draw/window so every visitor sees the same result."""
     snapshot_key = (
         f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:"
-        f"window-{selected_limit}:pick-6"
+        f"window-{selected_limit}:pick-5"
     )
     if snapshot_key in flagship_snapshot_memory:
         numbers = list(flagship_snapshot_memory[snapshot_key])
@@ -967,7 +969,7 @@ def _freeze_flagship_recommendation(
             )
             if rows:
                 numbers = json.loads(rows[0][0])
-                if isinstance(numbers, list) and len(numbers) == 6:
+                if isinstance(numbers, list) and len(numbers) == 5:
                     numbers = [int(number) for number in numbers]
                     flagship_snapshot_memory[snapshot_key] = numbers
                     return numbers, {
@@ -980,8 +982,8 @@ def _freeze_flagship_recommendation(
         except Exception:
             pass
 
-    numbers = [int(number) for number in (analysis.get("flagshipRecommendation") or [])[:6]]
-    if len(numbers) != 6:
+    numbers = [int(number) for number in (analysis.get("flagshipRecommendation") or [])[:5]]
+    if len(numbers) != 5:
         return numbers, {"key": snapshot_key, "status": "unavailable"}
     profile_name = str((analysis.get("patterns") or {}).get("selectedProfile", "balanced"))
     fingerprint = draw_fingerprint(history)
@@ -1015,7 +1017,7 @@ def _freeze_flagship_recommendation(
             )
             if rows:
                 stored_numbers = json.loads(rows[0][0])
-                if isinstance(stored_numbers, list) and len(stored_numbers) == 6:
+                if isinstance(stored_numbers, list) and len(stored_numbers) == 5:
                     numbers = [int(number) for number in stored_numbers]
                     profile_name = rows[0][1]
                     fingerprint = rows[0][2]
@@ -1934,17 +1936,17 @@ def model_recommendation(
 def flagship_recommendation(
     draws: list[dict[str, Any]],
     max_number: int = 39,
-    pick_count: int = 6,
+    pick_count: int = 5,
     profile_name: str = "balanced",
     evidence: dict[str, float] | None = None,
     backtest: dict[str, Any] | None = None,
 ) -> list[int]:
-    """Return the flagship pool from four deterministic evidence groups.
+    """Return a deterministic five-number flagship pool from six evidence groups.
 
     The groups are recent hot numbers, interval concentration, walk-forward
-    backtest support, and pattern signals.  This is a six-number candidate
-    pool, not a claim that any number has a guaranteed higher physical lottery
-    probability.
+    backtest support, pattern signals, drag-card support, and tail momentum.
+    This is a statistical candidate pool, not a claim that any number has a
+    guaranteed higher physical lottery probability.
     """
     ordered = list(draws)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
@@ -2009,16 +2011,14 @@ def flagship_recommendation(
     }
     backtest_scores = normalize(backtest_raw)
 
-    # 4) Pattern signals: pair/drag/repeat, tails, neighbours and multi-window
-    # agreement form the版路 component; interval is kept separate above.
+    # 4) Pattern signals: pair/repeat, neighbours, and multi-window agreement
+    # form the版路 component; interval, drag cards, and tails stay separate so
+    # the flagship explanation matches the actual scoring model.
     pattern_keys = (
-        "tail",
         "pair",
-        "drag",
         "repeatSignal",
         "neighbor",
         "multiWindow",
-        "tailMomentum",
         "streak",
         "momentum",
     )
@@ -2031,11 +2031,44 @@ def flagship_recommendation(
         ) / len(pattern_keys)
     pattern_scores = normalize(pattern_raw)
 
+    # 5) Drag-card support: numbers that historically followed the latest
+    # draw's numbers. Repeat support is a small stabilizer when drag samples
+    # are sparse, but it never replaces the direct drag signal.
+    drag_raw = {}
+    for number in range(1, max_number + 1):
+        features = current_profile["numberScores"][number]
+        drag_raw[number] = (
+            features.get("drag", 0.0)
+            * (float((evidence or {}).get("drag", 1.0)) if evidence else 1.0)
+            * 0.72
+            + features.get("repeatSignal", 0.0)
+            * (float((evidence or {}).get("repeatSignal", 1.0)) if evidence else 1.0)
+            * 0.28
+        )
+    drag_scores = normalize(drag_raw)
+
+    # 6) Tail support: combine recent tail heat with tail momentum so a hot
+    # tail can help without allowing one crowded ending to dominate the pool.
+    tail_raw = {}
+    for number in range(1, max_number + 1):
+        features = current_profile["numberScores"][number]
+        tail_raw[number] = (
+            features.get("tail", 0.0)
+            * (float((evidence or {}).get("tail", 1.0)) if evidence else 1.0)
+            * 0.62
+            + features.get("tailMomentum", 0.0)
+            * (float((evidence or {}).get("tailMomentum", 1.0)) if evidence else 1.0)
+            * 0.38
+        )
+    tail_scores = normalize(tail_raw)
+
     component_scores = {
-        number: recent_scores[number] * 0.34
-        + interval_scores[number] * 0.24
-        + backtest_scores[number] * 0.22
-        + pattern_scores[number] * 0.20
+        number: recent_scores[number] * 0.26
+        + interval_scores[number] * 0.20
+        + backtest_scores[number] * 0.18
+        + pattern_scores[number] * 0.16
+        + drag_scores[number] * 0.10
+        + tail_scores[number] * 0.10
         for number in range(1, max_number + 1)
     }
     candidate_pool = sorted(
@@ -2045,7 +2078,7 @@ def flagship_recommendation(
     if len(candidate_pool) <= pick_count:
         return sorted(candidate_pool)
 
-    # Select the best six-number shape from the top pool.  The small search is
+    # Select the best five-number shape from the top pool.  The small search is
     # deterministic and lets the interval/pattern evidence affect the group,
     # not only each number independently.
     best_combo: tuple[int, ...] | None = None
@@ -2180,7 +2213,7 @@ def recent_flagship_selection(
     patterns: dict[str, Any],
     consensus: dict[str, Any],
     max_number: int = 39,
-    pick_count: int = 6,
+    pick_count: int = 5,
 ) -> list[int]:
     """Blend the existing model with the 10/20/36-period recent consensus."""
     scores = {number: 0.0 for number in range(1, max_number + 1)}
@@ -2521,7 +2554,7 @@ def analyze(
     flagship_numbers = flagship_recommendation(
         draws,
         max_number=max_number,
-        pick_count=6,
+        pick_count=5,
         profile_name=selected_profile,
         evidence=evidence_map,
         backtest=backtest,
@@ -2542,12 +2575,14 @@ def analyze(
         "frequency": [{"number": n, "count": frequency[n], "gap": gaps[n]} for n in frequency],
         "recommendation": recommendation,
         "flagshipRecommendation": flagship_numbers,
-        "flagshipMethod": "近期熱牌 34%・區間 24%・回測 22%・版路 20%",
+        "flagshipMethod": "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%",
         "flagshipComponents": [
-            {"id": "recent", "label": "近期熱牌", "weight": 34},
-            {"id": "interval", "label": "區間", "weight": 24},
-            {"id": "backtest", "label": "回測", "weight": 22},
-            {"id": "pattern", "label": "版路", "weight": 20},
+            {"id": "recent", "label": "近期熱牌", "weight": 26},
+            {"id": "interval", "label": "區間", "weight": 20},
+            {"id": "backtest", "label": "回測", "weight": 18},
+            {"id": "pattern", "label": "版路", "weight": 16},
+            {"id": "drag", "label": "拖牌", "weight": 10},
+            {"id": "tail", "label": "尾數", "weight": 10},
         ],
         "backtest": backtest,
         "modelProfiles": model_results,
@@ -2610,7 +2645,7 @@ def analyze_with_stable_backtest(
     analysis["flagshipRecommendation"] = flagship_recommendation(
         display_draws,
         max_number=max_number,
-        pick_count=6,
+        pick_count=5,
         profile_name=selected_profile,
         evidence=evidence_map,
         backtest=fallback_backtest,
@@ -2819,7 +2854,7 @@ class Handler(SimpleHTTPRequestHandler):
                                 "name": "摘星狙擊手｜量化旗艦版",
                                 "price": "高階會員",
                                 "paymentLink": STRIPE_FLAGSHIP_PAYMENT_LINK,
-                                "features": ["每期模型高分 6 碼候選池", "訊號證據與穩定度校準", "短中長期多窗口交叉排名", "優先查看研究版路分析"],
+                                "features": ["每期模型高分 5 碼候選池", "拖牌與尾數獨立訊號", "訊號證據與穩定度校準", "短中長期多窗口交叉排名"],
                             },
                         ],
                         "flagshipPaymentLink": STRIPE_FLAGSHIP_PAYMENT_LINK,
