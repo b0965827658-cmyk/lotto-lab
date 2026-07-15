@@ -957,6 +957,7 @@ def _freeze_flagship_recommendation(
     history: list[dict[str, Any]],
     recommendation_key: str = "flagshipRecommendation",
     snapshot_tag: str = "pick-5",
+    profile_name_override: str | None = None,
 ) -> tuple[list[int], dict[str, Any]]:
     """Publish one flagship pool per draw/window so every visitor sees the same result."""
     snapshot_key = (
@@ -981,7 +982,7 @@ def _freeze_flagship_recommendation(
                     return numbers, {
                         "key": snapshot_key,
                         "status": "published",
-                        "profile": rows[0][1],
+                        "profile": profile_name_override or rows[0][1],
                         "historyFingerprint": rows[0][2],
                         "createdAt": rows[0][3],
                     }
@@ -991,7 +992,9 @@ def _freeze_flagship_recommendation(
     numbers = [int(number) for number in (analysis.get(recommendation_key) or [])[:5]]
     if len(numbers) != 5:
         return numbers, {"key": snapshot_key, "status": "unavailable"}
-    profile_name = str((analysis.get("patterns") or {}).get("selectedProfile", "balanced"))
+    profile_name = profile_name_override or str(
+        (analysis.get("patterns") or {}).get("selectedProfile", "balanced")
+    )
     fingerprint = draw_fingerprint(history)
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -2723,6 +2726,7 @@ def attach_flagship_analysis(
         history,
         recommendation_key="adaptiveRecommendation",
         snapshot_tag="adaptive-pick-5",
+        profile_name_override="adaptive",
     )
     result = dict(analysis)
     result["flagshipRecommendation"] = flagship_numbers
