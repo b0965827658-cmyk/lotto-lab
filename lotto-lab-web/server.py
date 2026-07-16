@@ -88,7 +88,7 @@ NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", ROOT / "data"
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 SQLITE_DATABASE_FILE = Path(os.environ.get("LOTTO_SQLITE_PATH", ROOT / "data" / "lotto.sqlite3"))
 AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
-AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "180"))
+AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "30"))
 AUTO_NOTIFY_GAMES = [
     game.strip()
     for game in os.environ.get("LOTTO_AUTO_NOTIFY_GAMES", "tw539,ca-fantasy5").split(",")
@@ -342,6 +342,8 @@ def flagship_reasoning_summary(
     adaptive_numbers = [
         int(number) for number in (analysis.get("adaptiveRecommendation") or [])[:5]
     ]
+    if len(adaptive_numbers) != 5:
+        adaptive_numbers = [int(number) for number in numbers[:5]]
     return {
         "analysisLimit": int(selected_limit),
         "selectedNumbers": list(numbers),
@@ -873,11 +875,21 @@ def broadcast_push_message(message: dict[str, Any] | None, message_factory=None)
 def notify_latest_game(game: str) -> dict[str, Any]:
     if not push_server_ready():
         return {"ok": False, "game": game, "error": "尚未設定完整推播金鑰"}
-    if not load_push_subscriptions():
+    subscriptions = load_push_subscriptions()
+    if not subscriptions:
         return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": 0, "skipped": True, "message": "目前沒有訂閱用戶"}
-    lottery = build_payload(game, 90)["latest"]
+
+    # 推播只需要最新一期，不應為了通知重跑完整回測與旗艦分析。
+    # 這讓背景輪詢可以維持在 30 秒左右，也避免開獎時通知被模型計算拖住。
+    if game == "tw539":
+        lottery = taiwan_latest()
+    else:
+        latest_history = california_history(1)
+        if not latest_history:
+            raise RuntimeError("加州天天樂目前沒有可用的最新資料")
+        lottery = latest_history[0]
     if already_notified(game, lottery):
-        return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": len(load_push_subscriptions()), "skipped": True, "message": "這一期已通知過"}
+        return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": len(subscriptions), "skipped": True, "message": "這一期已通知過"}
     message = latest_notification_message(game, lottery)
     sent, failed, alive = broadcast_push_message(
         message,
@@ -909,7 +921,7 @@ def auto_notify_loop() -> None:
                             )
         except Exception as exc:
             print(f"auto notify error: {exc}")
-        time.sleep(max(60, AUTO_NOTIFY_INTERVAL_SECONDS))
+        time.sleep(max(30, AUTO_NOTIFY_INTERVAL_SECONDS))
 
 
 def cached(key: str, loader, ttl_seconds: int | None = None):
@@ -966,7 +978,12 @@ def _freeze_flagship_recommendation(
     )
     if snapshot_key in flagship_snapshot_memory:
         numbers = list(flagship_snapshot_memory[snapshot_key])
-        return numbers, {"key": snapshot_key, "status": "published"}
+        return numbers, {
+            "key": snapshot_key,
+            "status": "published",
+            "profile": profile_name_override or "balanced",
+            "source": "memory",
+        }
 
     if database_ready:
         try:
@@ -1052,6 +1069,7 @@ def freeze_flagship_recommendation(
     history: list[dict[str, Any]],
     recommendation_key: str = "flagshipRecommendation",
     snapshot_tag: str = "pick-5",
+    profile_name_override: str | None = None,
 ) -> tuple[list[int], dict[str, Any]]:
     with flagship_snapshot_lock:
         return _freeze_flagship_recommendation(
@@ -1062,6 +1080,7 @@ def freeze_flagship_recommendation(
             history,
             recommendation_key=recommendation_key,
             snapshot_tag=snapshot_tag,
+            profile_name_override=profile_name_override,
         )
 
 
@@ -2728,16 +2747,40 @@ def attach_flagship_analysis(
         snapshot_tag="adaptive-pick-5",
         profile_name_override="adaptive",
     )
+    adaptive_fallback = False
+    if len(adaptive_numbers) != 5:
+        # 舊快取或短暫資料不足時，仍發布一組穩定的五碼，避免所有訪客一直看到
+        # 「資料累積中」。下一次新資料進來後，快取鍵會更新並重新校準自適應模型。
+        fallback_numbers = [int(number) for number in (flagship_analysis.get("recommendation") or [])[:5]]
+        if len(fallback_numbers) != 5:
+            fallback_numbers = [int(number) for number in (flagship_numbers or [])[:5]]
+        if len(fallback_numbers) == 5:
+            fallback_analysis = dict(flagship_analysis)
+            fallback_analysis["adaptiveRecommendation"] = fallback_numbers
+            adaptive_numbers, adaptive_snapshot = freeze_flagship_recommendation(
+                game,
+                latest,
+                flagship_limit,
+                fallback_analysis,
+                history,
+                recommendation_key="adaptiveRecommendation",
+                snapshot_tag="adaptive-pick-5",
+                profile_name_override="adaptive",
+            )
+            adaptive_fallback = True
     result = dict(analysis)
     result["flagshipRecommendation"] = flagship_numbers
     result["flagshipSnapshot"] = snapshot
     result["flagshipAnalysisLimit"] = flagship_limit
     result["adaptiveRecommendation"] = adaptive_numbers
     result["adaptiveSnapshot"] = adaptive_snapshot
+    result["adaptiveFallback"] = adaptive_fallback
     result["adaptiveMethod"] = flagship_analysis.get(
         "adaptiveMethod",
         "自適應集成：熱度、近期、趨勢、遺漏、版路、拖牌、連莊、區間與尾數動能加權",
     )
+    if adaptive_fallback:
+        result["adaptiveMethod"] += "；資料同步期間先沿用穩定綜合候選"
     result["flagshipProfile"] = (flagship_analysis.get("patterns") or {}).get("selectedProfile", "balanced")
     result["flagshipResearchEvidence"] = flagship_analysis.get("researchEvidence", {})
     history_analysis = dict(flagship_analysis)
@@ -2917,7 +2960,7 @@ class Handler(SimpleHTTPRequestHandler):
                         "supported": bool(PUSH_PUBLIC_KEY),
                         "serverReady": push_server_ready(),
                         "autoNotify": AUTO_NOTIFY_ENABLED,
-                        "autoNotifyIntervalSeconds": max(60, AUTO_NOTIFY_INTERVAL_SECONDS),
+                        "autoNotifyIntervalSeconds": max(30, AUTO_NOTIFY_INTERVAL_SECONDS),
                         "autoNotifyGames": AUTO_NOTIFY_GAMES,
                         "publicKey": PUSH_PUBLIC_KEY,
                         "subscriberCount": len(load_push_subscriptions()),
@@ -3131,7 +3174,7 @@ def main():
     server = ThreadingHTTPServer((host, port), Handler)
     if AUTO_NOTIFY_ENABLED:
         threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
-        print(f"auto notify enabled every {max(60, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
+        print(f"auto notify enabled every {max(30, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
     print(f"摘星狙擊手 running at http://{host}:{port}")
     server.serve_forever()
 
