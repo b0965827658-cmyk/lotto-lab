@@ -15,6 +15,8 @@ const state = {
   flagshipHistoryLatestKey: "",
   requestId: 0,
   latestRequestId: 0,
+  latestRefreshInFlight: false,
+  autoRefreshTimer: null,
   activeTab: "latest",
   apiCache: new Map(),
   candidateCache: new Map(),
@@ -26,6 +28,7 @@ const state = {
     serverReady: false,
     publicKey: "",
     subscriberCount: 0,
+    autoNotifyIntervalSeconds: 30,
   },
   serviceWorkerRegistration: null,
   pushSubscription: null,
@@ -186,6 +189,13 @@ const els = {
 
 function pad(n) {
   return String(n).padStart(2, "0");
+}
+
+function normalizedPick(value, count = 5) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(Number).filter((number) => Number.isInteger(number) && number >= 1 && number <= 39))]
+    .sort((left, right) => left - right)
+    .slice(0, count);
 }
 
 function hashString(value) {
@@ -424,7 +434,8 @@ function renderFlagshipHistory() {
         .slice(0, 3)
         .map((item) => `${item.tail}尾`)
         .filter(Boolean);
-      const adaptiveNumbers = (reasoning.adaptiveNumbers || []).slice(0, 5);
+      const adaptiveNumbers = normalizedPick(reasoning.adaptiveNumbers);
+      const adaptiveFallbackNumbers = adaptiveNumbers.length === 5 ? adaptiveNumbers : normalizedPick(record.numbers);
       const backtestText = summary.testedCount
         ? `回測 ${summary.testedCount} 期 · 均中 ${summary.averageHit ?? 0} · 最高 ${summary.bestHit ?? 0} 中`
         : "回測資料累積中";
@@ -449,7 +460,7 @@ function renderFlagshipHistory() {
             <span>版路：${pairs.join("、") || "綜合版路"}</span>
             <span>拖牌：${drags.join("、") || "資料累積中"}</span>
             <span>尾數：${tails.join("、") || "資料累積中"}</span>
-            <span>自適應集成：${adaptiveNumbers.length === 5 ? adaptiveNumbers.map(pad).join("、") : "資料累積中"}</span>
+            <span>自適應集成：${adaptiveFallbackNumbers.length === 5 ? adaptiveFallbackNumbers.map(pad).join("、") : "同步中"}</span>
             <span>${backtestText}</span>
           </div>
           ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：${miniBalls(record.actualNumbers)}</div>` : ""}
@@ -1428,8 +1439,12 @@ function renderFlagshipPick() {
     els.adaptiveMeta.innerHTML = "<span>量化旗艦版會員專屬</span>";
     return;
   }
-  const numbers = state.analysis?.flagshipRecommendation || [];
-  const adaptiveNumbers = state.analysis?.adaptiveRecommendation || [];
+  const numbers = normalizedPick(state.analysis?.flagshipRecommendation);
+  const adaptiveRawNumbers = normalizedPick(state.analysis?.adaptiveRecommendation);
+  const adaptiveFallback = adaptiveRawNumbers.length !== 5;
+  const adaptiveNumbers = adaptiveFallback
+    ? normalizedPick(state.analysis?.flagshipRecommendation)
+    : adaptiveRawNumbers;
   if (numbers.length !== 5) {
     els.flagshipBalls.innerHTML = "";
     els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 5 碼候選池。</span>";
@@ -1456,12 +1471,13 @@ function renderFlagshipPick() {
   }
   if (adaptiveNumbers.length !== 5) {
     els.adaptiveBalls.innerHTML = "";
-    els.adaptiveMeta.innerHTML = "<span>資料累積中，暫時無法產生自適應集成五碼。</span>";
+    els.adaptiveMeta.innerHTML = "<span>自適應模型正在同步最新資料，請稍後重新整理。</span>";
   } else {
     const adaptiveMethod = state.analysis?.adaptiveMethod || "自適應集成：多特徵加權與回測校準";
     els.adaptiveBalls.innerHTML = balls(adaptiveNumbers);
     els.adaptiveMeta.innerHTML = `
       <span class="adaptive-window-note">${adaptiveMethod}</span>
+      ${adaptiveFallback ? "<span>資料同步期間先顯示穩定綜合候選，完成同步後自動校準</span>" : ""}
       <span>獨立採用自適應模型，不覆蓋上方旗艦摘星五碼</span>
       <span>同一期固定發布，方便兩組候選交叉比較</span>
     `;
@@ -2048,7 +2064,8 @@ function updateNotificationUi() {
   if (permission === "denied") {
     els.notifyText.textContent = "瀏覽器目前封鎖通知。請到瀏覽器網站設定允許通知後，再回來開啟開獎提醒。";
   } else if (isSubscribed && serverReady) {
-    els.notifyText.textContent = `已登錄開獎通知。新一期更新時，系統可發送提醒；目前約 ${state.notifications.subscriberCount || 1} 個裝置訂閱。`;
+    const interval = state.notifications.autoNotifyIntervalSeconds || 30;
+    els.notifyText.textContent = `已登錄開獎通知。系統約每 ${interval} 秒檢查新一期並發送提醒；目前約 ${state.notifications.subscriberCount || 1} 個裝置訂閱。`;
   } else if (permission === "granted" && !serverReady) {
     els.notifyText.textContent = "已開啟本機提醒；網站開著時偵測到新一期會跳通知。離線群發需設定 Render 推播金鑰與排程。";
   } else if (isSubscribed) {
@@ -2223,6 +2240,7 @@ async function initNotifications(config) {
     serverReady: Boolean(config?.serverReady),
     publicKey: config?.publicKey || "",
     subscriberCount: config?.subscriberCount || 0,
+    autoNotifyIntervalSeconds: Number(config?.autoNotifyIntervalSeconds) || 30,
   };
   updateNotificationUi();
   if (notificationSupported()) {
@@ -2297,6 +2315,8 @@ async function load(options = {}) {
 }
 
 async function refreshLatest(options = {}) {
+  if (state.latestRefreshInFlight) return;
+  state.latestRefreshInFlight = true;
   const dailyReset = ensureDailyComparisonReset();
   if (dailyReset && state.latest) renderSavedPicks();
   const requestId = ++state.latestRequestId;
@@ -2320,11 +2340,14 @@ async function refreshLatest(options = {}) {
     if (!options.silent) {
       setStatus(error.name === "AbortError" ? "最新開獎讀取逾時，請稍後再試。" : "最新開獎暫時無法讀取。", true);
     }
+  } finally {
+    state.latestRefreshInFlight = false;
   }
 }
 
 function startAutoRefresh() {
-  window.setInterval(() => {
+  if (state.autoRefreshTimer) window.clearInterval(state.autoRefreshTimer);
+  state.autoRefreshTimer = window.setInterval(() => {
     if (document.visibilityState === "visible") {
       refreshLatest({ silent: true });
     }
@@ -2334,6 +2357,7 @@ function startAutoRefresh() {
       refreshLatest({ silent: true });
     }
   });
+  window.addEventListener("online", () => refreshLatest({ silent: true }));
 }
 
 async function runCrossYearSearch() {
