@@ -1847,6 +1847,159 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
     }
 
 
+def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
+    """Build an independent, deterministic tail-ending analysis.
+
+    This module intentionally uses fixed short windows instead of the public
+    analysis-period selector, so it can answer the user's short-term tail
+    question without changing the existing flagship or adaptive models.
+    """
+    ordered = canonical_analysis_draws(draws)
+    stats = number_stats(ordered, max_number)
+    window_sizes = (10, 20, 36)
+
+    def window_tail_stats(rows: list[dict[str, Any]]) -> tuple[dict[int, int], dict[int, int]]:
+        counts = {tail: 0 for tail in range(10)}
+        coverage = {tail: 0 for tail in range(10)}
+        for draw in rows:
+            tails_in_draw = {number % 10 for number in draw["numbers"]}
+            for tail in tails_in_draw:
+                coverage[tail] += 1
+            for number in draw["numbers"]:
+                counts[number % 10] += 1
+        return counts, coverage
+
+    def tail_gap(tail: int) -> int:
+        return next(
+            (
+                index
+                for index, draw in enumerate(ordered)
+                if any(number % 10 == tail for number in draw["numbers"])
+            ),
+            len(ordered),
+        )
+
+    window_data: dict[int, dict[str, dict[int, int]]] = {}
+    for size in window_sizes:
+        rows = ordered[: min(size, len(ordered))]
+        counts, coverage = window_tail_stats(rows)
+        window_data[size] = {"counts": counts, "coverage": coverage}
+
+    tail_rows: list[dict[str, Any]] = []
+    for tail in range(10):
+        count10 = window_data[10]["counts"][tail]
+        count20 = window_data[20]["counts"][tail]
+        count36 = window_data[36]["counts"][tail]
+        size10 = max(1, min(10, len(ordered)))
+        size20 = max(1, min(20, len(ordered)))
+        size36 = max(1, min(36, len(ordered)))
+        rate10 = count10 / (size10 * 5)
+        rate20 = count20 / (size20 * 5)
+        rate36 = count36 / (size36 * 5)
+        momentum = rate10 - rate36
+        gap = tail_gap(tail)
+        # Recent windows carry more weight; momentum only nudges a tail when
+        # the newest ten draws are stronger than its 36-draw baseline.
+        raw_score = rate10 * 0.50 + rate20 * 0.30 + rate36 * 0.20 + max(0.0, momentum) * 0.25
+        if gap >= 4:
+            raw_score *= 0.55
+        tail_rows.append(
+            {
+                "tail": tail,
+                "label": f"{tail}尾",
+                "recent10": count10,
+                "recent20": count20,
+                "recent36": count36,
+                "coverage10": window_data[10]["coverage"][tail],
+                "coverage20": window_data[20]["coverage"][tail],
+                "coverage36": window_data[36]["coverage"][tail],
+                "gap": gap,
+                "momentum": round(momentum * 100, 1),
+                "rawScore": raw_score,
+            }
+        )
+
+    ranked = sorted(tail_rows, key=lambda item: (-item["rawScore"], item["gap"], item["tail"]))
+    eligible_tails = [item for item in ranked if item["gap"] < 4]
+    recommended_tails = eligible_tails[:5]
+    if len(recommended_tails) < 3:
+        recommended_tails = [item for item in ranked if item["tail"] not in {row["tail"] for row in recommended_tails}][:5]
+    recommended_tail_set = {item["tail"] for item in recommended_tails}
+    top_score = max((item["rawScore"] for item in ranked), default=0.0) or 1.0
+
+    numbers_by_tail: dict[int, list[int]] = {tail: [] for tail in range(10)}
+    for number in range(1, max_number + 1):
+        numbers_by_tail[number % 10].append(number)
+    number_candidates: list[tuple[float, int]] = []
+    for item in ranked:
+        tail = item["tail"]
+        if tail not in recommended_tail_set:
+            continue
+        tail_score = item["rawScore"] / top_score
+        numbers = sorted(
+            numbers_by_tail[tail],
+            key=lambda number: (
+                -(
+                    stats["frequency"].get(number, 0) * 0.42
+                    + stats["windowFrequencies"].get("10", {}).get(number, 0) * 1.8
+                    + stats["windowFrequencies"].get("20", {}).get(number, 0) * 0.75
+                    + stats["windowFrequencies"].get("36", {}).get(number, 0) * 0.25
+                    + (1 / (1 + stats["gaps"].get(number, len(ordered)))) * 2
+                ),
+                number,
+            ),
+        )
+        numbers_by_tail[tail] = numbers
+        for number in numbers:
+            if stats["gaps"].get(number, len(ordered)) <= 25:
+                number_score = (
+                    stats["windowFrequencies"].get("10", {}).get(number, 0) * 1.8
+                    + stats["windowFrequencies"].get("20", {}).get(number, 0) * 0.75
+                    + stats["windowFrequencies"].get("36", {}).get(number, 0) * 0.25
+                    + (1 / (1 + stats["gaps"].get(number, len(ordered)))) * 2
+                )
+                number_candidates.append((tail_score * 10 + number_score, number))
+
+    # Give the standalone module at least one number from each selected tail,
+    # then fill remaining slots by the same deterministic strength ranking.
+    recommendation: list[int] = []
+    for item in recommended_tails:
+        for number in numbers_by_tail[item["tail"]]:
+            if number not in recommendation and stats["gaps"].get(number, len(ordered)) <= 25:
+                recommendation.append(number)
+                break
+        if len(recommendation) == 5:
+            break
+    for _, number in sorted(number_candidates, key=lambda item: (-item[0], item[1])):
+        if number not in recommendation:
+            recommendation.append(number)
+        if len(recommendation) == 5:
+            break
+
+    selected_tail_ranks = {item["tail"]: index for index, item in enumerate(ranked)}
+    for item in tail_rows:
+        item["score"] = round((item["rawScore"] / top_score) * 100, 1)
+        if item["gap"] >= 4:
+            item["status"] = "避開"
+        elif item["tail"] in recommended_tail_set and selected_tail_ranks[item["tail"]] < 3:
+            item["status"] = "優先"
+        else:
+            item["status"] = "觀察"
+        item.pop("rawScore", None)
+        item["numbers"] = [number for number in numbers_by_tail[item["tail"]] if stats["gaps"].get(number, len(ordered)) <= 25][:4]
+
+    tail_rows.sort(key=lambda item: (-item["score"], item["gap"], item["tail"]))
+    return {
+        "windows": [size for size in window_sizes if ordered[:size]],
+        "rows": tail_rows,
+        "recommendedTails": [item["tail"] for item in recommended_tails],
+        "avoidTails": [item["tail"] for item in tail_rows if item["gap"] >= 4],
+        "recommendation": sorted(recommendation[:5]),
+        "method": "獨立尾數模組：近10期 50%・近20期 30%・近36期 20%＋近期動能；尾數連續4期未出降低權重，25期以上未開號碼不列入參考。",
+        "note": "尾數只反映歷史分布與近期動能，不代表下一期必然開出；彩券每期仍是隨機事件。",
+    }
+
+
 def research_feature_evidence(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -2955,6 +3108,7 @@ def analyze(
         precomputed_scores=adaptive_scores,
     )
     patterns = pattern_summary(draws, max_number, selected_profile)
+    tail_analysis = tail_analysis_summary(draws, max_number)
     short_consensus = short_term_consensus(
         reference_draws,
         max_number=max_number,
@@ -2988,6 +3142,7 @@ def analyze(
         "backtest": backtest,
         "modelProfiles": model_results,
         "patterns": patterns,
+        "tailAnalysis": tail_analysis,
         "researchEvidence": research_evidence,
         "shortTermConsensus": short_consensus,
         "note": "這是用多視窗熱度、近期動能、遺漏週期、尾數動能、區間集中、奇偶大小、總和版路、拖牌連莊、鄰近號與穩定度回測做的交叉統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
@@ -3035,6 +3190,7 @@ def analyze_with_stable_backtest(
     analysis["backtest"] = fallback_backtest
     analysis["modelProfiles"] = model_results
     analysis["researchEvidence"] = research_evidence
+    analysis["tailAnalysis"] = tail_analysis_summary(display_draws, max_number)
     analysis["recommendation"] = model_recommendation(
         display_draws,
         max_number=max_number,
