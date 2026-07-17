@@ -64,12 +64,6 @@ BACKTEST_MIN_HISTORY = 36
 BACKTEST_DEFAULT_LIMIT = 24
 BACKTEST_MIN_LIMIT = 7
 BACKTEST_MAX_LIMIT = 365
-# The flagship layers use a stable, internal logic window.  It is deliberately
-# independent from the user-facing history and backtest selectors.
-FLAGSHIP_LOGIC_HISTORY_LIMIT = 120
-# Bump this when the flagship/adaptive rules change so an old persisted
-# snapshot cannot mask the new calculation for the current draw.
-FLAGSHIP_ALGORITHM_VERSION = "recent-logic-v2"
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 MAX_SAVED_PICKS_PER_SUBSCRIPTION = 20
@@ -354,7 +348,6 @@ def flagship_reasoning_summary(
         "analysisLimit": int(selected_limit),
         "selectedNumbers": list(numbers),
         "adaptiveNumbers": adaptive_numbers if len(adaptive_numbers) == 5 else [],
-        "logicRules": analysis.get("adaptiveLogicRules", {}),
         "recentHot": (analysis.get("hot") or [])[:8],
         "intervals": (patterns.get("intervals") or [])[:3],
         "pairCombos": (patterns.get("pairCombos") or [])[:3],
@@ -445,14 +438,12 @@ def persist_flagship_analysis_history(
         return
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     components = analysis.get("flagshipComponents") or [
-        {"id": "logic", "label": "近期回補規則", "weight": 12},
-        {"id": "recent", "label": "近期熱牌", "weight": 20},
-        {"id": "interval", "label": "區間", "weight": 14},
-        {"id": "backtest", "label": "回測", "weight": 14},
-        {"id": "pattern", "label": "版路", "weight": 12},
-        {"id": "drag", "label": "拖牌", "weight": 9},
-        {"id": "tail", "label": "尾數", "weight": 9},
-        {"id": "adaptive", "label": "自適應校準", "weight": 10},
+        {"id": "recent", "label": "近期熱牌", "weight": 26},
+        {"id": "interval", "label": "區間", "weight": 20},
+        {"id": "backtest", "label": "回測", "weight": 18},
+        {"id": "pattern", "label": "版路", "weight": 16},
+        {"id": "drag", "label": "拖牌", "weight": 10},
+        {"id": "tail", "label": "尾數", "weight": 10},
     ]
     reasoning = flagship_reasoning_summary(analysis, numbers, selected_limit)
     profile_name = str((analysis.get("patterns") or {}).get("selectedProfile", "balanced"))
@@ -982,7 +973,7 @@ def _freeze_flagship_recommendation(
 ) -> tuple[list[int], dict[str, Any]]:
     """Publish one flagship pool per draw/window so every visitor sees the same result."""
     snapshot_key = (
-        f"{game}:{FLAGSHIP_ALGORITHM_VERSION}:{latest.get('date', '')}:{latest.get('period', '')}:"
+        f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:"
         f"window-{selected_limit}:{snapshot_tag}"
     )
     if snapshot_key in flagship_snapshot_memory:
@@ -1619,22 +1610,6 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
     gaps = stats["gaps"]
     appearance_streak = stats["appearanceStreak"]
 
-    # Recent omission rules used only by the flagship and adaptive layers.
-    # A tail gap is the number of consecutive latest draws without any number
-    # ending in that digit.  Number gaps use the same zero-based draw distance
-    # as number_stats, so 15-19 means the 15th to 19th draw has been missed.
-    tail_gaps = {
-        tail: next(
-            (
-                index
-                for index, draw in enumerate(ordered)
-                if any(number % 10 == tail for number in draw["numbers"])
-            ),
-            len(ordered),
-        )
-        for tail in range(10)
-    }
-
     window_specs = ((6, 0.30), (12, 0.25), (24, 0.20), (36, 0.14), (60, 0.07), (90, 0.04))
     window_rows = {size: ordered[:size] for size, _ in window_specs}
     window_frequencies = {size: frequencies(rows) for size, rows in window_rows.items()}
@@ -1789,33 +1764,6 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
             "momentum": momentum,
         }
 
-    logic_scores: dict[int, float] = {}
-    logic_labels: dict[int, list[str]] = {}
-    for number in range(1, max_number + 1):
-        gap = gaps[number]
-        tail_gap = tail_gaps[number % 10]
-        labels: list[str] = []
-        score = 0.0
-        if gap <= 9:
-            score += 0.34
-            labels.append("近10期出現")
-        elif 10 <= gap <= 14:
-            score += 0.05
-        elif 15 <= gap <= 19:
-            score += 0.28
-            labels.append("15期回補")
-        elif 20 <= gap <= 25:
-            score += 0.42
-            labels.append("20期待開")
-        else:
-            score -= 0.58
-            labels.append("25期以上避開")
-        if tail_gap >= 4:
-            score -= 0.48
-            labels.append("尾數4期以上避開")
-        logic_scores[number] = score
-        logic_labels[number] = labels
-
     return {
         "ordered": ordered,
         "numberScores": number_scores,
@@ -1839,50 +1787,22 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
         "multiWindowScores": multi_window_raw,
         "tailMomentum": tail_momentum_raw,
         "appearanceStreak": appearance_streak,
-        "numberGaps": gaps,
-        "tailGaps": tail_gaps,
-        "logicScores": logic_scores,
-        "logicLabels": logic_labels,
         "windowSizes": [size for size, _ in window_specs if window_rows[size]],
     }
 
 
 def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
-    """Build an independent, deterministic tail-ending analysis.
-
-    V2 corrects for the different number of balls in each tail bucket (0尾 has
-    only 03/13/23/33 in a 1-39 game), smooths short samples, and requires
-    agreement across the 10/20/36-draw windows.  It remains separate from the
-    flagship and adaptive models so their persisted recommendations are not
-    changed by this module.
-    """
+    """Show a simple, independent tail summary without feeding the main model."""
     ordered = canonical_analysis_draws(draws)
     stats = number_stats(ordered, max_number)
-    configured_windows = (10, 20, 36)
-    windows = [size for size in configured_windows if ordered[:size]]
-    if not windows:
-        windows = list(configured_windows)
+    window_sizes = (10, 20, 36)
 
-    tail_bucket_size = {
-        tail: sum(1 for number in range(1, max_number + 1) if number % 10 == tail)
-        for tail in range(10)
-    }
-    tail_probability = {
-        tail: safe_divide(tail_bucket_size[tail], max_number)
-        for tail in range(10)
-    }
-    number_probability = safe_divide(1, max_number)
-    # A small prior prevents a single draw in a short window from becoming a
-    # false "hot" signal.  The prior is distributed according to the actual
-    # number of balls in each tail bucket.
-    prior_draws = 8.0
-
-    def window_tail_stats(rows: list[dict[str, Any]]) -> tuple[dict[int, int], dict[int, int]]:
+    def window_tail_counts(rows: list[dict[str, Any]]) -> tuple[dict[int, int], dict[int, int]]:
         counts = {tail: 0 for tail in range(10)}
         coverage = {tail: 0 for tail in range(10)}
         for draw in rows:
-            tails_in_draw = {number % 10 for number in draw["numbers"]}
-            for tail in tails_in_draw:
+            seen = {number % 10 for number in draw["numbers"]}
+            for tail in seen:
                 coverage[tail] += 1
             for number in draw["numbers"]:
                 counts[number % 10] += 1
@@ -1898,173 +1818,77 @@ def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> 
             len(ordered),
         )
 
-    def smoothed_lift(count: int, total_balls: int, expected_rate: float) -> float:
-        if not expected_rate:
-            return 0.0
-        smoothed_rate = safe_divide(
-            count + expected_rate * prior_draws * 5,
-            total_balls + prior_draws * 5,
-        )
-        return safe_divide(smoothed_rate, expected_rate)
-
-    window_data: dict[int, dict[str, Any]] = {}
-    for size in configured_windows:
+    window_data: dict[int, dict[str, dict[int, int]]] = {}
+    for size in window_sizes:
         rows = ordered[: min(size, len(ordered))]
-        counts, coverage = window_tail_stats(rows)
-        window_data[size] = {
-            "counts": counts,
-            "coverage": coverage,
-            "rows": len(rows),
-        }
-
-    # Convert each window to a rank score instead of comparing raw counts.
-    # This makes 10/20/36期 comparable and gives stable tie-breaking.
-    lift_by_window: dict[int, dict[int, float]] = {}
-    coverage_lift_by_window: dict[int, dict[int, float]] = {}
-    rank_by_window: dict[int, dict[int, float]] = {}
-    for size in configured_windows:
-        rows_count = window_data[size]["rows"]
-        total_balls = rows_count * 5
-        lifts = {}
-        coverage_lifts = {}
-        for tail in range(10):
-            lifts[tail] = smoothed_lift(
-                window_data[size]["counts"][tail],
-                total_balls,
-                tail_probability[tail],
-            )
-            expected_presence = 1 - (1 - tail_probability[tail]) ** 5
-            observed_presence = safe_divide(
-                window_data[size]["coverage"][tail] + expected_presence * prior_draws,
-                rows_count + prior_draws,
-            )
-            coverage_lifts[tail] = safe_divide(observed_presence, expected_presence)
-        lift_by_window[size] = lifts
-        coverage_lift_by_window[size] = coverage_lifts
-        ranked_tails = sorted(range(10), key=lambda tail: (-lifts[tail], tail))
-        rank_by_window[size] = {
-            tail: safe_divide(9 - rank, 9)
-            for rank, tail in enumerate(ranked_tails)
-        }
-
-    momentum_values = {
-        tail: (
-            (lift_by_window[10][tail] - lift_by_window[20][tail]) * 0.6
-            + (lift_by_window[20][tail] - lift_by_window[36][tail]) * 0.4
-        )
-        for tail in range(10)
-    }
-    momentum_ranked = sorted(range(10), key=lambda tail: (-momentum_values[tail], tail))
-    momentum_rank = {
-        tail: safe_divide(9 - rank, 9)
-        for rank, tail in enumerate(momentum_ranked)
-    }
+        counts, coverage = window_tail_counts(rows)
+        window_data[size] = {"counts": counts, "coverage": coverage}
 
     tail_rows: list[dict[str, Any]] = []
     for tail in range(10):
+        count10 = window_data[10]["counts"][tail]
+        count20 = window_data[20]["counts"][tail]
+        count36 = window_data[36]["counts"][tail]
+        size10 = max(1, min(10, len(ordered)))
+        size20 = max(1, min(20, len(ordered)))
+        size36 = max(1, min(36, len(ordered)))
+        rate10 = count10 / (size10 * 5)
+        rate20 = count20 / (size20 * 5)
+        rate36 = count36 / (size36 * 5)
         gap = tail_gap(tail)
-        consensus_count = sum(
-            1 for size in configured_windows if lift_by_window[size][tail] >= 1.0
-        )
-        stability = sum(rank_by_window[size][tail] for size in configured_windows) / len(configured_windows)
-        consensus = consensus_count / len(configured_windows)
-        # Recent data matters most, but the score also rewards tails that keep
-        # their position across all windows instead of winning one window only.
-        base_score = (
-            rank_by_window[10][tail] * 0.42
-            + rank_by_window[20][tail] * 0.24
-            + rank_by_window[36][tail] * 0.14
-            + stability * 0.10
-            + consensus * 0.06
-            + momentum_rank[tail] * 0.04
-        )
-        availability_factor = 0.42 if gap >= 4 else 1.0
-        raw_score = base_score * availability_factor
+        raw_score = rate10 * 0.50 + rate20 * 0.30 + rate36 * 0.20
+        if gap >= 4:
+            raw_score *= 0.55
         tail_rows.append(
             {
                 "tail": tail,
                 "label": f"{tail}尾",
-                "recent10": window_data[10]["counts"][tail],
-                "recent20": window_data[20]["counts"][tail],
-                "recent36": window_data[36]["counts"][tail],
+                "recent10": count10,
+                "recent20": count20,
+                "recent36": count36,
                 "coverage10": window_data[10]["coverage"][tail],
                 "coverage20": window_data[20]["coverage"][tail],
                 "coverage36": window_data[36]["coverage"][tail],
-                "lift10": round(lift_by_window[10][tail], 3),
-                "lift20": round(lift_by_window[20][tail], 3),
-                "lift36": round(lift_by_window[36][tail], 3),
-                "coverageLift10": round(coverage_lift_by_window[10][tail], 3),
                 "gap": gap,
-                "momentum": round(momentum_values[tail] * 100, 1),
-                "consensus": consensus_count,
-                "stability": round(stability * 100, 1),
+                "momentum": round((rate10 - rate36) * 100, 1),
                 "rawScore": raw_score,
             }
         )
 
     ranked = sorted(tail_rows, key=lambda item: (-item["rawScore"], item["gap"], item["tail"]))
-    eligible_tails = [item for item in ranked if item["gap"] < 4]
-    recommended_tails = eligible_tails[:5]
+    recommended_tails = [item for item in ranked if item["gap"] < 4][:5]
     recommended_tail_set = {item["tail"] for item in recommended_tails}
     top_score = max((item["rawScore"] for item in ranked), default=0.0) or 1.0
 
     numbers_by_tail: dict[int, list[int]] = {tail: [] for tail in range(10)}
     for number in range(1, max_number + 1):
         numbers_by_tail[number % 10].append(number)
-
-    def number_rank_scores() -> dict[int, float]:
-        scores: dict[int, float] = {}
-        number_window_rank: dict[int, dict[int, float]] = {}
-        for size in configured_windows:
-            rows_count = window_data[size]["rows"]
-            total_balls = rows_count * 5
-            lifts = {
-                number: smoothed_lift(
-                    stats["windowFrequencies"].get(str(size), {}).get(number, 0),
-                    total_balls,
-                    number_probability,
-                )
-                for number in range(1, max_number + 1)
-            }
-            ranked_numbers = sorted(range(1, max_number + 1), key=lambda number: (-lifts[number], number))
-            number_window_rank[size] = {
-                number: safe_divide(max_number - 1 - rank, max_number - 1)
-                for rank, number in enumerate(ranked_numbers)
-            }
-        for number in range(1, max_number + 1):
-            gap = stats["gaps"].get(number, len(ordered))
-            gap_fit = 1.0 - min(gap, 25) / 25 if gap <= 25 else 0.0
-            scores[number] = (
-                number_window_rank[10][number] * 0.52
-                + number_window_rank[20][number] * 0.28
-                + number_window_rank[36][number] * 0.12
-                + gap_fit * 0.08
-            )
-        return scores
-
-    number_scores = number_rank_scores()
     number_candidates: list[tuple[float, int]] = []
-    for item in ranked:
-        tail = item["tail"]
-        if tail not in recommended_tail_set:
-            continue
+    for item in recommended_tails:
         tail_score = item["rawScore"] / top_score
-        for number in numbers_by_tail[tail]:
-            gap = stats["gaps"].get(number, len(ordered))
-            if gap > 25:
-                continue
-            number_score = number_scores[number] * 0.72 + tail_score * 0.28
-            number_candidates.append((number_score, number))
-        numbers_by_tail[tail].sort(
+        numbers = sorted(
+            numbers_by_tail[item["tail"]],
             key=lambda number: (
-                -(number_scores[number] if stats["gaps"].get(number, len(ordered)) <= 25 else -1),
+                -(
+                    stats["windowFrequencies"].get("10", {}).get(number, 0) * 1.8
+                    + stats["windowFrequencies"].get("20", {}).get(number, 0) * 0.75
+                    + stats["windowFrequencies"].get("36", {}).get(number, 0) * 0.25
+                    + (1 / (1 + stats["gaps"].get(number, len(ordered)))) * 2
+                ),
                 number,
-            )
+            ),
         )
+        numbers_by_tail[item["tail"]] = numbers
+        for number in numbers:
+            if stats["gaps"].get(number, len(ordered)) <= 25:
+                number_score = (
+                    stats["windowFrequencies"].get("10", {}).get(number, 0) * 1.8
+                    + stats["windowFrequencies"].get("20", {}).get(number, 0) * 0.75
+                    + stats["windowFrequencies"].get("36", {}).get(number, 0) * 0.25
+                    + (1 / (1 + stats["gaps"].get(number, len(ordered)))) * 2
+                )
+                number_candidates.append((tail_score * 10 + number_score, number))
 
-    # Give the standalone module one number from each selected tail first,
-    # then fill remaining slots by the same calibrated ranking.  It keeps the
-    # five-number display diverse without introducing random output.
     recommendation: list[int] = []
     for item in recommended_tails:
         for number in numbers_by_tail[item["tail"]]:
@@ -2096,20 +1920,15 @@ def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> 
         ][:4]
 
     tail_rows.sort(key=lambda item: (-item["score"], item["gap"], item["tail"]))
-    active_consensus = [item["consensus"] for item in ranked if item["gap"] < 4]
-    confidence = safe_divide(
-        min(len(ordered), 36), 36
-    ) * safe_divide(sum(active_consensus), max(1, len(active_consensus)) * len(configured_windows))
     return {
-        "version": "v2",
-        "windows": windows,
+        "version": "獨立",
+        "windows": [size for size in window_sizes if ordered[:size]],
         "rows": tail_rows,
         "recommendedTails": [item["tail"] for item in recommended_tails],
         "avoidTails": [item["tail"] for item in tail_rows if item["gap"] >= 4],
         "recommendation": sorted(recommendation[:5]),
-        "confidence": round(confidence * 100, 1),
-        "method": "尾數分析 v2：校正各尾數可用球數後，綜合近10／20／36期排名、尾數覆蓋率、跨窗口共識與近期動能；連續4期未出避開，25期以上未開號碼不列入參考。",
-        "note": "v2 會降低單一短窗口暴衝的影響，優先保留多窗口一致的尾數；這是歷史統計參考，不代表下一期必然開出，彩券每期仍是隨機事件。",
+        "method": "獨立尾數統計：近10期 50%・近20期 30%・近36期 20%；只供查看，不參與主推薦、旗艦版或自適應集成。",
+        "note": "尾數只反映歷史分布與近期動能，不代表下一期必然開出；彩券每期仍是隨機事件。",
     }
 
 
@@ -2251,236 +2070,6 @@ def score_number(
     return base_score * 0.84 + evidence_score * 0.16
 
 
-ENSEMBLE_EXPERTS = ("classic", "balanced", "momentum", "cycle", "shape")
-
-
-def normalize_number_scores(values: dict[int, float], max_number: int = 39) -> dict[int, float]:
-    """Normalize a number score map without allowing one outlier to dominate."""
-    if not values:
-        return {number: 0.5 for number in range(1, max_number + 1)}
-    low = min(values.values())
-    high = max(values.values())
-    if high <= low:
-        return {number: 0.5 for number in values}
-    return {
-        number: max(0.0, min(1.0, (value - low) / (high - low)))
-        for number, value in values.items()
-    }
-
-
-def logic_candidate_pool(
-    scores: dict[int, float],
-    profile: dict[str, Any],
-    pick_count: int = 5,
-    max_number: int = 39,
-) -> list[int]:
-    """Rank numbers with the fixed recent omission rules before combinations.
-
-    The two hard guards are intentionally soft only when there are not enough
-    alternatives: avoid tails absent for 4+ draws and numbers absent for more
-    than 25 draws.  This keeps the app able to publish five numbers with short
-    or incomplete history while honoring the requested rules on normal data.
-    """
-    logic_scores = profile.get("logicScores", {})
-    tail_gaps = profile.get("tailGaps", {})
-    number_gaps = profile.get("numberGaps", {})
-
-    def ranked(numbers: list[int]) -> list[int]:
-        return sorted(
-            numbers,
-            key=lambda number: (
-                -float(scores.get(number, 0.0)),
-                -float(logic_scores.get(number, 0.0)),
-                int(number),
-            ),
-        )
-
-    all_numbers = list(range(1, max_number + 1))
-    guarded = [
-        number
-        for number in all_numbers
-        if int(tail_gaps.get(number % 10, 0)) < 4
-        and int(number_gaps.get(number, 0)) <= 25
-    ]
-    if len(guarded) < pick_count:
-        guarded = [number for number in all_numbers if int(number_gaps.get(number, 0)) <= 25]
-    if len(guarded) < pick_count:
-        guarded = all_numbers
-    return ranked(guarded)[: min(18, len(guarded))]
-
-
-def logic_rule_summary(profile: dict[str, Any], max_number: int = 39) -> dict[str, Any]:
-    gaps = profile.get("numberGaps", {})
-    tail_gaps = profile.get("tailGaps", {})
-    return {
-        "tailAvoid": [tail for tail in range(10) if int(tail_gaps.get(tail, 0)) >= 4],
-        "recent10": [number for number in range(1, max_number + 1) if int(gaps.get(number, 0)) <= 9],
-        "rebound15to19": [number for number in range(1, max_number + 1) if 15 <= int(gaps.get(number, 0)) <= 19],
-        "due20to25": [number for number in range(1, max_number + 1) if 20 <= int(gaps.get(number, 0)) <= 25],
-        "avoid25plus": [number for number in range(1, max_number + 1) if int(gaps.get(number, 0)) > 25],
-        "tailGaps": {str(tail): int(tail_gaps.get(tail, 0)) for tail in range(10)},
-    }
-
-
-def ensemble_expert_weights(
-    model_results: list[dict[str, Any]] | None,
-    expert_names: tuple[str, ...] = ENSEMBLE_EXPERTS,
-) -> dict[str, float]:
-    """Turn walk-forward model quality into conservative ensemble weights.
-
-    A single lucky model must not take over the entire recommendation.  The
-    floor and cap keep the ensemble diversified while still rewarding models
-    that are more stable in the validation window.
-    """
-    quality_by_id = {
-        str(item.get("id")): float(item.get("quality", 0.0))
-        for item in (model_results or [])
-        if item.get("id") in expert_names
-    }
-    if not quality_by_id:
-        return {name: 1.0 / len(expert_names) for name in expert_names}
-    values = [quality_by_id.get(name, 0.0) for name in expert_names]
-    minimum = min(values)
-    relative = {name: max(1.0, quality_by_id.get(name, minimum) - minimum + 6.0) for name in expert_names}
-    total = sum(relative.values()) or 1.0
-    raw = {name: relative[name] / total for name in expert_names}
-    # Let a clearly validated champion lead, but keep enough weight on the
-    # other experts to avoid chasing one lucky backtest window.
-    bounded = {name: max(0.06, min(0.48, value)) for name, value in raw.items()}
-    bounded_total = sum(bounded.values()) or 1.0
-    return {name: value / bounded_total for name, value in bounded.items()}
-
-
-def adaptive_ensemble_scores(
-    draws: list[dict[str, Any]],
-    max_number: int = 39,
-    model_results: list[dict[str, Any]] | None = None,
-    evidence: dict[str, float] | None = None,
-) -> tuple[dict[int, float], dict[str, Any]]:
-    """Build a deterministic, walk-forward-calibrated score for every number.
-
-    The ensemble combines independently scored experts with short-window
-    agreement.  Model weights come from out-of-sample backtest quality, while
-    research evidence acts only as a small reliability adjustment.  This is
-    intentionally conservative: a signal must survive more than one window
-    before it can move the final pool substantially.
-    """
-    ordered = list(draws)
-    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
-    profile = pattern_profile(ordered, max_number)
-    expert_weights = ensemble_expert_weights(model_results)
-    expert_scores: dict[str, dict[int, float]] = {}
-    for expert in ENSEMBLE_EXPERTS:
-        model = MODEL_PROFILES.get(expert, MODEL_PROFILES["balanced"])
-        raw = {
-            number: score_number(number, profile, model, evidence=evidence)
-            for number in range(1, max_number + 1)
-        }
-        expert_scores[expert] = normalize_number_scores(raw, max_number)
-
-    consensus = {
-        number: sum(
-            expert_weights[expert] * expert_scores[expert][number]
-            for expert in ENSEMBLE_EXPERTS
-        )
-        for number in range(1, max_number + 1)
-    }
-    multi_window = normalize_number_scores(profile.get("multiWindowScores", {}), max_number)
-    recent_raw: dict[int, float] = {number: 0.0 for number in range(1, max_number + 1)}
-    for window_size, weight in ((10, 0.48), (20, 0.32), (36, 0.20)):
-        rows = ordered[:window_size]
-        if not rows:
-            continue
-        counts = number_stats(rows, max_number)["frequency"]
-        recent_scores = normalize_number_scores(counts, max_number)
-        for number in recent_raw:
-            recent_raw[number] += recent_scores[number] * weight
-    recent_consensus = normalize_number_scores(recent_raw, max_number)
-    logic_consensus = normalize_number_scores(profile.get("logicScores", {}), max_number)
-
-    final_scores = {
-        number: consensus[number] * 0.62
-        + multi_window[number] * 0.22
-        + recent_consensus[number] * 0.16
-        for number in range(1, max_number + 1)
-    }
-    final_scores = {
-        number: final_scores[number] * 0.72 + logic_consensus[number] * 0.28
-        for number in range(1, max_number + 1)
-    }
-    return normalize_number_scores(final_scores, max_number), {
-        "expertWeights": {name: round(weight, 4) for name, weight in expert_weights.items()},
-        "method": "固定近期邏輯：4+尾數避開・近10期優先・15-19期回補・20-25期期待開・25+期避開 × walk-forward 共識",
-        "logicRules": logic_rule_summary(profile, max_number),
-    }
-
-
-def adaptive_ensemble_recommendation(
-    draws: list[dict[str, Any]],
-    max_number: int = 39,
-    pick_count: int = 5,
-    model_results: list[dict[str, Any]] | None = None,
-    evidence: dict[str, float] | None = None,
-    precomputed_scores: dict[int, float] | None = None,
-) -> list[int]:
-    """Select the highest-scoring coherent combination from the calibrated pool."""
-    ordered = list(draws)
-    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
-    profile = pattern_profile(ordered, max_number)
-    scores = precomputed_scores or adaptive_ensemble_scores(
-        ordered,
-        max_number=max_number,
-        model_results=model_results,
-        evidence=evidence,
-    )[0]
-
-    # When walk-forward validation identifies a clear champion, blend that
-    # model into the calibrated score instead of switching blindly.  The fixed
-    # omission rules still apply after this blend.
-    expert_results = [
-        item for item in (model_results or [])
-        if item.get("id") in ENSEMBLE_EXPERTS and item.get("testedCount", 1)
-    ]
-    expert_results.sort(key=lambda item: (-float(item.get("quality", 0.0)), str(item.get("id"))))
-    if len(expert_results) >= 2:
-        champion = expert_results[0]
-        runner_up = expert_results[1]
-        champion_quality = float(champion.get("quality", 0.0))
-        runner_quality = float(runner_up.get("quality", 0.0))
-        champion_gap = safe_divide(champion_quality - runner_quality, max(abs(champion_quality), 1.0))
-        if champion_gap >= 0.12:
-            champion_model = MODEL_PROFILES.get(str(champion["id"]), MODEL_PROFILES["balanced"])
-            champion_scores = normalize_number_scores(
-                {
-                    number: score_number(number, profile, champion_model, evidence=evidence)
-                    for number in range(1, max_number + 1)
-                },
-                max_number,
-            )
-            scores = {
-                number: scores[number] * 0.72 + champion_scores[number] * 0.28
-                for number in range(1, max_number + 1)
-            }
-    candidate_pool = logic_candidate_pool(scores, profile, pick_count, max_number)
-    if len(candidate_pool) <= pick_count:
-        return sorted(candidate_pool)
-    model = MODEL_PROFILES["adaptive"]
-    best_combo: tuple[int, ...] | None = None
-    best_score = float("-inf")
-    for combo in itertools.combinations(candidate_pool, pick_count):
-        sorted_combo = tuple(sorted(combo))
-        number_score = sum(scores[number] for number in sorted_combo) / pick_count
-        combo_score = number_score * 0.76 + combo_pattern_score(
-            list(sorted_combo), profile, model, max_number
-        ) * 0.24
-        if combo_score > best_score or (
-            combo_score == best_score and (best_combo is None or sorted_combo < best_combo)
-        ):
-            best_score = combo_score
-            best_combo = sorted_combo
-    return list(best_combo or tuple(candidate_pool[:pick_count]))
-
-
 def model_recommendation(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -2503,9 +2092,7 @@ def model_recommendation(
     profile = pattern_profile(draws, max_number)
     number_scores = {}
     for n in range(1, max_number + 1):
-        # Keep the rank deterministic.  The old per-number random jitter could
-        # move a borderline number between refreshes without adding evidence.
-        number_scores[n] = score_number(n, profile, model, evidence=evidence)
+        number_scores[n] = score_number(n, profile, model, evidence=evidence) + random.Random(f"{seed_label}:{profile_name}:{n}").random() * 0.035
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(24, max_number)]
     rng = random.Random(f"lotto-lab:{profile_name}:{seed_label}:{','.join(map(str, pool))}")
@@ -2532,16 +2119,13 @@ def flagship_recommendation(
     profile_name: str = "balanced",
     evidence: dict[str, float] | None = None,
     backtest: dict[str, Any] | None = None,
-    model_results: list[dict[str, Any]] | None = None,
-    ensemble_scores: dict[int, float] | None = None,
 ) -> list[int]:
-    """Return a deterministic five-number flagship pool from fixed logic groups.
+    """Return a deterministic five-number flagship pool from six evidence groups.
 
-    The pool combines recent omission rules, recent hot numbers, interval
-    concentration, walk-forward backtest support, pattern signals, drag-card
-    support, tail momentum, and the calibrated ensemble.  This is a statistical
-    candidate pool, not a claim that any number has a guaranteed higher
-    physical lottery probability.
+    The groups are recent hot numbers, interval concentration, walk-forward
+    backtest support, pattern signals, drag-card support, and tail momentum.
+    This is a statistical candidate pool, not a claim that any number has a
+    guaranteed higher physical lottery probability.
     """
     ordered = list(draws)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
@@ -2549,38 +2133,13 @@ def flagship_recommendation(
     current_profile = pattern_profile(ordered, max_number)
 
     def normalize(values: dict[int, float]) -> dict[int, float]:
-        return normalize_number_scores(values, max_number)
-
-    calibrated_scores = ensemble_scores or adaptive_ensemble_scores(
-        ordered,
-        max_number=max_number,
-        model_results=model_results,
-        evidence=evidence,
-    )[0]
-    logic_scores = normalize(current_profile.get("logicScores", {}))
-    expert_results = [
-        item for item in (model_results or [])
-        if item.get("id") in ENSEMBLE_EXPERTS and item.get("testedCount", 1)
-    ]
-    expert_results.sort(key=lambda item: (-float(item.get("quality", 0.0)), str(item.get("id"))))
-    if len(expert_results) >= 2:
-        champion = expert_results[0]
-        runner_up = expert_results[1]
-        champion_quality = float(champion.get("quality", 0.0))
-        runner_quality = float(runner_up.get("quality", 0.0))
-        champion_gap = safe_divide(champion_quality - runner_quality, max(abs(champion_quality), 1.0))
-        if champion_gap >= 0.12:
-            champion_model = MODEL_PROFILES.get(str(champion["id"]), MODEL_PROFILES["balanced"])
-            champion_scores = normalize(
-                {
-                    number: score_number(number, current_profile, champion_model, evidence=evidence)
-                    for number in range(1, max_number + 1)
-                }
-            )
-            calibrated_scores = {
-                number: calibrated_scores[number] * 0.72 + champion_scores[number] * 0.28
-                for number in range(1, max_number + 1)
-            }
+        if not values:
+            return {number: 0.5 for number in range(1, max_number + 1)}
+        low = min(values.values())
+        high = max(values.values())
+        if high <= low:
+            return {number: 0.5 for number in values}
+        return {number: (value - low) / (high - low) for number, value in values.items()}
 
     # 1) Recent hot numbers: the short windows get explicit votes so a fresh
     # cluster can move the flagship result without discarding the full sample.
@@ -2683,19 +2242,18 @@ def flagship_recommendation(
     tail_scores = normalize(tail_raw)
 
     component_scores = {
-        number: (
-            recent_scores[number] * 0.20
-            + interval_scores[number] * 0.14
-            + backtest_scores[number] * 0.14
-            + pattern_scores[number] * 0.12
-            + drag_scores[number] * 0.09
-            + tail_scores[number] * 0.09
-            + logic_scores[number] * 0.12
-            + calibrated_scores[number] * 0.10
-        )
+        number: recent_scores[number] * 0.26
+        + interval_scores[number] * 0.20
+        + backtest_scores[number] * 0.18
+        + pattern_scores[number] * 0.16
+        + drag_scores[number] * 0.10
+        + tail_scores[number] * 0.10
         for number in range(1, max_number + 1)
     }
-    candidate_pool = logic_candidate_pool(component_scores, current_profile, pick_count, max_number)
+    candidate_pool = sorted(
+        component_scores,
+        key=lambda number: (-component_scores[number], number),
+    )[: min(18, max_number)]
     if len(candidate_pool) <= pick_count:
         return sorted(candidate_pool)
 
@@ -2707,37 +2265,15 @@ def flagship_recommendation(
     for combo in itertools.combinations(candidate_pool, pick_count):
         sorted_combo = tuple(sorted(combo))
         combo_score = sum(component_scores[number] for number in sorted_combo) / pick_count
-        combo_score = combo_score * 0.72 + combo_pattern_score(
+        combo_score = combo_score * 0.76 + combo_pattern_score(
             list(sorted_combo), current_profile, model, max_number
-        ) * 0.18 + sum(calibrated_scores[number] for number in sorted_combo) / pick_count * 0.06 + sum(
-            logic_scores[number] for number in sorted_combo
-        ) / pick_count * 0.04
+        ) * 0.24
         if combo_score > best_score or (
             combo_score == best_score and (best_combo is None or sorted_combo < best_combo)
         ):
             best_score = combo_score
             best_combo = sorted_combo
-    flagship_pick = list(best_combo or tuple(candidate_pool[:pick_count]))
-    ensemble_pick = adaptive_ensemble_recommendation(
-        ordered,
-        max_number=max_number,
-        pick_count=pick_count,
-        model_results=model_results,
-        evidence=evidence,
-        precomputed_scores=calibrated_scores,
-    )
-    adaptive_model = MODEL_PROFILES["adaptive"]
-
-    def ensemble_combo_score(numbers: list[int]) -> float:
-        number_score = sum(calibrated_scores[number] for number in numbers) / pick_count
-        return number_score * 0.76 + combo_pattern_score(
-            numbers, current_profile, adaptive_model, max_number
-        ) * 0.24
-
-    # The flagship layer is allowed to add its specialised signals, but it is
-    # never allowed to publish a lower-scoring combination than the calibrated
-    # ensemble on the same data.
-    return ensemble_pick if ensemble_combo_score(ensemble_pick) > ensemble_combo_score(flagship_pick) else flagship_pick
+    return list(best_combo or tuple(candidate_pool[:pick_count]))
 
 
 def classic_recommendation(
@@ -2769,9 +2305,7 @@ def classic_recommendation(
                 for key in RESEARCH_FEATURE_KEYS
             ) / len(RESEARCH_FEATURE_KEYS)
             base_score = base_score * 0.84 + research_score * 0.16
-        # Do not add artificial noise to a recommendation that is supposed to
-        # be explainable and repeatable for every user.
-        number_scores[n] = base_score
+        number_scores[n] = base_score + random.Random(f"{seed_label}:{n}").random() * 0.10
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(22, max_number)]
     rng = random.Random(f"lotto-lab:{seed_label}:{','.join(map(str, pool))}")
@@ -3196,12 +2730,6 @@ def analyze(
         profile_name=selected_profile,
         evidence=evidence_map,
     )
-    adaptive_scores, adaptive_meta = adaptive_ensemble_scores(
-        draws,
-        max_number=max_number,
-        model_results=model_results,
-        evidence=evidence_map,
-    )
     flagship_numbers = flagship_recommendation(
         draws,
         max_number=max_number,
@@ -3209,25 +2737,23 @@ def analyze(
         profile_name=selected_profile,
         evidence=evidence_map,
         backtest=backtest,
-        model_results=model_results,
-        ensemble_scores=adaptive_scores,
     )
-    adaptive_numbers = adaptive_ensemble_recommendation(
+    adaptive_numbers = model_recommendation(
         draws,
         max_number=max_number,
         pick_count=5,
-        model_results=model_results,
+        seed_label=f"{seed_label}:adaptive-ensemble",
+        profile_name="adaptive",
         evidence=evidence_map,
-        precomputed_scores=adaptive_scores,
     )
     patterns = pattern_summary(draws, max_number, selected_profile)
-    tail_analysis = tail_analysis_summary(draws, max_number)
     short_consensus = short_term_consensus(
         reference_draws,
         max_number=max_number,
         pick_count=pick_count,
         profile_name=selected_profile,
     )
+    tail_analysis = tail_analysis_summary(draws, max_number)
 
     return {
         "drawCount": len(draws),
@@ -3238,19 +2764,15 @@ def analyze(
         "recommendation": recommendation,
         "flagshipRecommendation": flagship_numbers,
         "adaptiveRecommendation": adaptive_numbers,
-        "adaptiveMethod": adaptive_meta["method"],
-        "adaptiveExpertWeights": adaptive_meta["expertWeights"],
-        "adaptiveLogicRules": adaptive_meta.get("logicRules", {}),
-        "flagshipMethod": "固定近期邏輯 12%（4+尾數避開・近10期優先・15-19期回補・20-25期期待開・25+期避開）・近期熱牌 20%・區間 14%・回測 14%・版路 12%・拖牌 9%・尾數 9%・自適應校準 10%",
+        "adaptiveMethod": "自適應集成：熱度、近期、趨勢、遺漏、版路、拖牌、連莊、區間與尾數動能加權",
+        "flagshipMethod": "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%",
         "flagshipComponents": [
-            {"id": "logic", "label": "近期回補規則", "weight": 12},
-            {"id": "recent", "label": "近期熱牌", "weight": 20},
-            {"id": "interval", "label": "區間", "weight": 14},
-            {"id": "backtest", "label": "回測", "weight": 14},
-            {"id": "pattern", "label": "版路", "weight": 12},
-            {"id": "drag", "label": "拖牌", "weight": 9},
-            {"id": "tail", "label": "尾數", "weight": 9},
-            {"id": "adaptive", "label": "自適應校準", "weight": 10},
+            {"id": "recent", "label": "近期熱牌", "weight": 26},
+            {"id": "interval", "label": "區間", "weight": 20},
+            {"id": "backtest", "label": "回測", "weight": 18},
+            {"id": "pattern", "label": "版路", "weight": 16},
+            {"id": "drag", "label": "拖牌", "weight": 10},
+            {"id": "tail", "label": "尾數", "weight": 10},
         ],
         "backtest": backtest,
         "modelProfiles": model_results,
@@ -3312,12 +2834,6 @@ def analyze_with_stable_backtest(
         profile_name=selected_profile,
         evidence=evidence_map,
     )
-    adaptive_scores, adaptive_meta = adaptive_ensemble_scores(
-        display_draws,
-        max_number=max_number,
-        model_results=model_results,
-        evidence=evidence_map,
-    )
     analysis["flagshipRecommendation"] = flagship_recommendation(
         display_draws,
         max_number=max_number,
@@ -3325,20 +2841,15 @@ def analyze_with_stable_backtest(
         profile_name=selected_profile,
         evidence=evidence_map,
         backtest=fallback_backtest,
-        model_results=model_results,
-        ensemble_scores=adaptive_scores,
     )
-    analysis["adaptiveRecommendation"] = adaptive_ensemble_recommendation(
+    analysis["adaptiveRecommendation"] = model_recommendation(
         display_draws,
         max_number=max_number,
         pick_count=5,
-        model_results=model_results,
+        seed_label=f"{stable_analysis_seed(fallback_draws, f'fallback-window-{len(draws)}-backtest-{requested_limit}')}:adaptive-ensemble",
+        profile_name="adaptive",
         evidence=evidence_map,
-        precomputed_scores=adaptive_scores,
     )
-    analysis["adaptiveMethod"] = adaptive_meta["method"]
-    analysis["adaptiveExpertWeights"] = adaptive_meta["expertWeights"]
-    analysis["adaptiveLogicRules"] = adaptive_meta.get("logicRules", {})
     analysis["shortTermConsensus"] = short_term_consensus(
         display_draws,
         max_number=max_number,
@@ -3437,9 +2948,7 @@ def build_payload(
     flagship_limit: int | None = None,
 ) -> dict[str, Any]:
     requested_backtest_limit = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
-    # Flagship and adaptive recommendations always use the same internal
-    # logic window.  The public analysis-period selector must not change them.
-    requested_flagship_limit = FLAGSHIP_LOGIC_HISTORY_LIMIT
+    requested_flagship_limit = max(10, min(BACKTEST_MAX_LIMIT, int(flagship_limit if flagship_limit is not None else limit)))
     fetch_limit = min(5000, max(limit, requested_flagship_limit, requested_backtest_limit + 90, BACKTEST_FALLBACK_LIMIT))
     if game == "tw539":
         latest = taiwan_latest()
@@ -3644,9 +3153,12 @@ class Handler(SimpleHTTPRequestHandler):
                     BACKTEST_MIN_LIMIT,
                     BACKTEST_MAX_LIMIT,
                 )
-                # Kept as a backwards-compatible query parameter, but ignored
-                # so flagship/adaptive results are logic-driven and stable.
-                flagship_limit = FLAGSHIP_LOGIC_HISTORY_LIMIT
+                flagship_limit = clamp_int(
+                    params.get("flagshipLimit", [str(limit)])[0],
+                    limit,
+                    10,
+                    BACKTEST_MAX_LIMIT,
+                )
                 payload = build_payload(
                     game,
                     limit,
