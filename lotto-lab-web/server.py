@@ -67,6 +67,9 @@ BACKTEST_MAX_LIMIT = 365
 # The flagship layers use a stable, internal logic window.  It is deliberately
 # independent from the user-facing history and backtest selectors.
 FLAGSHIP_LOGIC_HISTORY_LIMIT = 120
+# Bump this when the flagship/adaptive rules change so an old persisted
+# snapshot cannot mask the new calculation for the current draw.
+FLAGSHIP_ALGORITHM_VERSION = "recent-logic-v2"
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 MAX_SAVED_PICKS_PER_SUBSCRIPTION = 20
@@ -979,7 +982,7 @@ def _freeze_flagship_recommendation(
 ) -> tuple[list[int], dict[str, Any]]:
     """Publish one flagship pool per draw/window so every visitor sees the same result."""
     snapshot_key = (
-        f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:"
+        f"{game}:{FLAGSHIP_ALGORITHM_VERSION}:{latest.get('date', '')}:{latest.get('period', '')}:"
         f"window-{selected_limit}:{snapshot_tag}"
     )
     if snapshot_key in flagship_snapshot_memory:
