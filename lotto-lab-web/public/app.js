@@ -1925,7 +1925,7 @@ function renderTailAnalysis(tailAnalysis) {
   const strongest = rows[0];
   const freshest = [...rows].sort((left, right) => (right.momentum || 0) - (left.momentum || 0) || left.tail - right.tail)[0];
   const activeCount = rows.filter((row) => row.status !== "避開").length;
-  els.tailAnalysisBadge.textContent = `固定近 ${windows.join("／")} 期`;
+  els.tailAnalysisBadge.textContent = `${tailAnalysis.version || "v2"} · 近 ${windows.join("／")} 期`;
   els.tailAnalysisSummary.innerHTML = `
     <div>
       <span>近期最強</span>
