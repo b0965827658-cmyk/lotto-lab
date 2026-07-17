@@ -1929,6 +1929,173 @@ def score_number(
     return base_score * 0.84 + evidence_score * 0.16
 
 
+ENSEMBLE_EXPERTS = ("classic", "balanced", "momentum", "cycle", "shape")
+
+
+def normalize_number_scores(values: dict[int, float], max_number: int = 39) -> dict[int, float]:
+    """Normalize a number score map without allowing one outlier to dominate."""
+    if not values:
+        return {number: 0.5 for number in range(1, max_number + 1)}
+    low = min(values.values())
+    high = max(values.values())
+    if high <= low:
+        return {number: 0.5 for number in values}
+    return {
+        number: max(0.0, min(1.0, (value - low) / (high - low)))
+        for number, value in values.items()
+    }
+
+
+def ensemble_expert_weights(
+    model_results: list[dict[str, Any]] | None,
+    expert_names: tuple[str, ...] = ENSEMBLE_EXPERTS,
+) -> dict[str, float]:
+    """Turn walk-forward model quality into conservative ensemble weights.
+
+    A single lucky model must not take over the entire recommendation.  The
+    floor and cap keep the ensemble diversified while still rewarding models
+    that are more stable in the validation window.
+    """
+    quality_by_id = {
+        str(item.get("id")): float(item.get("quality", 0.0))
+        for item in (model_results or [])
+        if item.get("id") in expert_names
+    }
+    if not quality_by_id:
+        return {name: 1.0 / len(expert_names) for name in expert_names}
+    values = [quality_by_id.get(name, 0.0) for name in expert_names]
+    minimum = min(values)
+    relative = {name: max(1.0, quality_by_id.get(name, minimum) - minimum + 6.0) for name in expert_names}
+    total = sum(relative.values()) or 1.0
+    raw = {name: relative[name] / total for name in expert_names}
+    # Let a clearly validated champion lead, but keep enough weight on the
+    # other experts to avoid chasing one lucky backtest window.
+    bounded = {name: max(0.06, min(0.48, value)) for name, value in raw.items()}
+    bounded_total = sum(bounded.values()) or 1.0
+    return {name: value / bounded_total for name, value in bounded.items()}
+
+
+def adaptive_ensemble_scores(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    model_results: list[dict[str, Any]] | None = None,
+    evidence: dict[str, float] | None = None,
+) -> tuple[dict[int, float], dict[str, Any]]:
+    """Build a deterministic, walk-forward-calibrated score for every number.
+
+    The ensemble combines independently scored experts with short-window
+    agreement.  Model weights come from out-of-sample backtest quality, while
+    research evidence acts only as a small reliability adjustment.  This is
+    intentionally conservative: a signal must survive more than one window
+    before it can move the final pool substantially.
+    """
+    ordered = list(draws)
+    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    profile = pattern_profile(ordered, max_number)
+    expert_weights = ensemble_expert_weights(model_results)
+    expert_scores: dict[str, dict[int, float]] = {}
+    for expert in ENSEMBLE_EXPERTS:
+        model = MODEL_PROFILES.get(expert, MODEL_PROFILES["balanced"])
+        raw = {
+            number: score_number(number, profile, model, evidence=evidence)
+            for number in range(1, max_number + 1)
+        }
+        expert_scores[expert] = normalize_number_scores(raw, max_number)
+
+    consensus = {
+        number: sum(
+            expert_weights[expert] * expert_scores[expert][number]
+            for expert in ENSEMBLE_EXPERTS
+        )
+        for number in range(1, max_number + 1)
+    }
+    multi_window = normalize_number_scores(profile.get("multiWindowScores", {}), max_number)
+    recent_raw: dict[int, float] = {number: 0.0 for number in range(1, max_number + 1)}
+    for window_size, weight in ((10, 0.48), (20, 0.32), (36, 0.20)):
+        rows = ordered[:window_size]
+        if not rows:
+            continue
+        counts = number_stats(rows, max_number)["frequency"]
+        recent_scores = normalize_number_scores(counts, max_number)
+        for number in recent_raw:
+            recent_raw[number] += recent_scores[number] * weight
+    recent_consensus = normalize_number_scores(recent_raw, max_number)
+
+    final_scores = {
+        number: consensus[number] * 0.62
+        + multi_window[number] * 0.22
+        + recent_consensus[number] * 0.16
+        for number in range(1, max_number + 1)
+    }
+    return normalize_number_scores(final_scores, max_number), {
+        "expertWeights": {name: round(weight, 4) for name, weight in expert_weights.items()},
+        "method": "walk-forward 模型品質 × 多窗口共識 × 近期 10/20/36 期校準",
+    }
+
+
+def adaptive_ensemble_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    model_results: list[dict[str, Any]] | None = None,
+    evidence: dict[str, float] | None = None,
+    precomputed_scores: dict[int, float] | None = None,
+) -> list[int]:
+    """Select the highest-scoring coherent combination from the calibrated pool."""
+    ordered = list(draws)
+    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    profile = pattern_profile(ordered, max_number)
+    scores = precomputed_scores or adaptive_ensemble_scores(
+        ordered,
+        max_number=max_number,
+        model_results=model_results,
+        evidence=evidence,
+    )[0]
+
+    # When walk-forward validation identifies a clear champion, let that
+    # champion lead this draw.  The ensemble remains the default when the
+    # models are close, so one noisy period cannot force a hard switch.
+    expert_results = [
+        item for item in (model_results or [])
+        if item.get("id") in ENSEMBLE_EXPERTS and item.get("testedCount", 1)
+    ]
+    expert_results.sort(key=lambda item: (-float(item.get("quality", 0.0)), str(item.get("id"))))
+    if len(expert_results) >= 2:
+        champion = expert_results[0]
+        runner_up = expert_results[1]
+        champion_quality = float(champion.get("quality", 0.0))
+        runner_quality = float(runner_up.get("quality", 0.0))
+        champion_gap = safe_divide(champion_quality - runner_quality, max(abs(champion_quality), 1.0))
+        if champion_gap >= 0.12:
+            return model_recommendation(
+                ordered,
+                max_number=max_number,
+                pick_count=pick_count,
+                seed_label=stable_analysis_seed(ordered, f"adaptive-champion-{champion['id']}"),
+                profile_name=str(champion["id"]),
+                candidate_budget=220,
+                evidence=evidence,
+            )
+    candidate_pool = sorted(scores, key=lambda number: (-scores[number], number))[: min(18, max_number)]
+    if len(candidate_pool) <= pick_count:
+        return sorted(candidate_pool)
+    model = MODEL_PROFILES["adaptive"]
+    best_combo: tuple[int, ...] | None = None
+    best_score = float("-inf")
+    for combo in itertools.combinations(candidate_pool, pick_count):
+        sorted_combo = tuple(sorted(combo))
+        number_score = sum(scores[number] for number in sorted_combo) / pick_count
+        combo_score = number_score * 0.76 + combo_pattern_score(
+            list(sorted_combo), profile, model, max_number
+        ) * 0.24
+        if combo_score > best_score or (
+            combo_score == best_score and (best_combo is None or sorted_combo < best_combo)
+        ):
+            best_score = combo_score
+            best_combo = sorted_combo
+    return list(best_combo or tuple(candidate_pool[:pick_count]))
+
+
 def model_recommendation(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -1951,7 +2118,9 @@ def model_recommendation(
     profile = pattern_profile(draws, max_number)
     number_scores = {}
     for n in range(1, max_number + 1):
-        number_scores[n] = score_number(n, profile, model, evidence=evidence) + random.Random(f"{seed_label}:{profile_name}:{n}").random() * 0.035
+        # Keep the rank deterministic.  The old per-number random jitter could
+        # move a borderline number between refreshes without adding evidence.
+        number_scores[n] = score_number(n, profile, model, evidence=evidence)
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(24, max_number)]
     rng = random.Random(f"lotto-lab:{profile_name}:{seed_label}:{','.join(map(str, pool))}")
@@ -1978,6 +2147,8 @@ def flagship_recommendation(
     profile_name: str = "balanced",
     evidence: dict[str, float] | None = None,
     backtest: dict[str, Any] | None = None,
+    model_results: list[dict[str, Any]] | None = None,
+    ensemble_scores: dict[int, float] | None = None,
 ) -> list[int]:
     """Return a deterministic five-number flagship pool from six evidence groups.
 
@@ -1992,13 +2163,35 @@ def flagship_recommendation(
     current_profile = pattern_profile(ordered, max_number)
 
     def normalize(values: dict[int, float]) -> dict[int, float]:
-        if not values:
-            return {number: 0.5 for number in range(1, max_number + 1)}
-        low = min(values.values())
-        high = max(values.values())
-        if high <= low:
-            return {number: 0.5 for number in values}
-        return {number: (value - low) / (high - low) for number, value in values.items()}
+        return normalize_number_scores(values, max_number)
+
+    calibrated_scores = ensemble_scores or adaptive_ensemble_scores(
+        ordered,
+        max_number=max_number,
+        model_results=model_results,
+        evidence=evidence,
+    )[0]
+    expert_results = [
+        item for item in (model_results or [])
+        if item.get("id") in ENSEMBLE_EXPERTS and item.get("testedCount", 1)
+    ]
+    expert_results.sort(key=lambda item: (-float(item.get("quality", 0.0)), str(item.get("id"))))
+    if len(expert_results) >= 2:
+        champion = expert_results[0]
+        runner_up = expert_results[1]
+        champion_quality = float(champion.get("quality", 0.0))
+        runner_quality = float(runner_up.get("quality", 0.0))
+        champion_gap = safe_divide(champion_quality - runner_quality, max(abs(champion_quality), 1.0))
+        if champion_gap >= 0.12:
+            return model_recommendation(
+                ordered,
+                max_number=max_number,
+                pick_count=pick_count,
+                seed_label=stable_analysis_seed(ordered, f"flagship-champion-{champion['id']}"),
+                profile_name=str(champion["id"]),
+                candidate_budget=220,
+                evidence=evidence,
+            )
 
     # 1) Recent hot numbers: the short windows get explicit votes so a fresh
     # cluster can move the flagship result without discarding the full sample.
@@ -2101,12 +2294,15 @@ def flagship_recommendation(
     tail_scores = normalize(tail_raw)
 
     component_scores = {
-        number: recent_scores[number] * 0.26
-        + interval_scores[number] * 0.20
-        + backtest_scores[number] * 0.18
-        + pattern_scores[number] * 0.16
-        + drag_scores[number] * 0.10
-        + tail_scores[number] * 0.10
+        number: (
+            recent_scores[number] * 0.25
+            + interval_scores[number] * 0.18
+            + backtest_scores[number] * 0.18
+            + pattern_scores[number] * 0.16
+            + drag_scores[number] * 0.115
+            + tail_scores[number] * 0.115
+        ) * 0.78
+        + calibrated_scores[number] * 0.22
         for number in range(1, max_number + 1)
     }
     candidate_pool = sorted(
@@ -2124,15 +2320,35 @@ def flagship_recommendation(
     for combo in itertools.combinations(candidate_pool, pick_count):
         sorted_combo = tuple(sorted(combo))
         combo_score = sum(component_scores[number] for number in sorted_combo) / pick_count
-        combo_score = combo_score * 0.76 + combo_pattern_score(
+        combo_score = combo_score * 0.72 + combo_pattern_score(
             list(sorted_combo), current_profile, model, max_number
-        ) * 0.24
+        ) * 0.20 + sum(calibrated_scores[number] for number in sorted_combo) / pick_count * 0.08
         if combo_score > best_score or (
             combo_score == best_score and (best_combo is None or sorted_combo < best_combo)
         ):
             best_score = combo_score
             best_combo = sorted_combo
-    return list(best_combo or tuple(candidate_pool[:pick_count]))
+    flagship_pick = list(best_combo or tuple(candidate_pool[:pick_count]))
+    ensemble_pick = adaptive_ensemble_recommendation(
+        ordered,
+        max_number=max_number,
+        pick_count=pick_count,
+        model_results=model_results,
+        evidence=evidence,
+        precomputed_scores=calibrated_scores,
+    )
+    adaptive_model = MODEL_PROFILES["adaptive"]
+
+    def ensemble_combo_score(numbers: list[int]) -> float:
+        number_score = sum(calibrated_scores[number] for number in numbers) / pick_count
+        return number_score * 0.76 + combo_pattern_score(
+            numbers, current_profile, adaptive_model, max_number
+        ) * 0.24
+
+    # The flagship layer is allowed to add its specialised signals, but it is
+    # never allowed to publish a lower-scoring combination than the calibrated
+    # ensemble on the same data.
+    return ensemble_pick if ensemble_combo_score(ensemble_pick) > ensemble_combo_score(flagship_pick) else flagship_pick
 
 
 def classic_recommendation(
@@ -2164,7 +2380,9 @@ def classic_recommendation(
                 for key in RESEARCH_FEATURE_KEYS
             ) / len(RESEARCH_FEATURE_KEYS)
             base_score = base_score * 0.84 + research_score * 0.16
-        number_scores[n] = base_score + random.Random(f"{seed_label}:{n}").random() * 0.10
+        # Do not add artificial noise to a recommendation that is supposed to
+        # be explainable and repeatable for every user.
+        number_scores[n] = base_score
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(22, max_number)]
     rng = random.Random(f"lotto-lab:{seed_label}:{','.join(map(str, pool))}")
@@ -2589,6 +2807,12 @@ def analyze(
         profile_name=selected_profile,
         evidence=evidence_map,
     )
+    adaptive_scores, adaptive_meta = adaptive_ensemble_scores(
+        draws,
+        max_number=max_number,
+        model_results=model_results,
+        evidence=evidence_map,
+    )
     flagship_numbers = flagship_recommendation(
         draws,
         max_number=max_number,
@@ -2596,14 +2820,16 @@ def analyze(
         profile_name=selected_profile,
         evidence=evidence_map,
         backtest=backtest,
+        model_results=model_results,
+        ensemble_scores=adaptive_scores,
     )
-    adaptive_numbers = model_recommendation(
+    adaptive_numbers = adaptive_ensemble_recommendation(
         draws,
         max_number=max_number,
         pick_count=5,
-        seed_label=f"{seed_label}:adaptive-ensemble",
-        profile_name="adaptive",
+        model_results=model_results,
         evidence=evidence_map,
+        precomputed_scores=adaptive_scores,
     )
     patterns = pattern_summary(draws, max_number, selected_profile)
     short_consensus = short_term_consensus(
@@ -2622,15 +2848,17 @@ def analyze(
         "recommendation": recommendation,
         "flagshipRecommendation": flagship_numbers,
         "adaptiveRecommendation": adaptive_numbers,
-        "adaptiveMethod": "自適應集成：熱度、近期、趨勢、遺漏、版路、拖牌、連莊、區間與尾數動能加權",
-        "flagshipMethod": "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%",
+        "adaptiveMethod": adaptive_meta["method"],
+        "adaptiveExpertWeights": adaptive_meta["expertWeights"],
+        "flagshipMethod": "近期熱牌 20%・區間 14%・回測 14%・版路 12%・拖牌 9%・尾數 9%・自適應校準 22%",
         "flagshipComponents": [
-            {"id": "recent", "label": "近期熱牌", "weight": 26},
-            {"id": "interval", "label": "區間", "weight": 20},
-            {"id": "backtest", "label": "回測", "weight": 18},
-            {"id": "pattern", "label": "版路", "weight": 16},
-            {"id": "drag", "label": "拖牌", "weight": 10},
-            {"id": "tail", "label": "尾數", "weight": 10},
+            {"id": "recent", "label": "近期熱牌", "weight": 20},
+            {"id": "interval", "label": "區間", "weight": 14},
+            {"id": "backtest", "label": "回測", "weight": 14},
+            {"id": "pattern", "label": "版路", "weight": 12},
+            {"id": "drag", "label": "拖牌", "weight": 9},
+            {"id": "tail", "label": "尾數", "weight": 9},
+            {"id": "adaptive", "label": "自適應校準", "weight": 22},
         ],
         "backtest": backtest,
         "modelProfiles": model_results,
@@ -2690,6 +2918,12 @@ def analyze_with_stable_backtest(
         profile_name=selected_profile,
         evidence=evidence_map,
     )
+    adaptive_scores, adaptive_meta = adaptive_ensemble_scores(
+        display_draws,
+        max_number=max_number,
+        model_results=model_results,
+        evidence=evidence_map,
+    )
     analysis["flagshipRecommendation"] = flagship_recommendation(
         display_draws,
         max_number=max_number,
@@ -2697,15 +2931,19 @@ def analyze_with_stable_backtest(
         profile_name=selected_profile,
         evidence=evidence_map,
         backtest=fallback_backtest,
+        model_results=model_results,
+        ensemble_scores=adaptive_scores,
     )
-    analysis["adaptiveRecommendation"] = model_recommendation(
+    analysis["adaptiveRecommendation"] = adaptive_ensemble_recommendation(
         display_draws,
         max_number=max_number,
         pick_count=5,
-        seed_label=f"{stable_analysis_seed(fallback_draws, f'fallback-window-{len(draws)}-backtest-{requested_limit}')}:adaptive-ensemble",
-        profile_name="adaptive",
+        model_results=model_results,
         evidence=evidence_map,
+        precomputed_scores=adaptive_scores,
     )
+    analysis["adaptiveMethod"] = adaptive_meta["method"]
+    analysis["adaptiveExpertWeights"] = adaptive_meta["expertWeights"]
     analysis["shortTermConsensus"] = short_term_consensus(
         display_draws,
         max_number=max_number,
