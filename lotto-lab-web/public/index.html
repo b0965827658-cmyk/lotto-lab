@@ -40,7 +40,7 @@
           <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
         </div>
         <label class="select-wrap">
-          分析期數（一般統計用；旗艦／自適應採固定近期邏輯）
+          分析期數（一般統計用；旗艦／自適應採穩定核心邏輯）
           <select id="limitSelect">
             <option value="10">近 10 期</option>
             <option value="20">近 20 期</option>
@@ -113,7 +113,7 @@
               <p class="label">摘星狙擊手｜量化旗艦版</p>
               <h2>六維綜合推理五碼</h2>
             </div>
-            <span class="flagship-fixed-label">固定近期規則＋熱牌＋區間＋回測＋版路</span>
+            <span class="flagship-fixed-label">近期熱牌＋區間＋回測＋版路＋拖牌＋尾數</span>
           </div>
           <div class="balls flagship-balls" id="flagshipBalls" aria-label="旗艦摘星五碼五芒星配置"></div>
           <div class="pick-meta flagship-meta" id="flagshipMeta"></div>
@@ -292,7 +292,7 @@
               <p class="label">獨立分析模組</p>
               <h2>尾數分析模組</h2>
             </div>
-            <span id="tailAnalysisBadge" class="count-pill">v2 · 近 10／20／36 期</span>
+            <span id="tailAnalysisBadge" class="count-pill">獨立 · 近 10／20／36 期</span>
           </div>
           <div class="tail-analysis-summary" id="tailAnalysisSummary"></div>
           <div class="tail-analysis-grid">
@@ -311,7 +311,7 @@
                 <span class="tail-analysis-label">尾數推理參考</span>
                 <strong>尾數焦點五碼</strong>
               </div>
-              <span class="tail-recommendation-mark">多窗口校準</span>
+              <span class="tail-recommendation-mark">獨立計算</span>
             </div>
             <div class="balls tail-recommendation-balls" id="tailRecommendationBalls"></div>
             <div class="pick-meta tail-analysis-meta" id="tailAnalysisMeta"></div>
@@ -414,6 +414,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=69"></script>
+    <script src="/app.js?v=71"></script>
   </body>
 </html>

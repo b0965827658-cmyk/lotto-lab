@@ -455,7 +455,7 @@ function renderFlagshipHistory() {
           <div class="flagship-history-head">
             <div>
               <strong>${record.latestDate || "-"}</strong>
-              <span>分析期 ${record.latestPeriod || "-"} · 固定近期邏輯窗口</span>
+              <span>分析期 ${record.latestPeriod || "-"} · 穩定核心邏輯</span>
             </div>
             <span class="flagship-history-result ${actualAvailable ? "completed" : "pending"}">${outcome}</span>
           </div>
@@ -1468,7 +1468,7 @@ function renderFlagshipPick() {
           .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
           .join("、")
       : "多窗口交叉驗證";
-    const flagshipMethod = state.analysis?.flagshipMethod || "固定近期邏輯：4+尾數避開・近10期優先・15-19期回補・20-25期期待開・25+期避開";
+    const flagshipMethod = state.analysis?.flagshipMethod || "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%";
     els.flagshipBalls.innerHTML = `
       <div class="flagship-star-shape" role="img" aria-label="五芒星摘星五碼">
         ${balls(numbers)}
@@ -1476,7 +1476,7 @@ function renderFlagshipPick() {
     `;
     els.flagshipMeta.innerHTML = `
       <span class="flagship-window-note">${flagshipMethod}</span>
-      <span>固定近期規則＋熱牌、區間、回測、版路、拖牌與尾數綜合推理</span>
+      <span>近期熱牌、區間、回測、版路、拖牌與尾數綜合推理</span>
       <span>研究支持：${evidenceText}</span>
       <span>僅供統計參考，不代表保證中獎</span>
     `;
@@ -1485,7 +1485,7 @@ function renderFlagshipPick() {
     els.adaptiveBalls.innerHTML = "";
     els.adaptiveMeta.innerHTML = "<span>自適應模型正在同步最新資料，請稍後重新整理。</span>";
   } else {
-    const adaptiveMethod = state.analysis?.adaptiveMethod || "自適應集成：固定近期邏輯與多窗口共識";
+    const adaptiveMethod = state.analysis?.adaptiveMethod || "自適應集成：熱度、近期、趨勢、遺漏、版路、拖牌、連莊、區間與尾數動能加權";
     els.adaptiveBalls.innerHTML = balls(adaptiveNumbers);
     els.adaptiveMeta.innerHTML = `
       <span class="adaptive-window-note">${adaptiveMethod}</span>
@@ -1925,7 +1925,7 @@ function renderTailAnalysis(tailAnalysis) {
   const strongest = rows[0];
   const freshest = [...rows].sort((left, right) => (right.momentum || 0) - (left.momentum || 0) || left.tail - right.tail)[0];
   const activeCount = rows.filter((row) => row.status !== "避開").length;
-  els.tailAnalysisBadge.textContent = `${tailAnalysis.version || "v2"} · 近 ${windows.join("／")} 期`;
+  els.tailAnalysisBadge.textContent = `${tailAnalysis.version || "獨立"} · 近 ${windows.join("／")} 期`;
   els.tailAnalysisSummary.innerHTML = `
     <div>
       <span>近期最強</span>
