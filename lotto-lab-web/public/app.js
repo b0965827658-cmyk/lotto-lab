@@ -452,7 +452,7 @@ function renderFlagshipHistory() {
           <div class="flagship-history-meta">
             <span>${record.method || "六維綜合推理"}</span>
             <span>模型 ${record.profile || "綜合"}</span>
-            <span>${components || "近期熱牌 26% · 區間 20% · 回測 18% · 版路 16% · 拖牌 10% · 尾數 10%"}</span>
+            <span>${components || "近期熱牌 20% · 區間 14% · 回測 14% · 版路 12% · 拖牌 9% · 尾數 9% · 自適應校準 22%"}</span>
           </div>
           <div class="flagship-history-reasoning">
             <span>熱牌：${flagshipHistoryNumbers(recentHot)}</span>
@@ -1456,7 +1456,7 @@ function renderFlagshipPick() {
           .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
           .join("、")
       : "多窗口交叉驗證";
-    const flagshipMethod = state.analysis?.flagshipMethod || "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%";
+    const flagshipMethod = state.analysis?.flagshipMethod || "近期熱牌 20%・區間 14%・回測 14%・版路 12%・拖牌 9%・尾數 9%・自適應校準 22%";
     els.flagshipBalls.innerHTML = `
       <div class="flagship-star-shape" role="img" aria-label="五芒星摘星五碼">
         ${balls(numbers)}
