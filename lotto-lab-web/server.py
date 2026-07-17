@@ -1850,13 +1850,32 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
 def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
     """Build an independent, deterministic tail-ending analysis.
 
-    This module intentionally uses fixed short windows instead of the public
-    analysis-period selector, so it can answer the user's short-term tail
-    question without changing the existing flagship or adaptive models.
+    V2 corrects for the different number of balls in each tail bucket (0尾 has
+    only 03/13/23/33 in a 1-39 game), smooths short samples, and requires
+    agreement across the 10/20/36-draw windows.  It remains separate from the
+    flagship and adaptive models so their persisted recommendations are not
+    changed by this module.
     """
     ordered = canonical_analysis_draws(draws)
     stats = number_stats(ordered, max_number)
-    window_sizes = (10, 20, 36)
+    configured_windows = (10, 20, 36)
+    windows = [size for size in configured_windows if ordered[:size]]
+    if not windows:
+        windows = list(configured_windows)
+
+    tail_bucket_size = {
+        tail: sum(1 for number in range(1, max_number + 1) if number % 10 == tail)
+        for tail in range(10)
+    }
+    tail_probability = {
+        tail: safe_divide(tail_bucket_size[tail], max_number)
+        for tail in range(10)
+    }
+    number_probability = safe_divide(1, max_number)
+    # A small prior prevents a single draw in a short window from becoming a
+    # false "hot" signal.  The prior is distributed according to the actual
+    # number of balls in each tail bucket.
+    prior_draws = 8.0
 
     def window_tail_stats(rows: list[dict[str, Any]]) -> tuple[dict[int, int], dict[int, int]]:
         counts = {tail: 0 for tail in range(10)}
@@ -1879,42 +1898,106 @@ def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> 
             len(ordered),
         )
 
-    window_data: dict[int, dict[str, dict[int, int]]] = {}
-    for size in window_sizes:
+    def smoothed_lift(count: int, total_balls: int, expected_rate: float) -> float:
+        if not expected_rate:
+            return 0.0
+        smoothed_rate = safe_divide(
+            count + expected_rate * prior_draws * 5,
+            total_balls + prior_draws * 5,
+        )
+        return safe_divide(smoothed_rate, expected_rate)
+
+    window_data: dict[int, dict[str, Any]] = {}
+    for size in configured_windows:
         rows = ordered[: min(size, len(ordered))]
         counts, coverage = window_tail_stats(rows)
-        window_data[size] = {"counts": counts, "coverage": coverage}
+        window_data[size] = {
+            "counts": counts,
+            "coverage": coverage,
+            "rows": len(rows),
+        }
+
+    # Convert each window to a rank score instead of comparing raw counts.
+    # This makes 10/20/36期 comparable and gives stable tie-breaking.
+    lift_by_window: dict[int, dict[int, float]] = {}
+    coverage_lift_by_window: dict[int, dict[int, float]] = {}
+    rank_by_window: dict[int, dict[int, float]] = {}
+    for size in configured_windows:
+        rows_count = window_data[size]["rows"]
+        total_balls = rows_count * 5
+        lifts = {}
+        coverage_lifts = {}
+        for tail in range(10):
+            lifts[tail] = smoothed_lift(
+                window_data[size]["counts"][tail],
+                total_balls,
+                tail_probability[tail],
+            )
+            expected_presence = 1 - (1 - tail_probability[tail]) ** 5
+            observed_presence = safe_divide(
+                window_data[size]["coverage"][tail] + expected_presence * prior_draws,
+                rows_count + prior_draws,
+            )
+            coverage_lifts[tail] = safe_divide(observed_presence, expected_presence)
+        lift_by_window[size] = lifts
+        coverage_lift_by_window[size] = coverage_lifts
+        ranked_tails = sorted(range(10), key=lambda tail: (-lifts[tail], tail))
+        rank_by_window[size] = {
+            tail: safe_divide(9 - rank, 9)
+            for rank, tail in enumerate(ranked_tails)
+        }
+
+    momentum_values = {
+        tail: (
+            (lift_by_window[10][tail] - lift_by_window[20][tail]) * 0.6
+            + (lift_by_window[20][tail] - lift_by_window[36][tail]) * 0.4
+        )
+        for tail in range(10)
+    }
+    momentum_ranked = sorted(range(10), key=lambda tail: (-momentum_values[tail], tail))
+    momentum_rank = {
+        tail: safe_divide(9 - rank, 9)
+        for rank, tail in enumerate(momentum_ranked)
+    }
 
     tail_rows: list[dict[str, Any]] = []
     for tail in range(10):
-        count10 = window_data[10]["counts"][tail]
-        count20 = window_data[20]["counts"][tail]
-        count36 = window_data[36]["counts"][tail]
-        size10 = max(1, min(10, len(ordered)))
-        size20 = max(1, min(20, len(ordered)))
-        size36 = max(1, min(36, len(ordered)))
-        rate10 = count10 / (size10 * 5)
-        rate20 = count20 / (size20 * 5)
-        rate36 = count36 / (size36 * 5)
-        momentum = rate10 - rate36
         gap = tail_gap(tail)
-        # Recent windows carry more weight; momentum only nudges a tail when
-        # the newest ten draws are stronger than its 36-draw baseline.
-        raw_score = rate10 * 0.50 + rate20 * 0.30 + rate36 * 0.20 + max(0.0, momentum) * 0.25
-        if gap >= 4:
-            raw_score *= 0.55
+        consensus_count = sum(
+            1 for size in configured_windows if lift_by_window[size][tail] >= 1.0
+        )
+        stability = sum(rank_by_window[size][tail] for size in configured_windows) / len(configured_windows)
+        consensus = consensus_count / len(configured_windows)
+        # Recent data matters most, but the score also rewards tails that keep
+        # their position across all windows instead of winning one window only.
+        base_score = (
+            rank_by_window[10][tail] * 0.42
+            + rank_by_window[20][tail] * 0.24
+            + rank_by_window[36][tail] * 0.14
+            + stability * 0.10
+            + consensus * 0.06
+            + momentum_rank[tail] * 0.04
+        )
+        availability_factor = 0.42 if gap >= 4 else 1.0
+        raw_score = base_score * availability_factor
         tail_rows.append(
             {
                 "tail": tail,
                 "label": f"{tail}尾",
-                "recent10": count10,
-                "recent20": count20,
-                "recent36": count36,
+                "recent10": window_data[10]["counts"][tail],
+                "recent20": window_data[20]["counts"][tail],
+                "recent36": window_data[36]["counts"][tail],
                 "coverage10": window_data[10]["coverage"][tail],
                 "coverage20": window_data[20]["coverage"][tail],
                 "coverage36": window_data[36]["coverage"][tail],
+                "lift10": round(lift_by_window[10][tail], 3),
+                "lift20": round(lift_by_window[20][tail], 3),
+                "lift36": round(lift_by_window[36][tail], 3),
+                "coverageLift10": round(coverage_lift_by_window[10][tail], 3),
                 "gap": gap,
-                "momentum": round(momentum * 100, 1),
+                "momentum": round(momentum_values[tail] * 100, 1),
+                "consensus": consensus_count,
+                "stability": round(stability * 100, 1),
                 "rawScore": raw_score,
             }
         )
@@ -1922,46 +2005,66 @@ def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> 
     ranked = sorted(tail_rows, key=lambda item: (-item["rawScore"], item["gap"], item["tail"]))
     eligible_tails = [item for item in ranked if item["gap"] < 4]
     recommended_tails = eligible_tails[:5]
-    if len(recommended_tails) < 3:
-        recommended_tails = [item for item in ranked if item["tail"] not in {row["tail"] for row in recommended_tails}][:5]
     recommended_tail_set = {item["tail"] for item in recommended_tails}
     top_score = max((item["rawScore"] for item in ranked), default=0.0) or 1.0
 
     numbers_by_tail: dict[int, list[int]] = {tail: [] for tail in range(10)}
     for number in range(1, max_number + 1):
         numbers_by_tail[number % 10].append(number)
+
+    def number_rank_scores() -> dict[int, float]:
+        scores: dict[int, float] = {}
+        number_window_rank: dict[int, dict[int, float]] = {}
+        for size in configured_windows:
+            rows_count = window_data[size]["rows"]
+            total_balls = rows_count * 5
+            lifts = {
+                number: smoothed_lift(
+                    stats["windowFrequencies"].get(str(size), {}).get(number, 0),
+                    total_balls,
+                    number_probability,
+                )
+                for number in range(1, max_number + 1)
+            }
+            ranked_numbers = sorted(range(1, max_number + 1), key=lambda number: (-lifts[number], number))
+            number_window_rank[size] = {
+                number: safe_divide(max_number - 1 - rank, max_number - 1)
+                for rank, number in enumerate(ranked_numbers)
+            }
+        for number in range(1, max_number + 1):
+            gap = stats["gaps"].get(number, len(ordered))
+            gap_fit = 1.0 - min(gap, 25) / 25 if gap <= 25 else 0.0
+            scores[number] = (
+                number_window_rank[10][number] * 0.52
+                + number_window_rank[20][number] * 0.28
+                + number_window_rank[36][number] * 0.12
+                + gap_fit * 0.08
+            )
+        return scores
+
+    number_scores = number_rank_scores()
     number_candidates: list[tuple[float, int]] = []
     for item in ranked:
         tail = item["tail"]
         if tail not in recommended_tail_set:
             continue
         tail_score = item["rawScore"] / top_score
-        numbers = sorted(
-            numbers_by_tail[tail],
+        for number in numbers_by_tail[tail]:
+            gap = stats["gaps"].get(number, len(ordered))
+            if gap > 25:
+                continue
+            number_score = number_scores[number] * 0.72 + tail_score * 0.28
+            number_candidates.append((number_score, number))
+        numbers_by_tail[tail].sort(
             key=lambda number: (
-                -(
-                    stats["frequency"].get(number, 0) * 0.42
-                    + stats["windowFrequencies"].get("10", {}).get(number, 0) * 1.8
-                    + stats["windowFrequencies"].get("20", {}).get(number, 0) * 0.75
-                    + stats["windowFrequencies"].get("36", {}).get(number, 0) * 0.25
-                    + (1 / (1 + stats["gaps"].get(number, len(ordered)))) * 2
-                ),
+                -(number_scores[number] if stats["gaps"].get(number, len(ordered)) <= 25 else -1),
                 number,
-            ),
+            )
         )
-        numbers_by_tail[tail] = numbers
-        for number in numbers:
-            if stats["gaps"].get(number, len(ordered)) <= 25:
-                number_score = (
-                    stats["windowFrequencies"].get("10", {}).get(number, 0) * 1.8
-                    + stats["windowFrequencies"].get("20", {}).get(number, 0) * 0.75
-                    + stats["windowFrequencies"].get("36", {}).get(number, 0) * 0.25
-                    + (1 / (1 + stats["gaps"].get(number, len(ordered)))) * 2
-                )
-                number_candidates.append((tail_score * 10 + number_score, number))
 
-    # Give the standalone module at least one number from each selected tail,
-    # then fill remaining slots by the same deterministic strength ranking.
+    # Give the standalone module one number from each selected tail first,
+    # then fill remaining slots by the same calibrated ranking.  It keeps the
+    # five-number display diverse without introducing random output.
     recommendation: list[int] = []
     for item in recommended_tails:
         for number in numbers_by_tail[item["tail"]]:
@@ -1986,17 +2089,27 @@ def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> 
         else:
             item["status"] = "觀察"
         item.pop("rawScore", None)
-        item["numbers"] = [number for number in numbers_by_tail[item["tail"]] if stats["gaps"].get(number, len(ordered)) <= 25][:4]
+        item["numbers"] = [
+            number
+            for number in numbers_by_tail[item["tail"]]
+            if stats["gaps"].get(number, len(ordered)) <= 25
+        ][:4]
 
     tail_rows.sort(key=lambda item: (-item["score"], item["gap"], item["tail"]))
+    active_consensus = [item["consensus"] for item in ranked if item["gap"] < 4]
+    confidence = safe_divide(
+        min(len(ordered), 36), 36
+    ) * safe_divide(sum(active_consensus), max(1, len(active_consensus)) * len(configured_windows))
     return {
-        "windows": [size for size in window_sizes if ordered[:size]],
+        "version": "v2",
+        "windows": windows,
         "rows": tail_rows,
         "recommendedTails": [item["tail"] for item in recommended_tails],
         "avoidTails": [item["tail"] for item in tail_rows if item["gap"] >= 4],
         "recommendation": sorted(recommendation[:5]),
-        "method": "獨立尾數模組：近10期 50%・近20期 30%・近36期 20%＋近期動能；尾數連續4期未出降低權重，25期以上未開號碼不列入參考。",
-        "note": "尾數只反映歷史分布與近期動能，不代表下一期必然開出；彩券每期仍是隨機事件。",
+        "confidence": round(confidence * 100, 1),
+        "method": "尾數分析 v2：校正各尾數可用球數後，綜合近10／20／36期排名、尾數覆蓋率、跨窗口共識與近期動能；連續4期未出避開，25期以上未開號碼不列入參考。",
+        "note": "v2 會降低單一短窗口暴衝的影響，優先保留多窗口一致的尾數；這是歷史統計參考，不代表下一期必然開出，彩券每期仍是隨機事件。",
     }
 
 
