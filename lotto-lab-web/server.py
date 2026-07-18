@@ -1461,7 +1461,7 @@ def number_stats(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str,
         for number in draw["numbers"]:
             recent_frequency[number] += 1
     window_frequencies = {}
-    for window_size in (6, 12, 18, 24, 36, 60, 90):
+    for window_size in (6, 10, 12, 18, 20, 24, 36, 60, 90):
         window_rows = ordered[:window_size]
         window_counts = {n: 0 for n in range(1, max_number + 1)}
         for draw in window_rows:
@@ -1491,7 +1491,7 @@ MODEL_PROFILES = {
         "combo": {"spread": 1.0, "zone": 0.0, "odd": 0.0, "low": 0.0, "sum": 0.0, "tail": 0.0, "repeat": 0.0, "interval": 0.0},
     },
     "balanced": {
-        "label": "綜合版路",
+        "label": "核心分析",
         "number": {"heat": 0.14, "recent": 0.16, "trend": 0.10, "gap": 0.12, "neighbor": 0.06, "tail": 0.05, "pair": 0.05, "drag": 0.06, "repeatSignal": 0.04, "interval": 0.06, "multiWindow": 0.10, "tailMomentum": 0.04, "streak": 0.02},
         "combo": {"spread": 0.16, "zone": 0.17, "odd": 0.13, "low": 0.09, "sum": 0.16, "tail": 0.08, "repeat": 0.11, "interval": 0.10},
     },
@@ -1519,36 +1519,16 @@ MODEL_PROFILES = {
 
 SHORT_TERM_WINDOWS = (10, 20, 36)
 RESEARCH_FEATURE_KEYS = (
-    "heat",
     "recent",
-    "trend",
+    "heat",
     "gap",
-    "neighbor",
-    "tail",
-    "pair",
-    "drag",
-    "repeatSignal",
     "interval",
-    "multiWindow",
-    "tailMomentum",
-    "streak",
-    "momentum",
 )
 RESEARCH_FEATURE_LABELS = {
-    "heat": "長期熱度",
     "recent": "近期熱度",
-    "trend": "趨勢動能",
-    "gap": "遺漏週期",
-    "neighbor": "鄰近號",
-    "tail": "尾數熱度",
-    "pair": "哥倆好",
-    "drag": "拖牌",
-    "repeatSignal": "連莊",
+    "heat": "長期熱度",
+    "gap": "遺漏平衡",
     "interval": "區間",
-    "multiWindow": "多窗口",
-    "tailMomentum": "尾數動能",
-    "streak": "連續開出",
-    "momentum": "近期差值",
 }
 
 
@@ -1952,12 +1932,12 @@ def research_feature_evidence(
         training = ordered[index + 1 : index + 91]
         if len(training) < 36:
             continue
-        profile = pattern_profile(training, max_number)
+        components = simple_core_score_components(training, max_number)
         actual = set(target["numbers"])
         for feature in RESEARCH_FEATURE_KEYS:
             ranked = sorted(
                 range(1, max_number + 1),
-                key=lambda number: (-profile["numberScores"][number].get(feature, 0.0), number),
+                key=lambda number: (-components[number].get(feature, 0.0), number),
             )
             top_five = ranked[:5]
             top_eight = ranked[:8]
@@ -2070,6 +2050,95 @@ def score_number(
     return base_score * 0.84 + evidence_score * 0.16
 
 
+CORE_ANALYSIS_METHOD = "核心分析：近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%"
+
+
+def simple_core_score_components(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+) -> dict[int, dict[str, float]]:
+    """Build the small, explainable score used by every published pick."""
+    ordered = canonical_analysis_draws(draws)
+    stats = number_stats(ordered, max_number)
+    windows = ((10, 0.50), (20, 0.30), (36, 0.20))
+    recent_raw = {number: 0.0 for number in range(1, max_number + 1)}
+    for size, weight in windows:
+        rows = ordered[: min(size, len(ordered))]
+        if not rows:
+            continue
+        denominator = max(1, len(rows) * 5)
+        counts = stats["windowFrequencies"].get(str(size), {})
+        for number in recent_raw:
+            recent_raw[number] += weight * counts.get(number, 0) / denominator
+
+    def normalize(values: dict[int, float]) -> dict[int, float]:
+        highest = max(values.values(), default=0.0)
+        return {number: (value / highest if highest else 0.0) for number, value in values.items()}
+
+    recent = normalize(recent_raw)
+    long_term = normalize({
+        number: stats["frequency"].get(number, 0) / max(1, len(ordered) * 5)
+        for number in range(1, max_number + 1)
+    })
+    gap_balance = {
+        number: max(0.0, 1.0 - abs(stats["gaps"].get(number, len(ordered)) - 8) / 20)
+        for number in range(1, max_number + 1)
+    }
+    for number, gap in stats["gaps"].items():
+        if gap > 25:
+            gap_balance[number] *= 0.25
+
+    recent_rows = ordered[: min(36, len(ordered))]
+    zone_counts = [0, 0, 0, 0]
+    for draw in recent_rows:
+        for number in draw["numbers"]:
+            zone_counts[min(3, (number - 1) // 10)] += 1
+    max_zone = max(zone_counts, default=0) or 1
+    zone = {
+        number: zone_counts[min(3, (number - 1) // 10)] / max_zone
+        for number in range(1, max_number + 1)
+    }
+    return {
+        number: {
+            "recent": round(recent[number], 6),
+            "heat": round(long_term[number], 6),
+            "gap": round(gap_balance[number], 6),
+            "interval": round(zone[number], 6),
+        }
+        for number in range(1, max_number + 1)
+    }
+
+
+def simple_core_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> list[int]:
+    """Return one deterministic recommendation from the four core signals."""
+    components = simple_core_score_components(draws, max_number)
+    weights = {"recent": 0.45, "heat": 0.20, "gap": 0.15, "interval": 0.20}
+    scores = {
+        number: sum(values[key] * weight for key, weight in weights.items())
+        for number, values in components.items()
+    }
+    pool = sorted(scores, key=lambda number: (-scores[number], number))[: min(18, max_number)]
+    if len(pool) <= pick_count:
+        return sorted(pool)
+    best_combo: tuple[int, ...] | None = None
+    best_score = float("-inf")
+    for combo in itertools.combinations(pool, pick_count):
+        sorted_combo = tuple(sorted(combo))
+        number_score = sum(scores[number] for number in sorted_combo) / pick_count
+        shape_score = combo_spread_score(list(sorted_combo), max_number)
+        combo_score = number_score * 0.85 + shape_score * 0.15
+        if combo_score > best_score or (
+            combo_score == best_score and (best_combo is None or sorted_combo < best_combo)
+        ):
+            best_score = combo_score
+            best_combo = sorted_combo
+    return list(best_combo or tuple(pool[:pick_count]))
+
+
 def model_recommendation(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -2079,37 +2148,7 @@ def model_recommendation(
     candidate_budget: int | None = None,
     evidence: dict[str, float] | None = None,
 ) -> list[int]:
-    if profile_name == "classic":
-        return classic_recommendation(
-            draws,
-            max_number=max_number,
-            pick_count=pick_count,
-            seed_label=seed_label,
-            candidate_budget=candidate_budget,
-            evidence=evidence,
-        )
-    model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
-    profile = pattern_profile(draws, max_number)
-    number_scores = {}
-    for n in range(1, max_number + 1):
-        number_scores[n] = score_number(n, profile, model, evidence=evidence) + random.Random(f"{seed_label}:{profile_name}:{n}").random() * 0.035
-
-    pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(24, max_number)]
-    rng = random.Random(f"lotto-lab:{profile_name}:{seed_label}:{','.join(map(str, pool))}")
-    candidates: set[tuple[int, ...]] = set()
-    candidates.add(tuple(sorted(pool[:pick_count])))
-    for _ in range(candidate_budget or 220):
-        weighted = sorted(pool, key=lambda n: number_scores[n] + rng.random() * 0.28, reverse=True)
-        candidates.add(tuple(sorted(weighted[:pick_count])))
-        if len(pool) >= pick_count:
-            candidates.add(tuple(sorted(rng.sample(pool, pick_count))))
-
-    def score_combo(combo: tuple[int, ...]) -> float:
-        score = sum(number_scores[n] for n in combo) / pick_count
-        return score * 0.58 + combo_pattern_score(list(combo), profile, model, max_number) * 0.42
-
-    best = max(candidates, key=lambda combo: (score_combo(combo), combo_spread_score(list(combo), max_number), combo))
-    return list(best)
+    return simple_core_recommendation(draws, max_number=max_number, pick_count=pick_count)
 
 
 def flagship_recommendation(
@@ -2120,13 +2159,11 @@ def flagship_recommendation(
     evidence: dict[str, float] | None = None,
     backtest: dict[str, Any] | None = None,
 ) -> list[int]:
-    """Return a deterministic five-number flagship pool from six evidence groups.
+    """Compatibility wrapper: flagship uses the same explainable core pick."""
+    return simple_core_recommendation(draws, max_number=max_number, pick_count=pick_count)
 
-    The groups are recent hot numbers, interval concentration, walk-forward
-    backtest support, pattern signals, drag-card support, and tail momentum.
-    This is a statistical candidate pool, not a claim that any number has a
-    guaranteed higher physical lottery probability.
-    """
+    # Kept below for old snapshots only; new requests never run this legacy
+    # six-signal branch.
     ordered = list(draws)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
@@ -2331,41 +2368,38 @@ def short_term_consensus(
     pick_count: int = 5,
     profile_name: str = "balanced",
 ) -> dict[str, Any]:
-    """Compare short windows so a recent cluster can be seen without hiding longer context."""
+    """Show the same core model over the three short windows."""
     ordered = list(draws)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     views = []
-    weighted_votes: dict[int, float] = {n: 0.0 for n in range(1, max_number + 1)}
     weights = {10: 0.50, 20: 0.30, 36: 0.20}
     for window in SHORT_TERM_WINDOWS:
         rows = ordered[:window]
         if len(rows) < 5:
             continue
-        profile = pattern_profile(rows, max_number)
-        model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
-        ranked = sorted(
-            range(1, max_number + 1),
-            key=lambda number: (-score_number(number, profile, model), number),
-        )
+        components = simple_core_score_components(rows, max_number)
+        weights_for_number = {"recent": 0.45, "heat": 0.20, "gap": 0.15, "interval": 0.20}
+        scores = {
+            number: sum(values[key] * weight for key, weight in weights_for_number.items())
+            for number, values in components.items()
+        }
+        ranked = sorted(scores, key=lambda number: (-scores[number], number))
         leaders = ranked[: min(8, max_number)]
-        for rank, number in enumerate(leaders):
-            weighted_votes[number] += weights[window] * (1.0 - rank / max(8, len(leaders)))
         views.append(
             {
                 "window": window,
                 "drawCount": len(rows),
                 "leaders": leaders,
-                "recommendation": model_recommendation(
-                    rows,
-                    max_number=max_number,
-                    pick_count=pick_count,
-                    seed_label=f"short-{window}",
-                    profile_name=profile_name,
-                ),
+                "recommendation": simple_core_recommendation(rows, max_number=max_number, pick_count=pick_count),
             }
         )
     if not views:
         return {"windows": [], "leaders": [], "recommendations": []}
+    weighted_votes: dict[int, float] = {n: 0.0 for n in range(1, max_number + 1)}
+    for view in views:
+        window_weight = weights.get(view["window"], 0.0)
+        for rank, number in enumerate(view["leaders"]):
+            weighted_votes[number] += window_weight * (1.0 - rank / max(8, len(view["leaders"])))
     leaders = sorted(
         (number for number in range(1, max_number + 1)),
         key=lambda number: (-weighted_votes[number], number),
@@ -2499,7 +2533,7 @@ def rolling_backtest(
             for number, value in number_support.items()
         },
         "recentRows": rows[:10],
-        "method": f"每一期只用該期以前的歷史資料產生推薦，再與實際開獎比對；採用多視窗、版路支持度與近期穩定度；目前採用「{MODEL_PROFILES.get(profile_name, MODEL_PROFILES['balanced'])['label']}」。",
+        "method": f"每一期只用該期以前的歷史資料產生推薦，再與實際開獎比對；只驗證核心四訊號，不用回測結果反覆改寫選號。",
     }
 
 
@@ -2523,58 +2557,32 @@ def choose_model_profile(
     pick_count: int = 5,
     backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
 ) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
-    results = []
-    validation_limit = max(requested := int(backtest_limit), BACKTEST_MIN_LIMIT)
-    if validation_limit < 90 and len(draws) >= 85:
-        validation_limit = min(90, max(60, validation_limit * 2))
-    for profile_name, config in MODEL_PROFILES.items():
-        backtest = rolling_backtest(
-            draws,
-            max_number=max_number,
-            pick_count=pick_count,
-            profile_name=profile_name,
-            backtest_limit=backtest_limit,
-        )
-        validation = backtest
-        if validation_limit > max(requested, BACKTEST_MIN_LIMIT) and len(draws) >= validation_limit + 25:
-            validation = rolling_backtest(
-                draws,
-                max_number=max_number,
-                pick_count=pick_count,
-                profile_name=profile_name,
-                backtest_limit=validation_limit,
-            )
-        primary_quality = model_quality(backtest)
-        validation_quality = model_quality(validation)
-        quality = primary_quality * 0.70 + validation_quality * 0.30
-        results.append(
-            {
-                "id": profile_name,
-                "label": config["label"],
-                "quality": round(quality, 2),
-                "averageHit": backtest["averageHit"],
-                "onePlusRate": backtest["onePlusRate"],
-                "twoPlusRate": backtest["twoPlusRate"],
-                "threePlusRate": backtest["threePlusRate"],
-                "bestHit": backtest["bestHit"],
-                "testedCount": backtest["testedCount"],
-                "recentAverageHit": backtest["recentAverageHit"],
-                "stability": backtest["stability"],
-                "validationCount": validation["testedCount"],
-                "validationAverageHit": validation["averageHit"],
-                "validationTwoPlusRate": validation["twoPlusRate"],
-                "validationThreePlusRate": validation["threePlusRate"],
-            }
-        )
-    results.sort(key=lambda item: (-item["quality"], -item["averageHit"], -item["threePlusRate"], item["id"]))
-    selected = results[0]["id"] if results else "balanced"
-    return selected, rolling_backtest(
+    selected = "balanced"
+    backtest = rolling_backtest(
         draws,
         max_number=max_number,
         pick_count=pick_count,
         profile_name=selected,
         backtest_limit=backtest_limit,
-    ), results
+    )
+    results = [{
+        "id": selected,
+        "label": "核心分析",
+        "quality": round(model_quality(backtest), 2),
+        "averageHit": backtest["averageHit"],
+        "onePlusRate": backtest["onePlusRate"],
+        "twoPlusRate": backtest["twoPlusRate"],
+        "threePlusRate": backtest["threePlusRate"],
+        "bestHit": backtest["bestHit"],
+        "testedCount": backtest["testedCount"],
+        "recentAverageHit": backtest["recentAverageHit"],
+        "stability": backtest["stability"],
+        "validationCount": backtest["testedCount"],
+        "validationAverageHit": backtest["averageHit"],
+        "validationTwoPlusRate": backtest["twoPlusRate"],
+        "validationThreePlusRate": backtest["threePlusRate"],
+    }]
+    return selected, backtest, results
 
 
 def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profile: str) -> dict[str, Any]:
@@ -2730,22 +2738,11 @@ def analyze(
         profile_name=selected_profile,
         evidence=evidence_map,
     )
-    flagship_numbers = flagship_recommendation(
-        draws,
-        max_number=max_number,
-        pick_count=5,
-        profile_name=selected_profile,
-        evidence=evidence_map,
-        backtest=backtest,
-    )
-    adaptive_numbers = model_recommendation(
-        draws,
-        max_number=max_number,
-        pick_count=5,
-        seed_label=f"{seed_label}:adaptive-ensemble",
-        profile_name="adaptive",
-        evidence=evidence_map,
-    )
+    # All published tiers use the same deterministic core pick.  Pro adds
+    # validation and history; the flagship tier adds presentation and saved
+    # reasoning, rather than a second competing algorithm.
+    flagship_numbers = simple_core_recommendation(draws, max_number=max_number, pick_count=5)
+    adaptive_numbers = list(flagship_numbers)
     patterns = pattern_summary(draws, max_number, selected_profile)
     short_consensus = short_term_consensus(
         reference_draws,
@@ -2764,15 +2761,13 @@ def analyze(
         "recommendation": recommendation,
         "flagshipRecommendation": flagship_numbers,
         "adaptiveRecommendation": adaptive_numbers,
-        "adaptiveMethod": "自適應集成：熱度、近期、趨勢、遺漏、版路、拖牌、連莊、區間與尾數動能加權",
-        "flagshipMethod": "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%",
+        "adaptiveMethod": "與旗艦共用同一套核心分析，避免多套邏輯互相干擾。",
+        "flagshipMethod": CORE_ANALYSIS_METHOD,
         "flagshipComponents": [
-            {"id": "recent", "label": "近期熱牌", "weight": 26},
-            {"id": "interval", "label": "區間", "weight": 20},
-            {"id": "backtest", "label": "回測", "weight": 18},
-            {"id": "pattern", "label": "版路", "weight": 16},
-            {"id": "drag", "label": "拖牌", "weight": 10},
-            {"id": "tail", "label": "尾數", "weight": 10},
+            {"id": "recent", "label": "近期熱度", "weight": 45},
+            {"id": "heat", "label": "長期熱度", "weight": 20},
+            {"id": "gap", "label": "遺漏平衡", "weight": 15},
+            {"id": "interval", "label": "區間分布", "weight": 20},
         ],
         "backtest": backtest,
         "modelProfiles": model_results,
@@ -2780,7 +2775,7 @@ def analyze(
         "tailAnalysis": tail_analysis,
         "researchEvidence": research_evidence,
         "shortTermConsensus": short_consensus,
-        "note": "這是用多視窗熱度、近期動能、遺漏週期、尾數動能、區間集中、奇偶大小、總和版路、拖牌連莊、鄰近號與穩定度回測做的交叉統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
+        "note": f"主模型只看四個容易理解的訊號：近期熱度、長期熱度、遺漏平衡與區間分布；回測只用來檢查穩定度，不直接改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。",
     }
 
 
@@ -2834,22 +2829,16 @@ def analyze_with_stable_backtest(
         profile_name=selected_profile,
         evidence=evidence_map,
     )
-    analysis["flagshipRecommendation"] = flagship_recommendation(
-        display_draws,
-        max_number=max_number,
-        pick_count=5,
-        profile_name=selected_profile,
-        evidence=evidence_map,
-        backtest=fallback_backtest,
-    )
-    analysis["adaptiveRecommendation"] = model_recommendation(
-        display_draws,
-        max_number=max_number,
-        pick_count=5,
-        seed_label=f"{stable_analysis_seed(fallback_draws, f'fallback-window-{len(draws)}-backtest-{requested_limit}')}:adaptive-ensemble",
-        profile_name="adaptive",
-        evidence=evidence_map,
-    )
+    analysis["flagshipRecommendation"] = simple_core_recommendation(display_draws, max_number=max_number, pick_count=5)
+    analysis["adaptiveRecommendation"] = list(analysis["flagshipRecommendation"])
+    analysis["adaptiveMethod"] = "與旗艦共用同一套核心分析，避免多套邏輯互相干擾。"
+    analysis["flagshipMethod"] = CORE_ANALYSIS_METHOD
+    analysis["flagshipComponents"] = [
+        {"id": "recent", "label": "近期熱度", "weight": 45},
+        {"id": "heat", "label": "長期熱度", "weight": 20},
+        {"id": "gap", "label": "遺漏平衡", "weight": 15},
+        {"id": "interval", "label": "區間分布", "weight": 20},
+    ]
     analysis["shortTermConsensus"] = short_term_consensus(
         display_draws,
         max_number=max_number,
@@ -3088,14 +3077,14 @@ class Handler(SimpleHTTPRequestHandler):
                                 "id": "pro",
                                 "name": "Pro 訂閱",
                                 "price": "$9 / 月起",
-                                "features": ["120-365 期進階分析", "跨年歷史查詢", "模型回測與版路模式", "高分組合排序"],
+                                "features": ["120-365 期進階分析", "跨年歷史查詢", "核心模型回測", "簡潔版路摘要"],
                             },
                             {
                                 "id": "flagship",
                                 "name": "摘星狙擊手｜量化旗艦版",
                                 "price": "高階會員",
                                 "paymentLink": STRIPE_FLAGSHIP_PAYMENT_LINK,
-                                "features": ["每期模型高分 5 碼候選池", "拖牌與尾數獨立訊號", "訊號證據與穩定度校準", "短中長期多窗口交叉排名"],
+                                "features": ["每期核心摘星 5 碼", "四項邏輯完整說明", "固定結果與分析紀錄", "回測驗證與命中追蹤"],
                             },
                         ],
                         "flagshipPaymentLink": STRIPE_FLAGSHIP_PAYMENT_LINK,
