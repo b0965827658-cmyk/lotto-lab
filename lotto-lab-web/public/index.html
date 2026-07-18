@@ -13,7 +13,7 @@
     <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
     <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
-    <link rel="stylesheet" href="/styles.css?v=60" />
+    <link rel="stylesheet" href="/styles.css?v=61" />
   </head>
   <body>
     <main class="shell">
@@ -40,7 +40,7 @@
           <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
         </div>
         <label class="select-wrap">
-          分析期數（一般統計用；旗艦／自適應採穩定核心邏輯）
+          分析資料（主模型採核心分析）
           <select id="limitSelect">
             <option value="10">近 10 期</option>
             <option value="20">近 20 期</option>
@@ -107,17 +107,17 @@
           <p class="fineprint" id="analysisNote"></p>
         </article>
 
-        <article class="panel flagship-panel" data-tier="flagship" data-lock-title="量化旗艦版專屬" data-lock-text="升級後可查看每期的旗艦摘星五碼與自適應集成五碼。">
+        <article class="panel flagship-panel" data-tier="flagship" data-lock-title="量化旗艦版專屬" data-lock-text="升級後可查看每期的核心摘星五碼與保存的推理紀錄。">
           <div class="panel-head compact">
             <div>
               <p class="label">摘星狙擊手｜量化旗艦版</p>
-              <h2>六維綜合推理五碼</h2>
+              <h2>核心推理五碼</h2>
             </div>
-            <span class="flagship-fixed-label">近期熱牌＋區間＋回測＋版路＋拖牌＋尾數</span>
+            <span class="flagship-fixed-label">近期熱度＋長期熱度＋遺漏平衡＋區間分布</span>
           </div>
           <div class="balls flagship-balls" id="flagshipBalls" aria-label="旗艦摘星五碼五芒星配置"></div>
           <div class="pick-meta flagship-meta" id="flagshipMeta"></div>
-          <div class="adaptive-pick-block">
+          <div class="adaptive-pick-block" hidden>
             <div class="adaptive-pick-head">
               <div>
                 <p class="label">自適應集成</p>
@@ -244,46 +244,33 @@
         </div>
 
         <div class="tab-panel" data-tab-panel="model">
-        <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 模型設定" data-lock-text="訂閱後可切換板路模式並調整權重。">
+        <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 核心分析" data-lock-text="訂閱後可查看核心分析說明與回測結果。">
           <div class="panel-head compact">
             <div>
               <p class="label">模型設定</p>
               <h2>調整偏好</h2>
             </div>
-            <button id="resetModelBtn" class="text-button">重設</button>
+            <button id="resetModelBtn" class="text-button" hidden>重設</button>
           </div>
-          <div class="model-controls" id="modelControls">
-            <div class="focus-controls" id="focusControls" aria-label="分析重點">
-              <button type="button" class="focus-chip active" data-focus="balanced">綜合</button>
-              <button type="button" class="focus-chip" data-focus="classic">熱遺</button>
-              <button type="button" class="focus-chip" data-focus="hot">追熱</button>
-              <button type="button" class="focus-chip" data-focus="overdue">追冷</button>
-              <button type="button" class="focus-chip" data-focus="interval">區間</button>
-              <button type="button" class="focus-chip" data-focus="pattern">版路</button>
-              <button type="button" class="focus-chip" data-focus="backtest">回測</button>
+          <div class="core-logic-summary" aria-label="核心分析邏輯">
+            <div class="core-logic-item">
+              <strong>1. 近期熱度 45%</strong>
+              <span>近 10／20／36 期，越近期的資料權重越高。</span>
             </div>
-            <label class="range-row">
-              <span>熱度</span>
-              <input type="range" min="0" max="60" value="30" data-weight="heat" />
-              <strong id="heatWeight">30</strong>
-            </label>
-            <label class="range-row">
-              <span>遺漏</span>
-              <input type="range" min="0" max="60" value="25" data-weight="overdue" />
-              <strong id="overdueWeight">25</strong>
-            </label>
-            <label class="range-row">
-              <span>分散</span>
-              <input type="range" min="0" max="60" value="25" data-weight="spread" />
-              <strong id="spreadWeight">25</strong>
-            </label>
-            <label class="range-row">
-              <span>回測</span>
-              <input type="range" min="0" max="60" value="20" data-weight="backtest" />
-              <strong id="backtestWeight">20</strong>
-            </label>
+            <div class="core-logic-item">
+              <strong>2. 長期熱度 20%</strong>
+              <span>用較長期分布避免只追單一短期熱門號碼。</span>
+            </div>
+            <div class="core-logic-item">
+              <strong>3. 遺漏平衡 15%</strong>
+              <span>不盲追剛開，也不因超過 25 期未開就硬追。</span>
+            </div>
+            <div class="core-logic-item">
+              <strong>4. 區間分布 20%</strong>
+              <span>讓 01～39 的號碼分布保持合理，不把號碼擠在同一段。</span>
+            </div>
           </div>
-          <p class="fineprint" id="modelSummary">目前模型：熱度 30%、遺漏 25%、分散 25%、回測 20%。</p>
+          <p class="fineprint" id="modelSummary">所有方案共用這套核心分析；回測只用來檢查表現，不再反覆改寫推薦號碼。</p>
         </article>
 
         <article class="panel tail-analysis-panel" data-tier="pro" data-lock-title="Pro 尾數分析模組" data-lock-text="訂閱後可查看近 10、20、36 期的獨立尾數動能與參考號碼。">
@@ -327,11 +314,11 @@
             </div>
             <button id="flagshipHistoryRefresh" class="text-button" type="button">重新載入</button>
           </div>
-          <p class="fineprint">每期保存旗艦五碼與自適應集成五碼，並保留近期熱牌、區間、回測、版路、拖牌與尾數摘要；下一期開獎後會自動補上命中結果。</p>
+          <p class="fineprint">每期保存核心五碼與當時的四項推理摘要；下一期開獎後會自動補上命中結果。</p>
           <div id="flagshipHistoryList" class="flagship-history-list"></div>
         </article>
 
-        <article class="panel mode-snapshot-panel" data-tier="pro" data-lock-title="Pro 模式版路" data-lock-text="訂閱後可查看每個模式各自產生的候選組合。">
+        <article class="panel mode-snapshot-panel" data-tier="pro" hidden data-lock-title="Pro 模式版路" data-lock-text="訂閱後可查看每個模式各自產生的候選組合。">
           <div class="panel-head compact">
             <div>
               <p class="label">模式版路</p>
@@ -343,7 +330,7 @@
           <div class="mode-snapshot-list" id="modeSnapshotList"></div>
         </article>
 
-        <article class="panel candidate-panel" data-tier="pro" data-lock-title="Pro 高分組合" data-lock-text="訂閱後可重新產生多組候選排序。">
+        <article class="panel candidate-panel" data-tier="pro" hidden data-lock-title="Pro 高分組合" data-lock-text="訂閱後可重新產生多組候選排序。">
           <div class="panel-head compact">
             <div>
               <p class="label">高分組合</p>
@@ -414,6 +401,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=71"></script>
+    <script src="/app.js?v=72"></script>
   </body>
 </html>
