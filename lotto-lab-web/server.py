@@ -2139,6 +2139,44 @@ def simple_core_recommendation(
     return list(best_combo or tuple(pool[:pick_count]))
 
 
+def simple_core_candidate_pool(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    candidate_count: int = 15,
+) -> list[dict[str, Any]]:
+    """Return a deterministic ranked pool built from the same core signals.
+
+    The primary five-number pick is always kept inside the pool so members can
+    make their own combination without introducing a second, conflicting model.
+    Scores are ranking indexes, not winning probabilities.
+    """
+    components = simple_core_score_components(draws, max_number)
+    weights = {"recent": 0.45, "heat": 0.20, "gap": 0.15, "interval": 0.20}
+    scores = {
+        number: sum(values[key] * weight for key, weight in weights.items())
+        for number, values in components.items()
+    }
+    ranked = sorted(scores, key=lambda number: (-scores[number], number))
+    target = max(1, min(int(candidate_count), max_number))
+    core_pick = set(simple_core_recommendation(draws, max_number=max_number, pick_count=pick_count))
+    selected = set(core_pick)
+    for number in ranked:
+        if len(selected) >= target:
+            break
+        selected.add(number)
+    ordered = sorted(selected, key=lambda number: (-scores[number], number))
+    return [
+        {
+            "rank": index + 1,
+            "number": number,
+            "score": round(scores[number] * 100, 1),
+            "isCorePick": number in core_pick,
+        }
+        for index, number in enumerate(ordered[:target])
+    ]
+
+
 def model_recommendation(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -2743,6 +2781,12 @@ def analyze(
     # reasoning, rather than a second competing algorithm.
     flagship_numbers = simple_core_recommendation(draws, max_number=max_number, pick_count=5)
     adaptive_numbers = list(flagship_numbers)
+    core_candidate_pool = simple_core_candidate_pool(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        candidate_count=15,
+    )
     patterns = pattern_summary(draws, max_number, selected_profile)
     short_consensus = short_term_consensus(
         reference_draws,
@@ -2759,6 +2803,8 @@ def analyze(
         "overdue": [{"number": n, "gap": gaps[n]} for n in overdue],
         "frequency": [{"number": n, "count": frequency[n], "gap": gaps[n]} for n in frequency],
         "recommendation": recommendation,
+        "coreCandidatePool": core_candidate_pool,
+        "coreCandidateMethod": "同一套核心分析排序；15 碼是會員自選候選池，不代表 15 碼同時推薦或保證中獎。",
         "flagshipRecommendation": flagship_numbers,
         "adaptiveRecommendation": adaptive_numbers,
         "adaptiveMethod": "與旗艦共用同一套核心分析，避免多套邏輯互相干擾。",
@@ -2830,6 +2876,13 @@ def analyze_with_stable_backtest(
         evidence=evidence_map,
     )
     analysis["flagshipRecommendation"] = simple_core_recommendation(display_draws, max_number=max_number, pick_count=5)
+    analysis["coreCandidatePool"] = simple_core_candidate_pool(
+        display_draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        candidate_count=15,
+    )
+    analysis["coreCandidateMethod"] = "同一套核心分析排序；15 碼是會員自選候選池，不代表 15 碼同時推薦或保證中獎。"
     analysis["adaptiveRecommendation"] = list(analysis["flagshipRecommendation"])
     analysis["adaptiveMethod"] = "與旗艦共用同一套核心分析，避免多套邏輯互相干擾。"
     analysis["flagshipMethod"] = CORE_ANALYSIS_METHOD
