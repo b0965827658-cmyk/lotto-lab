@@ -427,26 +427,6 @@ function renderFlagshipHistory() {
         .join(" · ");
       const actualAvailable = record.actualPeriod && Array.isArray(record.actualNumbers) && record.actualNumbers.length;
       const outcome = record.hitCount === null || record.hitCount === undefined ? "待下一期開獎" : `${record.hitCount} 中`;
-      const recentHot = (reasoning.recentHot || []).slice(0, 5).map((item) => item.number);
-      const intervals = (reasoning.intervals || []).slice(0, 2).map((item) => item.label || `${item.start}-${item.end}`);
-      const pairs = (reasoning.pairCombos || [])
-        .slice(0, 2)
-        .map((item) => (item.numbers || []).map(pad).join("+") )
-        .filter(Boolean);
-      const drags = (reasoning.dragCards || [])
-        .slice(0, 2)
-        .map((item) => `${pad(item.base)}拖${pad(item.follow)}`)
-        .filter(Boolean);
-      const tails = (reasoning.tailMomentum || [])
-        .slice(0, 3)
-        .map((item) => `${item.tail}尾`)
-        .filter(Boolean);
-      const logicRules = reasoning.logicRules || {};
-      const avoidedTails = Array.isArray(logicRules.tailAvoid) && logicRules.tailAvoid.length
-        ? `尾數${logicRules.tailAvoid.join("、")}避開`
-        : "沒有尾數需要避開";
-      const adaptiveNumbers = normalizedPick(reasoning.adaptiveNumbers);
-      const adaptiveFallbackNumbers = adaptiveNumbers.length === 5 ? adaptiveNumbers : normalizedPick(record.numbers);
       const backtestText = summary.testedCount
         ? `回測 ${summary.testedCount} 期 · 均中 ${summary.averageHit ?? 0} · 最高 ${summary.bestHit ?? 0} 中`
         : "回測資料累積中";
@@ -463,16 +443,10 @@ function renderFlagshipHistory() {
           <div class="flagship-history-meta">
             <span>${record.method || "六維綜合推理"}</span>
             <span>模型 ${record.profile || "綜合"}</span>
-            <span>${components || "近期回補規則 12% · 近期熱牌 20% · 區間 14% · 回測 14% · 版路 12% · 拖牌 9% · 尾數 9% · 自適應校準 10%"}</span>
+            <span>${components || "近期熱度 45% · 長期熱度 20% · 遺漏平衡 15% · 區間分布 20%"}</span>
           </div>
           <div class="flagship-history-reasoning">
-            <span>熱牌：${flagshipHistoryNumbers(recentHot)}</span>
-            <span>區間：${intervals.join("、") || "資料累積中"}</span>
-            <span>版路：${pairs.join("、") || "綜合版路"}</span>
-            <span>拖牌：${drags.join("、") || "資料累積中"}</span>
-            <span>尾數：${tails.join("、") || "資料累積中"}</span>
-            <span>近期邏輯：${avoidedTails}・近10期優先・15-19期回補・20-25期期待開・25+期避開</span>
-            <span>自適應集成：${adaptiveFallbackNumbers.length === 5 ? adaptiveFallbackNumbers.map(pad).join("、") : "同步中"}</span>
+            <span>同一套核心分析：近期熱度、長期熱度、遺漏平衡、區間分布</span>
             <span>${backtestText}</span>
           </div>
           ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：${miniBalls(record.actualNumbers)}</div>` : ""}
@@ -845,18 +819,7 @@ function normalizedWeights() {
 }
 
 function renderModelControls() {
-  els.focusButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.focus === state.analysisFocus);
-  });
-  els.modelInputs.forEach((input) => {
-    const key = input.dataset.weight;
-    input.value = state.modelWeights[key];
-    const valueEl = document.querySelector(`#${key}Weight`);
-    if (valueEl) valueEl.textContent = state.modelWeights[key];
-  });
-  const weights = normalizedWeights();
-  const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
-  els.modelSummary.textContent = `${focus.label}：${focus.description} 權重為熱度 ${Math.round(weights.heat * 100)}%、遺漏 ${Math.round(weights.overdue * 100)}%、分散 ${Math.round(weights.spread * 100)}%、回測 ${Math.round(weights.backtest * 100)}%。`;
+  els.modelSummary.textContent = "所有方案共用這套核心分析；回測只用來檢查表現，不再反覆改寫推薦號碼。";
 }
 
 function gameLabel(game) {
@@ -1399,12 +1362,10 @@ function validationRowsForLatest() {
 }
 
 function referenceCandidate() {
-  const candidates = generateCandidates();
-  if (candidates.length) return candidates[0];
-  const numbers = state.analysis?.recommendation || [];
+  const numbers = normalizedPick(state.analysis?.recommendation);
   if (numbers.length !== 5) return null;
   const backtest = backtestPick(numbers);
-  return { numbers, backtest, score: scorePick(numbers, backtest) };
+  return { numbers, backtest, score: { total: "核心", pattern: 0 } };
 }
 
 function currentReferenceNumbers() {
@@ -1418,57 +1379,28 @@ function renderReferencePick() {
     els.pickMeta.innerHTML = "";
     return;
   }
-  const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
-  const tailProfile = hotTailProfile();
-  const shortCycle = shortCycleProfile();
-  const shortTermLeaders = state.analysis?.shortTermConsensus?.leaders || [];
-  const shortTermText = shortTermLeaders.length
-    ? shortTermLeaders
-        .slice(0, 5)
-        .map((item) => `${pad(item.number)}（${item.agreement}/${state.analysis.shortTermConsensus.windows.length}窗）`)
-        .join("、")
-    : "資料不足";
   els.pickBalls.innerHTML = balls(candidate.numbers);
   els.pickMeta.innerHTML = `
-    <span>${focus.label}</span>
-    <span>${focus.description}</span>
-    <span>熱尾 ${tailProfile.label}</span>
-    <span>短期共識 ${shortTermText}</span>
-    ${state.game === "ca-fantasy5" ? `<span>${shortCycle.label}</span>` : ""}
-    <span>分數 ${candidate.score.total}</span>
-    <span>版路 +${candidate.score.pattern || 0}</span>
+    <span>核心分析</span>
+    <span>近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%</span>
     <span>最高 ${candidate.backtest.bestHit} 中</span>
-    <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
+    <span>回測只驗證，不反覆改寫推薦</span>
   `;
 }
 
 function renderFlagshipPick() {
-  if (!els.flagshipBalls || !els.flagshipMeta || !els.adaptiveBalls || !els.adaptiveMeta) return;
+  if (!els.flagshipBalls || !els.flagshipMeta) return;
   if (!isFlagshipPlan()) {
     els.flagshipBalls.innerHTML = "";
     els.flagshipMeta.innerHTML = "<span>量化旗艦版會員專屬</span>";
-    els.adaptiveBalls.innerHTML = "";
-    els.adaptiveMeta.innerHTML = "<span>量化旗艦版會員專屬</span>";
     return;
   }
   const numbers = normalizedPick(state.analysis?.flagshipRecommendation);
-  const adaptiveRawNumbers = normalizedPick(state.analysis?.adaptiveRecommendation);
-  const adaptiveFallback = adaptiveRawNumbers.length !== 5;
-  const adaptiveNumbers = adaptiveFallback
-    ? normalizedPick(state.analysis?.flagshipRecommendation)
-    : adaptiveRawNumbers;
   if (numbers.length !== 5) {
     els.flagshipBalls.innerHTML = "";
     els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 5 碼候選池。</span>";
   } else {
-    const evidence = state.analysis?.flagshipResearchEvidence?.features || state.analysis?.researchEvidence?.features || [];
-    const evidenceText = evidence.length
-      ? evidence
-          .slice(0, 3)
-          .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
-          .join("、")
-      : "多窗口交叉驗證";
-    const flagshipMethod = state.analysis?.flagshipMethod || "近期熱牌 26%・區間 20%・回測 18%・版路 16%・拖牌 10%・尾數 10%";
+    const flagshipMethod = state.analysis?.flagshipMethod || "核心分析：近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%";
     els.flagshipBalls.innerHTML = `
       <div class="flagship-star-shape" role="img" aria-label="五芒星摘星五碼">
         ${balls(numbers)}
@@ -1476,22 +1408,8 @@ function renderFlagshipPick() {
     `;
     els.flagshipMeta.innerHTML = `
       <span class="flagship-window-note">${flagshipMethod}</span>
-      <span>近期熱牌、區間、回測、版路、拖牌與尾數綜合推理</span>
-      <span>研究支持：${evidenceText}</span>
+      <span>旗艦版與主模型共用同一套核心邏輯，避免號碼互相打架</span>
       <span>僅供統計參考，不代表保證中獎</span>
-    `;
-  }
-  if (adaptiveNumbers.length !== 5) {
-    els.adaptiveBalls.innerHTML = "";
-    els.adaptiveMeta.innerHTML = "<span>自適應模型正在同步最新資料，請稍後重新整理。</span>";
-  } else {
-    const adaptiveMethod = state.analysis?.adaptiveMethod || "自適應集成：熱度、近期、趨勢、遺漏、版路、拖牌、連莊、區間與尾數動能加權";
-    els.adaptiveBalls.innerHTML = balls(adaptiveNumbers);
-    els.adaptiveMeta.innerHTML = `
-      <span class="adaptive-window-note">${adaptiveMethod}</span>
-      ${adaptiveFallback ? "<span>資料同步期間先顯示穩定綜合候選，完成同步後自動校準</span>" : ""}
-      <span>獨立採用自適應模型，不覆蓋上方旗艦摘星五碼</span>
-      <span>同一期固定發布，方便兩組候選交叉比較</span>
     `;
   }
 }
@@ -1621,13 +1539,10 @@ function renderModeSnapshots() {
 function renderModelOutput({ heavy = state.activeTab === "model" } = {}) {
   renderSavedPicks();
   renderReferencePick();
-  if (heavy || !isProPlan()) {
-    renderCandidates();
-    renderModeSnapshots();
-    return;
-  }
-  els.candidates.innerHTML = `<div class="empty-state">開啟「模型」分頁後產生高分候選組合。</div>`;
-  els.modeSnapshots.innerHTML = `<div class="empty-state">開啟「模型」分頁後產生各模式候選快照。</div>`;
+  // Keep the old containers for compatibility with saved links, but do not
+  // generate several competing candidate sets in the background anymore.
+  if (els.candidates) els.candidates.innerHTML = "";
+  if (els.modeSnapshots) els.modeSnapshots.innerHTML = "";
 }
 
 function scheduleModelRender(message = "模型設定已更新。") {
@@ -1751,19 +1666,15 @@ function renderPatterns(patterns, profiles = [], researchEvidence = null) {
     els.patternLines.innerHTML = "";
     return;
   }
-  els.patternModel.textContent = patterns.selectedLabel || "版路模型";
+  els.patternModel.textContent = "核心版路摘要";
   els.patternRepeat.textContent = `重複均值 ${patterns.repeatAverage}`;
   const zone = patterns.zonePatterns?.[0];
   const odd = patterns.oddPatterns?.[0];
   const low = patterns.lowPatterns?.[0];
-  const tails = patterns.tails || [];
-  const intervals = patterns.intervals || [];
   const sumRange = patterns.sumRange || {};
-  const chip = (text, tone = "") => `<span class="pattern-chip ${tone}">${text}</span>`;
-  const empty = `<span class="pattern-note">資料不足</span>`;
   els.patternGrid.innerHTML = `
     <div>
-      <span>常見區間</span>
+      <span>常見分布</span>
       <strong>${zone ? zone.pattern : "-"}</strong>
       <em>${zone ? `${zone.count} 次` : ""}</em>
     </div>
@@ -1783,119 +1694,29 @@ function renderPatterns(patterns, profiles = [], researchEvidence = null) {
       <em>中心 ${sumRange.center || "-"}</em>
     </div>
   `;
-  const tailText = tails.length
-    ? tails.slice(0, 5).map((item, index) => chip(`${item.tail}尾 ${item.count}次`, index < 2 ? "gold" : "")).join("")
-    : empty;
-  const intervalText = intervals.length
-    ? intervals.slice(0, 4).map((item, index) => chip(`${item.label} ${item.rate}%`, index < 2 ? "gold" : "")).join("")
-    : empty;
-  const neighborText = patterns.neighborNumbers?.length
-    ? patterns.neighborNumbers.slice(0, 12).map((number) => chip(pad(number))).join("")
-    : empty;
-  const shortCycle = shortCycleProfile();
-  const shortCycleText =
-    state.game === "ca-fantasy5"
-      ? [
-          ...shortCycle.aroundNumbers.slice(0, 8).map((number) => chip(pad(number), "gold")),
-          ...shortCycle.edgeNumbers.slice(0, 3).map((number) => chip(pad(number))),
-          ...shortCycle.edgeNumbers.slice(-3).map((number) => chip(pad(number))),
-        ].join("")
-      : "";
-  const pairText = patterns.pairCombos?.length
-    ? patterns.pairCombos
-        .slice(0, 5)
-        .map((item, index) => chip(`${pad(item.numbers[0])}-${pad(item.numbers[1])} ${item.count}次`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const dragText = patterns.dragCards?.length
-    ? patterns.dragCards
-        .slice(0, 5)
-        .map((item, index) => chip(`${pad(item.base)}拖${pad(item.follow)} ${item.rate}%`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const repeatText = patterns.repeatCandidates?.length
-    ? patterns.repeatCandidates
-        .slice(0, 5)
-        .map((item, index) => chip(`${pad(item.number)} ${item.rate}%`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const multiWindowText = patterns.multiWindowNumbers?.length
-    ? patterns.multiWindowNumbers
-        .slice(0, 6)
-        .map((item, index) => chip(`${pad(item.number)} ${item.score}`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const signalText = patterns.signalLeaders?.length
-    ? patterns.signalLeaders
-        .slice(0, 6)
-        .map((item, index) => chip(`${pad(item.number)} ${item.support}項`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const profileText = profiles
-    .slice(0, 3)
-    .map((item, index) => chip(`${item.label} 均${item.averageHit} / 高${item.bestHit}`, index === 0 ? "gold" : ""))
-    .join("");
-  const evidenceRows = researchEvidence?.features || [];
-  const evidenceText = evidenceRows.length
-    ? evidenceRows
-        .slice(0, 4)
-        .map((item, index) => chip(`${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
+  const tails = (patterns.tails || []).slice(0, 4).map((item) => `${item.tail}尾`).join("、") || "資料不足";
+  const intervals = (patterns.intervals || []).slice(0, 3).map((item) => `${item.label} ${item.rate}%`).join("、") || "資料不足";
+  const neighbors = (patterns.neighborNumbers || []).slice(0, 6).map(pad).join("、") || "資料不足";
   els.patternLines.innerHTML = `
     <div class="pattern-soft">
-      <span>近期熱門尾數</span>
-      <strong class="pattern-line-main">${tailText}</strong>
-      <em class="pattern-note">優先保留近期有熱度的尾數，過冷尾數降低權重。</em>
+      <span>近期尾數</span>
+      <strong class="pattern-line-main">${tails}</strong>
+      <em class="pattern-note">尾數只作觀察，不會改寫核心推薦。</em>
     </div>
     <div class="pattern-soft">
       <span>集中區間</span>
-      <strong class="pattern-line-main">${intervalText}</strong>
-      <em class="pattern-note">看近期開獎是否集中在你設定的區間帶。</em>
+      <strong class="pattern-line-main">${intervals}</strong>
+      <em class="pattern-note">區間只用來檢查組合是否過度集中。</em>
     </div>
     <div>
-      <span>哥倆好</span>
-      <strong class="pattern-line-main">${pairText}</strong>
+      <span>上期鄰近觀察</span>
+      <strong class="pattern-line-main">${neighbors}</strong>
+      <em class="pattern-note">僅作版路提示，不會單獨把號碼推上推薦。</em>
     </div>
-    <div>
-      <span>拖牌</span>
-      <strong class="pattern-line-main">${dragText}</strong>
-    </div>
-    <div>
-      <span>可能連莊</span>
-      <strong class="pattern-line-main">${repeatText}</strong>
-    </div>
-    <div class="pattern-soft">
-      <span>多窗口交集</span>
-      <strong class="pattern-line-main">${multiWindowText}</strong>
-      <em class="pattern-note">近 6、12、24、36、60、90 期重疊支持，避免只追單一熱點。</em>
-    </div>
-    <div class="pattern-soft">
-      <span>交叉支持</span>
-      <strong class="pattern-line-main">${signalText}</strong>
-      <em class="pattern-note">同時得到尾數、拖牌、連莊、區間等訊號的號碼優先。</em>
-    </div>
-    <div>
-      <span>上期鄰近</span>
-      <strong class="pattern-line-main">${neighborText}</strong>
-    </div>
-    <div class="pattern-soft">
-      <span>統計驗證</span>
-      <strong class="pattern-line-main">${evidenceText}</strong>
-      <em class="pattern-note">用走期回測比較隨機基準；樣本不穩定的訊號會自動降權。</em>
-    </div>
-    ${
-      state.game === "ca-fantasy5"
-        ? `<div class="pattern-soft">
-            <span>天天樂近10期</span>
-            <strong class="pattern-line-main">${shortCycleText || empty}</strong>
-            <em class="pattern-note">近10期附近環繞優先，再補 01-05 / 35-39 邊線。</em>
-          </div>`
-        : ""
-    }
-    <div class="pattern-wide">
-      <span>模型比較</span>
-      <strong class="pattern-line-main">${profileText || empty}</strong>
+    <div class="pattern-wide pattern-soft">
+      <span>目前原則</span>
+      <strong class="pattern-line-main">四項核心訊號＋回測驗證</strong>
+      <em class="pattern-note">所有方案共用同一套計算，讓結果穩定、容易理解。</em>
     </div>
   `;
 }
