@@ -1870,6 +1870,34 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   margin-top: 14px;
 }
 
+.core-logic-summary {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.core-logic-item {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(0, 1.4fr);
+  gap: 14px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbf8;
+  padding: 11px 13px;
+}
+
+.core-logic-item strong {
+  color: var(--green);
+  font-size: 14px;
+}
+
+.core-logic-item span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .focus-controls {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -2321,6 +2349,11 @@ th {
 
   .focus-controls {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .core-logic-item {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 
   .score-card {
