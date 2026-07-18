@@ -13,7 +13,7 @@
     <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
     <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
-    <link rel="stylesheet" href="/styles.css?v=61" />
+    <link rel="stylesheet" href="/styles.css?v=62" />
   </head>
   <body>
     <main class="shell">
@@ -273,6 +273,22 @@
           <p class="fineprint" id="modelSummary">所有方案共用這套核心分析；回測只用來檢查表現，不再反覆改寫推薦號碼。</p>
         </article>
 
+        <article class="panel core-candidate-panel" data-tier="pro" data-lock-title="Pro 核心候選 15 碼" data-lock-text="訂閱後可查看依核心分析排序的 15 碼候選池，並自行組合 5 碼。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">會員自選池</p>
+              <h2>核心候選 15 碼</h2>
+            </div>
+            <span class="count-pill">模型分數排序</span>
+          </div>
+          <p class="fineprint">沿用近期熱度、長期熱度、遺漏平衡與區間分布，列出分數較高的 15 碼供會員自行選擇；不是保證中獎清單。</p>
+          <div class="core-candidate-balls" id="coreCandidateBalls" aria-label="核心候選 15 碼"></div>
+          <div class="core-candidate-footer">
+            <span id="coreCandidateMeta" class="core-candidate-meta">已選 0／5</span>
+            <button id="coreCandidateSave" class="text-button" type="button" disabled>儲存這組 5 碼</button>
+          </div>
+        </article>
+
         <article class="panel tail-analysis-panel" data-tier="pro" data-lock-title="Pro 尾數分析模組" data-lock-text="訂閱後可查看近 10、20、36 期的獨立尾數動能與參考號碼。">
           <div class="panel-head compact">
             <div>
@@ -401,6 +417,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=72"></script>
+    <script src="/app.js?v=73"></script>
   </body>
 </html>

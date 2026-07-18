@@ -13,6 +13,7 @@ const state = {
   flagshipHistory: [],
   flagshipHistoryLoading: false,
   flagshipHistoryLatestKey: "",
+  coreCandidateSelection: [],
   requestId: 0,
   latestRequestId: 0,
   latestRefreshInFlight: false,
@@ -132,6 +133,9 @@ const els = {
   pickMeta: $("#pickMeta"),
   flagshipBalls: $("#flagshipBalls"),
   flagshipMeta: $("#flagshipMeta"),
+  coreCandidateBalls: $("#coreCandidateBalls"),
+  coreCandidateMeta: $("#coreCandidateMeta"),
+  coreCandidateSave: $("#coreCandidateSave"),
   adaptiveBalls: $("#adaptiveBalls"),
   adaptiveMeta: $("#adaptiveMeta"),
   note: $("#analysisNote"),
@@ -1414,6 +1418,49 @@ function renderFlagshipPick() {
   }
 }
 
+function renderCoreCandidatePool() {
+  if (!els.coreCandidateBalls || !els.coreCandidateMeta || !els.coreCandidateSave) return;
+  if (!isProPlan()) {
+    els.coreCandidateBalls.innerHTML = "";
+    els.coreCandidateMeta.textContent = "Pro 訂閱版專屬";
+    els.coreCandidateSave.disabled = true;
+    return;
+  }
+  const pool = Array.isArray(state.analysis?.coreCandidatePool) ? state.analysis.coreCandidatePool : [];
+  if (pool.length < 15) {
+    els.coreCandidateBalls.innerHTML = "";
+    els.coreCandidateMeta.textContent = "資料累積中，暫時無法產生候選 15 碼。";
+    els.coreCandidateSave.disabled = true;
+    return;
+  }
+  const allowed = new Set(pool.map((item) => Number(item.number)));
+  state.coreCandidateSelection = state.coreCandidateSelection.filter((number) => allowed.has(number)).slice(0, 5);
+  els.coreCandidateBalls.innerHTML = pool
+    .map((item) => {
+      const number = Number(item.number);
+      const selected = state.coreCandidateSelection.includes(number);
+      const core = item.isCorePick ? " is-core-pick" : "";
+      return `<button class="core-candidate-ball${selected ? " is-selected" : ""}${core}" type="button" data-core-number="${number}" aria-pressed="${selected}" title="${item.isCorePick ? "核心推薦號碼" : "模型候選號碼"}">${pad(number)}</button>`;
+    })
+    .join("");
+  els.coreCandidateMeta.textContent = `已選 ${state.coreCandidateSelection.length}／5；金色外框為核心推薦五碼`;
+  els.coreCandidateSave.disabled = state.coreCandidateSelection.length !== 5;
+  els.coreCandidateBalls.querySelectorAll("[data-core-number]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const number = Number(button.dataset.coreNumber);
+      if (state.coreCandidateSelection.includes(number)) {
+        state.coreCandidateSelection = state.coreCandidateSelection.filter((item) => item !== number);
+      } else if (state.coreCandidateSelection.length < 5) {
+        state.coreCandidateSelection = [...state.coreCandidateSelection, number].sort((a, b) => a - b);
+      } else {
+        setStatus("最多選 5 顆號碼。", true);
+        return;
+      }
+      renderCoreCandidatePool();
+    });
+  });
+}
+
 function savePick(numbers) {
   const normalized = [...numbers].sort((a, b) => a - b);
   const picks = loadSavedPicks();
@@ -1539,6 +1586,7 @@ function renderModeSnapshots() {
 function renderModelOutput({ heavy = state.activeTab === "model" } = {}) {
   renderSavedPicks();
   renderReferencePick();
+  renderCoreCandidatePool();
   // Keep the old containers for compatibility with saved links, but do not
   // generate several competing candidate sets in the background anymore.
   if (els.candidates) els.candidates.innerHTML = "";
@@ -2383,6 +2431,19 @@ if (els.flagshipHistoryRefresh) {
   els.flagshipHistoryRefresh.addEventListener("click", () => {
     if (!requireFlagship("旗艦分析紀錄")) return;
     loadFlagshipHistory({ force: true });
+  });
+}
+
+if (els.coreCandidateSave) {
+  els.coreCandidateSave.addEventListener("click", () => {
+    if (!requirePro("核心候選 15 碼")) return;
+    if (state.coreCandidateSelection.length !== 5) {
+      setStatus("請先從候選 15 碼選滿 5 顆。", true);
+      return;
+    }
+    if (savePick(state.coreCandidateSelection)) {
+      setStatus(`已儲存核心候選組合：${state.coreCandidateSelection.map(pad).join(" · ")}`);
+    }
   });
 }
 
