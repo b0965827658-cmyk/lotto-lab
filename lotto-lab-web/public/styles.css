@@ -307,6 +307,11 @@ select {
   display: grid;
 }
 
+.tab-panel[data-tab-panel="latest"] .latest-panel,
+.tab-panel[data-tab-panel="latest"] .disclaimer-panel {
+  grid-column: 1 / -1;
+}
+
 .tab-panel[data-tab-panel="history"] .wide,
 .tab-panel[data-tab-panel="recent"] .wide,
 .tab-panel[data-tab-panel="subscription"] .subscription-panel {

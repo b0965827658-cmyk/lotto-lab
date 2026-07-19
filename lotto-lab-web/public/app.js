@@ -637,6 +637,38 @@ function activateTab(tabName) {
   }
 }
 
+function organizeAnalysisPanels() {
+  const latestPanel = document.querySelector('[data-tab-panel="latest"]');
+  const recentPanel = document.querySelector('[data-tab-panel="recent"]');
+  const modelPanel = document.querySelector('[data-tab-panel="model"]');
+  if (!latestPanel || !recentPanel || !modelPanel) return;
+
+  const panelById = (id) => document.getElementById(id)?.closest(".panel");
+  const movePanels = (destination, panels) => {
+    const movable = panels.filter(
+      (panel, index, list) => panel && panel.closest("[data-tab-panel]") === latestPanel && list.indexOf(panel) === index,
+    );
+    if (!movable.length) return;
+    const fragment = document.createDocumentFragment();
+    movable.forEach((panel) => fragment.appendChild(panel));
+    destination.insertBefore(fragment, destination.firstElementChild);
+  };
+
+  movePanels(modelPanel, [
+    latestPanel.querySelector(".countdown-panel"),
+    latestPanel.querySelector(".pick-panel"),
+    latestPanel.querySelector(".flagship-panel"),
+    latestPanel.querySelector(".backtest-panel"),
+    latestPanel.querySelector(".pattern-panel"),
+    latestPanel.querySelector(".saved-panel"),
+  ]);
+  movePanels(recentPanel, [
+    panelById("hotList"),
+    panelById("coldList"),
+    panelById("overdueList"),
+  ]);
+}
+
 function loadPlanPreview() {
   const saved = localStorage.getItem(PLAN_STORAGE_KEY);
   return saved === "flagship" || saved === "pro" ? saved : "free";
@@ -2476,6 +2508,8 @@ document.querySelectorAll(".segment").forEach((button) => {
     load();
   });
 });
+
+organizeAnalysisPanels();
 
 els.tabButtons.forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tab));
