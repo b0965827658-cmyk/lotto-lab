@@ -60,6 +60,7 @@ const LATEST_FETCH_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 60000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
+const CANDIDATE_ATTEMPTS = 72;
 const BACKTEST_PRESETS = [7, 14, 21, 24, 28, 35, 60, 90, 180, 365];
 
 const FOCUS_PRESETS = {
@@ -1290,6 +1291,7 @@ function randomChoice(items, rng = Math.random) {
 }
 
 function buildCandidate(pool, rng = Math.random) {
+  if (!Array.isArray(pool) || pool.length < 5) return [];
   const numbers = new Set();
   const frequencyRows = state.analysis?.frequency || [];
   const stats = new Map(frequencyRows.map((row) => [row.number, row]));
@@ -1319,6 +1321,13 @@ function buildCandidate(pool, rng = Math.random) {
     .filter((number) => poolSet.has(number))
     .slice(0, 18);
   const focus = state.analysisFocus;
+  const addRandomUntil = (targetSize, choices) => {
+    const available = [...new Set(choices)].filter((number) => poolSet.has(number) && !numbers.has(number));
+    while (numbers.size < targetSize && available.length) {
+      const index = Math.floor(rng() * available.length);
+      numbers.add(available.splice(index, 1)[0]);
+    }
+  };
   const zones = [
     pool.filter((n) => n <= 10),
     pool.filter((n) => n >= 11 && n <= 20),
@@ -1342,13 +1351,13 @@ function buildCandidate(pool, rng = Math.random) {
     numbers.add(randomChoice(intervalNumbers, rng));
   }
   if ((focus === "pattern" || focus === "interval") && intervalNumbers.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(intervalNumbers, rng));
+    addRandomUntil(3, intervalNumbers);
   }
   if (repeatNumbers.length && numbers.size < 5 && rng() < 0.45) {
     numbers.add(randomChoice(repeatNumbers, rng));
   }
   if (state.game === "ca-fantasy5") {
-    while (numbers.size < 2 && shortAround.length) numbers.add(randomChoice(shortAround, rng));
+    addRandomUntil(2, shortAround);
     if (shortEdges.length && numbers.size < 5 && rng() < 0.72) {
       numbers.add(randomChoice(shortEdges, rng));
     }
@@ -1360,13 +1369,13 @@ function buildCandidate(pool, rng = Math.random) {
     }
   }
   if (focus === "classic" && classicList.length) {
-    while (numbers.size < 4) numbers.add(randomChoice(classicList, rng));
+    addRandomUntil(4, classicList);
   }
   if (focus === "hot" && hotList.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(hotList, rng));
+    addRandomUntil(3, hotList);
   }
   if (focus === "overdue" && overdueList.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(overdueList, rng));
+    addRandomUntil(3, overdueList);
   }
   if (focus === "backtest") {
     const top = [...pool]
@@ -1377,12 +1386,10 @@ function buildCandidate(pool, rng = Math.random) {
       .sort((a, b) => b.score - a.score)
       .slice(0, 20)
       .map((item) => item.n);
-    while (numbers.size < 4 && top.length) numbers.add(randomChoice(top, rng));
+    addRandomUntil(4, top);
   }
-  while (numbers.size < 5) {
-    numbers.add(randomChoice(pool, rng));
-  }
-  return [...numbers].sort((a, b) => a - b);
+  addRandomUntil(5, pool);
+  return [...numbers].sort((a, b) => a - b).slice(0, 5);
 }
 
 function generateCandidates() {
@@ -1395,9 +1402,10 @@ function generateCandidates() {
     const rng = createRng(seed);
     const seen = new Set();
     const candidates = [];
-    const attempts = state.analysisFocus === "backtest" ? 260 : 200;
+    const attempts = state.analysisFocus === "backtest" ? CANDIDATE_ATTEMPTS + 24 : CANDIDATE_ATTEMPTS;
     for (let i = 0; i < attempts; i += 1) {
       const numbers = buildCandidate(pool, rng);
+      if (numbers.length !== 5) continue;
       const key = numbers.join(",");
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1618,6 +1626,7 @@ function savePick(numbers) {
 }
 
 function renderCandidates() {
+  if (!els.candidates) return;
   if (!isProPlan()) {
     els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；目前會保留上方一組統計參考選號。</div>`;
     return;
@@ -1722,9 +1731,13 @@ function renderModelOutput({ heavy = state.activeTab === "model" } = {}) {
   renderSavedPicks();
   renderReferencePick();
   renderCoreCandidatePool();
-  // Keep the old containers for compatibility with saved links, but do not
-  // generate several competing candidate sets in the background anymore.
-  if (els.candidates) els.candidates.innerHTML = "";
+  if (els.candidates) {
+    if (heavy) {
+      renderCandidates();
+    } else {
+      els.candidates.innerHTML = `<div class="empty-state">切換到「模型」分頁後載入高分組合。</div>`;
+    }
+  }
   if (els.modeSnapshots) els.modeSnapshots.innerHTML = "";
 }
 
