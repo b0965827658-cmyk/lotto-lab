@@ -960,6 +960,93 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   padding-top: 7px;
 }
 
+.flagship-history-actual-balls {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.flagship-marker-tools {
+  display: grid;
+  grid-template-columns: auto 86px auto auto;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.flagship-marker-tools input {
+  width: 86px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 8px;
+  text-align: center;
+  font: inherit;
+}
+
+.flagship-marker-tools .text-button {
+  min-height: 36px;
+}
+
+.flagship-marker-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.flagship-marker-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 10px 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.flagship-marker-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.flagship-marker-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
+.marker-tracked {
+  border-color: #2f86bd !important;
+  background: #d9efff !important;
+  color: #175d86 !important;
+}
+
+.marker-return {
+  border-color: #d05b45 !important;
+  background: #ffe1da !important;
+  color: #923c2e !important;
+}
+
+.marker-streak {
+  box-shadow: 0 0 0 3px rgba(122, 73, 162, 0.36), inset 0 -5px 9px rgba(0, 0, 0, 0.08) !important;
+}
+
+.flagship-marker-swatch.marker-streak {
+  border: 2px solid rgba(122, 73, 162, 0.72);
+  background: #edf3ef;
+}
+
 .pick-panel .label,
 .pick-panel .fineprint {
   color: rgba(255, 255, 255, 0.76);
@@ -2395,6 +2482,24 @@ th {
 
   .flagship-history-head {
     align-items: flex-start;
+  }
+
+  .flagship-marker-tools {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .flagship-marker-tools label {
+    grid-column: 1 / -1;
+  }
+
+  .flagship-marker-tools input,
+  .flagship-marker-tools .text-button {
+    width: 100%;
+  }
+
+  .flagship-history-actual-balls {
+    margin-top: 6px;
+    margin-left: 0;
   }
 
   .flagship-history-result {

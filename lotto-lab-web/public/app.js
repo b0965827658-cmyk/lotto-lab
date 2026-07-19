@@ -13,6 +13,7 @@ const state = {
   flagshipHistory: [],
   flagshipHistoryLoading: false,
   flagshipHistoryLatestKey: "",
+  flagshipTrackNumber: null,
   coreCandidateSelection: [],
   requestId: 0,
   latestRequestId: 0,
@@ -55,6 +56,7 @@ const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const DAILY_COMPARISON_STORAGE_KEY = "lotto-lab-daily-comparison-v1";
 const BACKTEST_LIMIT_STORAGE_KEY = "lotto-lab-backtest-limit";
 const FLAGSHIP_LIMIT_STORAGE_KEY = "lotto-lab-flagship-limit";
+const FLAGSHIP_TRACK_NUMBER_STORAGE_KEY = "lotto-lab-flagship-track-number";
 const POLL_INTERVAL_MS = 30 * 1000;
 const LATEST_FETCH_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 60000;
@@ -154,6 +156,10 @@ const els = {
   modeSnapshots: $("#modeSnapshotList"),
   flagshipHistoryList: $("#flagshipHistoryList"),
   flagshipHistoryRefresh: $("#flagshipHistoryRefresh"),
+  flagshipTrackNumber: $("#flagshipTrackNumber"),
+  flagshipTrackApply: $("#flagshipTrackApply"),
+  flagshipTrackClear: $("#flagshipTrackClear"),
+  flagshipMarkerStatus: $("#flagshipMarkerStatus"),
   modelInputs: Array.from(document.querySelectorAll("[data-weight]")),
   focusButtons: Array.from(document.querySelectorAll("[data-focus]")),
   modelSummary: $("#modelSummary"),
@@ -237,6 +243,105 @@ function miniBalls(numbers, winners = []) {
   return numbers
     .map((n) => `<span class="mini-ball ${winnerSet.has(n) ? "hit" : ""}">${pad(n)}</span>`)
     .join("");
+}
+
+function normalizeFlagshipTrackNumber(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 1 && number <= 39 ? number : null;
+}
+
+function loadFlagshipTrackNumber() {
+  return normalizeFlagshipTrackNumber(localStorage.getItem(FLAGSHIP_TRACK_NUMBER_STORAGE_KEY));
+}
+
+function saveFlagshipTrackNumber() {
+  if (state.flagshipTrackNumber) {
+    localStorage.setItem(FLAGSHIP_TRACK_NUMBER_STORAGE_KEY, String(state.flagshipTrackNumber));
+  } else {
+    localStorage.removeItem(FLAGSHIP_TRACK_NUMBER_STORAGE_KEY);
+  }
+}
+
+function compareHistoryDraws(left, right) {
+  const dateCompare = String(left?.date || "").localeCompare(String(right?.date || ""));
+  if (dateCompare !== 0) return dateCompare;
+  return String(left?.period || "").localeCompare(String(right?.period || ""), undefined, { numeric: true });
+}
+
+function buildHistoryMarkerIndex(draws = []) {
+  const markerIndex = new Map();
+  const ordered = draws
+    .filter((draw) => draw && Array.isArray(draw.numbers) && draw.numbers.length)
+    .slice()
+    .sort(compareHistoryDraws);
+  const lastSeen = new Map();
+
+  ordered.forEach((draw, drawIndex) => {
+    const numbers = [...new Set(draw.numbers.map(Number))].sort((left, right) => left - right);
+    const previousNumbers = new Set((ordered[drawIndex - 1]?.numbers || []).map(Number));
+    const consecutiveNumbers = new Set();
+    for (let index = 0; index < numbers.length - 1; index += 1) {
+      if (numbers[index + 1] === numbers[index] + 1) {
+        consecutiveNumbers.add(numbers[index]);
+        consecutiveNumbers.add(numbers[index + 1]);
+      }
+    }
+
+    const drawMarkers = new Map();
+    numbers.forEach((number) => {
+      const gap = lastSeen.has(number) ? drawIndex - lastSeen.get(number) - 1 : null;
+      drawMarkers.set(number, {
+        tracked: state.flagshipTrackNumber === number,
+        returning: gap !== null && gap >= 20,
+        streak: previousNumbers.has(number) || consecutiveNumbers.has(number),
+        gap,
+      });
+      lastSeen.set(number, drawIndex);
+    });
+    markerIndex.set(drawKey(draw), drawMarkers);
+  });
+  return markerIndex;
+}
+
+function markerClasses(marker = {}) {
+  return [
+    marker.tracked ? "marker-tracked" : "",
+    marker.returning ? "marker-return" : "",
+    marker.streak ? "marker-streak" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function markerTitle(marker = {}) {
+  const labels = [];
+  if (marker.tracked) labels.push("追蹤號碼");
+  if (marker.returning) labels.push(`20 期以上未出後回補${marker.gap !== null ? `（${marker.gap} 期）` : ""}`);
+  if (marker.streak) labels.push("連莊或連號");
+  return labels.join("・");
+}
+
+function markedHistoryBalls(draw, markerIndex = new Map(), winners = []) {
+  const winnerSet = new Set(winners.map(Number));
+  const drawMarkers = markerIndex.get(drawKey(draw)) || new Map();
+  return (draw.numbers || [])
+    .map((number) => {
+      const marker = drawMarkers.get(Number(number)) || {};
+      const classes = ["mini-ball", "history-ball", winnerSet.has(number) ? "hit" : "", markerClasses(marker)]
+        .filter(Boolean)
+        .join(" ");
+      const title = markerTitle(marker);
+      return `<span class="${classes}"${title ? ` title="${title}"` : ""}>${pad(number)}</span>`;
+    })
+    .join("");
+}
+
+function renderFlagshipMarkerControls() {
+  if (!els.flagshipTrackNumber || !els.flagshipMarkerStatus) return;
+  els.flagshipTrackNumber.value = state.flagshipTrackNumber ? String(state.flagshipTrackNumber) : "";
+  els.flagshipMarkerStatus.textContent = state.flagshipTrackNumber
+    ? `目前追蹤 ${pad(state.flagshipTrackNumber)}；重新整理後仍會保留。`
+    : "尚未設定追蹤號碼。";
 }
 
 function zonedParts(date, timeZone) {
@@ -370,6 +475,7 @@ function historyRows(draws) {
       </tr>
     `;
   }
+  const markerIndex = buildHistoryMarkerIndex(state.displayHistory);
   return draws
     .map(
       (draw) => `
@@ -378,7 +484,7 @@ function historyRows(draws) {
           <td class="history-period">${draw.period || "-"}</td>
           <td class="number-text">
             <div class="history-balls" aria-label="開獎號碼 ${draw.numbers.map(pad).join("、")}">
-              ${draw.numbers.map((number) => `<span class="mini-ball history-ball">${pad(number)}</span>`).join("")}
+              ${markedHistoryBalls(draw, markerIndex)}
             </div>
           </td>
         </tr>
@@ -410,6 +516,7 @@ function flagshipHistoryNumbers(items = []) {
 
 function renderFlagshipHistory() {
   if (!els.flagshipHistoryList) return;
+  renderFlagshipMarkerControls();
   if (!isFlagshipPlan()) {
     els.flagshipHistoryList.innerHTML = `<div class="empty-state">升級量化旗艦版後可查看歷史推理紀錄。</div>`;
     return;
@@ -422,6 +529,7 @@ function renderFlagshipHistory() {
     els.flagshipHistoryList.innerHTML = `<div class="empty-state">目前還沒有保存的旗艦分析；完成一次數據分析後會自動建立紀錄。</div>`;
     return;
   }
+  const markerIndex = buildHistoryMarkerIndex(state.displayHistory);
   els.flagshipHistoryList.innerHTML = state.flagshipHistory
     .map((record) => {
       const reasoning = record.reasoning || {};
@@ -430,6 +538,11 @@ function renderFlagshipHistory() {
         .map((item) => `${item.label || item.id} ${item.weight || 0}%`)
         .join(" · ");
       const actualAvailable = record.actualPeriod && Array.isArray(record.actualNumbers) && record.actualNumbers.length;
+      const actualDraw = actualAvailable
+        ? state.displayHistory.find(
+            (draw) => String(draw.period || "") === String(record.actualPeriod || "") || draw.date === record.actualDate,
+          )
+        : null;
       const outcome = record.hitCount === null || record.hitCount === undefined ? "待下一期開獎" : `${record.hitCount} 中`;
       const backtestText = summary.testedCount
         ? `回測 ${summary.testedCount} 期 · 均中 ${summary.averageHit ?? 0} · 最高 ${summary.bestHit ?? 0} 中`
@@ -453,7 +566,7 @@ function renderFlagshipHistory() {
             <span>同一套核心分析：近期熱度、長期熱度、遺漏平衡、區間分布</span>
             <span>${backtestText}</span>
           </div>
-          ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：${miniBalls(record.actualNumbers)}</div>` : ""}
+          ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：<div class="flagship-history-actual-balls">${markedHistoryBalls(actualDraw || { ...record, numbers: record.actualNumbers }, markerIndex, record.actualNumbers)}</div></div>` : ""}
         </article>
       `;
     })
@@ -599,6 +712,9 @@ function applyPlanAccess() {
   [els.flagshipLimitSelect, els.flagshipLimitApply].filter(Boolean).forEach((control) => {
     control.disabled = !flagship;
   });
+  [els.flagshipTrackNumber, els.flagshipTrackApply, els.flagshipTrackClear].filter(Boolean).forEach((control) => {
+    control.disabled = !flagship;
+  });
   Array.from(els.limit.options).forEach((option) => {
     option.disabled = !pro && Number(option.value) > 90;
   });
@@ -617,6 +733,7 @@ function applyPlanAccess() {
   els.crossYearSearch.classList.toggle("pro-required", !pro);
   updateNotificationUi();
   if (state.analysis) {
+    renderFlagshipMarkerControls();
     renderFlagshipPick();
     renderFlagshipHistory();
     renderModelOutput({ heavy: state.activeTab === "model" });
@@ -2532,6 +2649,36 @@ els.clearHistorySearch.addEventListener("click", () => {
   setStatus("已清除歷史查詢條件。");
 });
 
+if (els.flagshipTrackApply) {
+  els.flagshipTrackApply.addEventListener("click", () => {
+    if (!requireFlagship("歷史標記")) return;
+    const number = normalizeFlagshipTrackNumber(els.flagshipTrackNumber.value);
+    if (!number) {
+      setStatus("請輸入 1 到 39 的追蹤號碼。", true);
+      els.flagshipTrackNumber.focus();
+      return;
+    }
+    state.flagshipTrackNumber = number;
+    saveFlagshipTrackNumber();
+    renderFlagshipMarkerControls();
+    renderHistory();
+    renderFlagshipHistory();
+    setStatus(`已設定追蹤號碼 ${pad(number)}，歷史紀錄會自動標記。`);
+  });
+}
+
+if (els.flagshipTrackClear) {
+  els.flagshipTrackClear.addEventListener("click", () => {
+    if (!requireFlagship("歷史標記")) return;
+    state.flagshipTrackNumber = null;
+    saveFlagshipTrackNumber();
+    renderFlagshipMarkerControls();
+    renderHistory();
+    renderFlagshipHistory();
+    setStatus("已清除追蹤號碼；回補、連莊與連號標記仍會保留。");
+  });
+}
+
 if (els.notifyToggle) {
   els.notifyToggle.addEventListener("click", toggleNotifications);
 }
@@ -2552,6 +2699,7 @@ window.addEventListener("load", () => {
 state.plan = loadPlanPreview();
 state.backtestLimit = loadBacktestLimit();
 state.flagshipLimit = loadFlagshipLimit();
+state.flagshipTrackNumber = loadFlagshipTrackNumber();
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 initHistoryYears();
