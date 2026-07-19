@@ -2061,6 +2061,11 @@ function renderLatestOverview() {
   const current = state.latestByGame[state.game] || state.latest;
   const secondaryGame = otherGame(state.game);
   const secondary = state.latestByGame[secondaryGame];
+  const primaryCard = els.gameName?.closest(".latest-draw-card");
+  const secondaryCard = els.secondaryGameName?.closest(".latest-draw-card");
+
+  if (primaryCard) primaryCard.dataset.game = state.game;
+  if (secondaryCard) secondaryCard.dataset.game = secondaryGame;
 
   if (current) {
     els.gameName.textContent = current.name || gameLabel(state.game);

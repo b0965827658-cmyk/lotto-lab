@@ -399,11 +399,45 @@ select {
 }
 
 .latest-draw-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   min-width: 0;
   padding: 14px;
   border: 1px solid rgba(246, 211, 109, 0.28);
   border-radius: 8px;
-  background: rgba(4, 27, 24, 0.34);
+  background-color: rgba(4, 27, 24, 0.34);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.latest-draw-card[data-game="tw539"] {
+  border-color: rgba(246, 211, 109, 0.48);
+  background-image:
+    linear-gradient(90deg, rgba(8, 55, 43, 0.92), rgba(11, 66, 51, 0.62)),
+    url("/game-bg-tw539.jpg?v=1");
+}
+
+.latest-draw-card[data-game="ca-fantasy5"] {
+  border-color: rgba(112, 189, 236, 0.52);
+  background-image:
+    linear-gradient(90deg, rgba(7, 22, 55, 0.92), rgba(10, 49, 83, 0.62)),
+    url("/game-bg-fantasy5.jpg?v=1");
+}
+
+.latest-draw-card[data-game="tw539"] .label {
+  color: #f4d578;
+}
+
+.latest-draw-card[data-game="ca-fantasy5"] .label {
+  color: #8fd8f1;
+}
+
+.latest-draw-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .latest-draw-card .panel-head {
