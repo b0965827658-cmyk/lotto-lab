@@ -560,7 +560,7 @@ function renderFlagshipHistory() {
           <div class="flagship-history-meta">
             <span>${record.method || "六維綜合推理"}</span>
             <span>模型 ${record.profile || "綜合"}</span>
-            <span>${components || "近期熱度 45% · 長期熱度 20% · 遺漏平衡 15% · 區間分布 20%"}</span>
+            <span>${components || coreWeightSummary()}</span>
           </div>
           <div class="flagship-history-reasoning">
             <span>同一套核心分析：近期熱度、長期熱度、遺漏平衡、區間分布</span>
@@ -973,8 +973,23 @@ function normalizedWeights() {
   };
 }
 
+function coreWeightSummary(analysis = state.analysis) {
+  const components = Array.isArray(analysis?.flagshipComponents) ? analysis.flagshipComponents : [];
+  const text = components
+    .map((item) => {
+      const weight = Number(item.weight ?? item.baseWeight);
+      return item?.label && Number.isFinite(weight) ? `${item.label} ${weight}%` : null;
+    })
+    .filter(Boolean)
+    .join("・");
+  return text || "近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%";
+}
+
 function renderModelControls() {
-  els.modelSummary.textContent = "所有方案共用這套核心分析；回測只用來檢查表現，不再反覆改寫推薦號碼。";
+  const adaptive = state.analysis?.adaptiveRecentPattern;
+  els.modelSummary.textContent = adaptive
+    ? `近期版路會依逐期回測自動微調：${coreWeightSummary()}。新一期資料進來後才重新校準。`
+    : "核心分析會依近期逐期回測微調權重；回測只作驗證，不代表預測或保證中獎。";
 }
 
 function gameLabel(game) {
@@ -1544,9 +1559,9 @@ function renderReferencePick() {
   els.pickBalls.innerHTML = balls(candidate.numbers);
   els.pickMeta.innerHTML = `
     <span>核心分析</span>
-    <span>近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%</span>
+    <span>${coreWeightSummary()}</span>
     <span>最高 ${candidate.backtest.bestHit} 中</span>
-    <span>回測只驗證，不反覆改寫推薦</span>
+    <span>${state.analysis?.adaptiveRecentPattern?.reason || "新一期資料進來後自動校準版路權重"}</span>
   `;
 }
 
@@ -1562,7 +1577,8 @@ function renderFlagshipPick() {
     els.flagshipBalls.innerHTML = "";
     els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 5 碼候選池。</span>";
   } else {
-    const flagshipMethod = state.analysis?.flagshipMethod || "核心分析：近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%";
+    const flagshipMethod = state.analysis?.flagshipMethod || `核心分析：${coreWeightSummary()}`;
+    const adaptiveReason = state.analysis?.adaptiveRecentPattern?.reason || "新一期資料進來後自動校準版路權重";
     els.flagshipBalls.innerHTML = `
       <div class="flagship-star-shape" role="img" aria-label="五芒星摘星五碼">
         ${balls(numbers)}
@@ -1570,7 +1586,7 @@ function renderFlagshipPick() {
     `;
     els.flagshipMeta.innerHTML = `
       <span class="flagship-window-note">${flagshipMethod}</span>
-      <span>旗艦版與主模型共用同一套核心邏輯，避免號碼互相打架</span>
+      <span>${adaptiveReason}</span>
       <span>僅供統計參考，不代表保證中獎</span>
     `;
   }
@@ -1908,26 +1924,33 @@ function renderPatterns(patterns, profiles = [], researchEvidence = null) {
   const tails = (patterns.tails || []).slice(0, 4).map((item) => `${item.tail}尾`).join("、") || "資料不足";
   const intervals = (patterns.intervals || []).slice(0, 3).map((item) => `${item.label} ${item.rate}%`).join("、") || "資料不足";
   const neighbors = (patterns.neighborNumbers || []).slice(0, 6).map(pad).join("、") || "資料不足";
+  const adaptive = patterns.adaptiveRecent || {};
+  const adaptiveWeights = Array.isArray(adaptive.components) && adaptive.components.length
+    ? adaptive.components.map((item) => `${item.label} ${item.weight}%`).join("・")
+    : coreWeightSummary();
+  const adaptiveTitle = adaptive.selectedLabel ? `動態版路：${adaptive.selectedLabel}` : "動態版路：綜合平衡";
+  const adaptiveReason = adaptive.reason || "依近期逐期回測平滑校準，避免追逐單一期的波動。";
   els.patternLines.innerHTML = `
     <div class="pattern-soft">
       <span>近期尾數</span>
       <strong class="pattern-line-main">${tails}</strong>
-      <em class="pattern-note">尾數只作觀察，不會改寫核心推薦。</em>
+      <em class="pattern-note">尾數作輔助觀察，不單獨決定推薦。</em>
     </div>
     <div class="pattern-soft">
       <span>集中區間</span>
       <strong class="pattern-line-main">${intervals}</strong>
-      <em class="pattern-note">區間只用來檢查組合是否過度集中。</em>
+      <em class="pattern-note">區間會作為核心版路的動態參考，避免組合過度集中。</em>
     </div>
     <div>
       <span>上期鄰近觀察</span>
       <strong class="pattern-line-main">${neighbors}</strong>
-      <em class="pattern-note">僅作版路提示，不會單獨把號碼推上推薦。</em>
+      <em class="pattern-note">僅作版路提示，不單獨把號碼推上推薦。</em>
     </div>
     <div class="pattern-wide pattern-soft">
-      <span>目前原則</span>
-      <strong class="pattern-line-main">四項核心訊號＋回測驗證</strong>
-      <em class="pattern-note">所有方案共用同一套計算，讓結果穩定、容易理解。</em>
+      <span>近期自動版路</span>
+      <strong class="pattern-line-main">${adaptiveTitle}</strong>
+      <strong class="pattern-line-main">${adaptiveWeights}</strong>
+      <em class="pattern-note">${adaptiveReason} 新一期資料進來後才重新校準，同一期不反覆改寫。</em>
     </div>
   `;
 }
