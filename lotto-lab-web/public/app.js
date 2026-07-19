@@ -293,7 +293,8 @@ function buildHistoryMarkerIndex(draws = []) {
       drawMarkers.set(number, {
         tracked: state.flagshipTrackNumber === number,
         returning: gap !== null && gap >= 20,
-        streak: previousNumbers.has(number) || consecutiveNumbers.has(number),
+        repeat: previousNumbers.has(number),
+        consecutive: consecutiveNumbers.has(number),
         gap,
       });
       lastSeen.set(number, drawIndex);
@@ -307,7 +308,8 @@ function markerClasses(marker = {}) {
   return [
     marker.tracked ? "marker-tracked" : "",
     marker.returning ? "marker-return" : "",
-    marker.streak ? "marker-streak" : "",
+    marker.repeat ? "marker-repeat" : "",
+    marker.consecutive ? "marker-consecutive" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -317,7 +319,8 @@ function markerTitle(marker = {}) {
   const labels = [];
   if (marker.tracked) labels.push("追蹤號碼");
   if (marker.returning) labels.push(`20 期以上未出後回補${marker.gap !== null ? `（${marker.gap} 期）` : ""}`);
-  if (marker.streak) labels.push("連莊或連號");
+  if (marker.repeat) labels.push("連莊");
+  if (marker.consecutive) labels.push("連號");
   return labels.join("・");
 }
 
