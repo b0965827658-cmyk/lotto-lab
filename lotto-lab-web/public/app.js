@@ -172,6 +172,7 @@ const els = {
   historyToYear: $("#historyToYear"),
   crossYearSearch: $("#crossYearSearch"),
   historyScope: $("#historyScope"),
+  recentScope: $("#recentScope"),
   backtestBadge: $("#backtestBadge"),
   backtestSelect: $("#backtestLimitSelect"),
   backtestInput: $("#backtestLimitInput"),
@@ -470,6 +471,14 @@ function rankRows(items, mode) {
     .join("");
 }
 
+function drawWeekday(value) {
+  const match = String(value || "").match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (!match) return "";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+  const labels = ["日", "一", "二", "三", "四", "五", "六"];
+  return `星期${labels[date.getDay()]}`;
+}
+
 function historyRows(draws) {
   if (!draws.length) {
     return `
@@ -483,7 +492,10 @@ function historyRows(draws) {
     .map(
       (draw) => `
         <tr>
-          <td class="history-date">${draw.date || "-"}</td>
+          <td class="history-date">
+            <strong>${draw.date || "-"}</strong>
+            <span>${drawWeekday(draw.date)}</span>
+          </td>
           <td class="history-period">${draw.period || "-"}</td>
           <td class="number-text">
             <div class="history-balls" aria-label="開獎號碼 ${draw.numbers.map(pad).join("、")}">
@@ -2017,7 +2029,9 @@ function render(payload) {
   state.analysis = analysis;
   state.history = history;
   state.displayHistory = history;
-  els.historyScope.textContent = `目前使用近 ${analysis.drawCount} 期分析；短期可切換近 10、20、36 期。`;
+  const scopeText = `目前使用近 ${analysis.drawCount} 期分析；短期可切換近 10、20、36 期。`;
+  els.historyScope.textContent = scopeText;
+  if (els.recentScope) els.recentScope.textContent = scopeText;
   els.dashboard.hidden = false;
   els.gameName.textContent = latest.name;
   els.period.textContent = `期別 ${latest.period || "-"}`;
@@ -2460,7 +2474,10 @@ async function runCrossYearSearch() {
     els.historyNumber.value = "";
     renderHistory();
     const years = payload.searchedYears?.length ? `${payload.searchedYears[0]}-${payload.searchedYears[payload.searchedYears.length - 1]}` : `${fromYear}-${toYear}`;
-    els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。`;
+    const scopeText = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。`;
+    els.historyScope.textContent = scopeText;
+    if (els.recentScope) els.recentScope.textContent = scopeText;
+    activateTab("recent");
     setStatus(`已完成跨年查詢：${payload.total} 筆。`);
   } catch (error) {
     setStatus(error.name === "AbortError" ? "查詢逾時，請縮小年份範圍或稍後再試。" : error.message, true);
@@ -2647,7 +2664,9 @@ els.clearHistorySearch.addEventListener("click", () => {
   els.historyKeyword.value = "";
   els.historyNumber.value = "";
   state.displayHistory = state.history;
-  els.historyScope.textContent = "目前顯示本次載入的分析期數。";
+  const scopeText = "目前顯示本次載入的分析期數。";
+  els.historyScope.textContent = scopeText;
+  if (els.recentScope) els.recentScope.textContent = scopeText;
   renderHistory();
   setStatus("已清除歷史查詢條件。");
 });
