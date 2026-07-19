@@ -13,7 +13,6 @@ const state = {
   flagshipHistory: [],
   flagshipHistoryLoading: false,
   flagshipHistoryLatestKey: "",
-  flagshipTrackNumber: null,
   coreCandidateSelection: [],
   requestId: 0,
   latestRequestId: 0,
@@ -56,7 +55,6 @@ const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const DAILY_COMPARISON_STORAGE_KEY = "lotto-lab-daily-comparison-v1";
 const BACKTEST_LIMIT_STORAGE_KEY = "lotto-lab-backtest-limit";
 const FLAGSHIP_LIMIT_STORAGE_KEY = "lotto-lab-flagship-limit";
-const FLAGSHIP_TRACK_NUMBER_STORAGE_KEY = "lotto-lab-flagship-track-number";
 const POLL_INTERVAL_MS = 30 * 1000;
 const LATEST_FETCH_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 60000;
@@ -156,10 +154,6 @@ const els = {
   modeSnapshots: $("#modeSnapshotList"),
   flagshipHistoryList: $("#flagshipHistoryList"),
   flagshipHistoryRefresh: $("#flagshipHistoryRefresh"),
-  flagshipTrackNumber: $("#flagshipTrackNumber"),
-  flagshipTrackApply: $("#flagshipTrackApply"),
-  flagshipTrackClear: $("#flagshipTrackClear"),
-  flagshipMarkerStatus: $("#flagshipMarkerStatus"),
   modelInputs: Array.from(document.querySelectorAll("[data-weight]")),
   focusButtons: Array.from(document.querySelectorAll("[data-focus]")),
   modelSummary: $("#modelSummary"),
@@ -240,27 +234,13 @@ function balls(numbers) {
 }
 
 function miniBalls(numbers, winners = []) {
-  const winnerSet = new Set(winners);
+  const winnerSet = new Set(winners.map(Number));
   return numbers
-    .map((n) => `<span class="mini-ball ${winnerSet.has(n) ? "hit" : ""}">${pad(n)}</span>`)
+    .map((n) => {
+      const hit = winnerSet.has(Number(n));
+      return `<span class="mini-ball ${hit ? "hit" : ""}"${hit ? ' title="命中號碼" aria-label="命中號碼"' : ""}>${pad(n)}${hit ? '<b class="hit-mark" aria-hidden="true">✓</b>' : ""}</span>`;
+    })
     .join("");
-}
-
-function normalizeFlagshipTrackNumber(value) {
-  const number = Number(value);
-  return Number.isInteger(number) && number >= 1 && number <= 39 ? number : null;
-}
-
-function loadFlagshipTrackNumber() {
-  return normalizeFlagshipTrackNumber(localStorage.getItem(FLAGSHIP_TRACK_NUMBER_STORAGE_KEY));
-}
-
-function saveFlagshipTrackNumber() {
-  if (state.flagshipTrackNumber) {
-    localStorage.setItem(FLAGSHIP_TRACK_NUMBER_STORAGE_KEY, String(state.flagshipTrackNumber));
-  } else {
-    localStorage.removeItem(FLAGSHIP_TRACK_NUMBER_STORAGE_KEY);
-  }
 }
 
 function compareHistoryDraws(left, right) {
@@ -292,7 +272,6 @@ function buildHistoryMarkerIndex(draws = []) {
     numbers.forEach((number) => {
       const gap = lastSeen.has(number) ? drawIndex - lastSeen.get(number) - 1 : null;
       drawMarkers.set(number, {
-        tracked: state.flagshipTrackNumber === number,
         returning: gap !== null && gap >= 20,
         repeat: previousNumbers.has(number),
         consecutive: consecutiveNumbers.has(number),
@@ -307,7 +286,6 @@ function buildHistoryMarkerIndex(draws = []) {
 
 function markerClasses(marker = {}) {
   return [
-    marker.tracked ? "marker-tracked" : "",
     marker.returning ? "marker-return" : "",
     marker.repeat ? "marker-repeat" : "",
     marker.consecutive ? "marker-consecutive" : "",
@@ -318,7 +296,6 @@ function markerClasses(marker = {}) {
 
 function markerTitle(marker = {}) {
   const labels = [];
-  if (marker.tracked) labels.push("追蹤號碼");
   if (marker.returning) labels.push(`20 期以上未出後回補${marker.gap !== null ? `（${marker.gap} 期）` : ""}`);
   if (marker.repeat) labels.push("連莊");
   if (marker.consecutive) labels.push("連號");
@@ -331,21 +308,13 @@ function markedHistoryBalls(draw, markerIndex = new Map(), winners = []) {
   return (draw.numbers || [])
     .map((number) => {
       const marker = drawMarkers.get(Number(number)) || {};
-      const classes = ["mini-ball", "history-ball", winnerSet.has(number) ? "hit" : "", markerClasses(marker)]
+      const classes = ["mini-ball", "history-ball", winnerSet.has(Number(number)) ? "hit" : "", markerClasses(marker)]
         .filter(Boolean)
         .join(" ");
       const title = markerTitle(marker);
       return `<span class="${classes}"${title ? ` title="${title}"` : ""}>${pad(number)}</span>`;
     })
     .join("");
-}
-
-function renderFlagshipMarkerControls() {
-  if (!els.flagshipTrackNumber || !els.flagshipMarkerStatus) return;
-  els.flagshipTrackNumber.value = state.flagshipTrackNumber ? String(state.flagshipTrackNumber) : "";
-  els.flagshipMarkerStatus.textContent = state.flagshipTrackNumber
-    ? `目前追蹤 ${pad(state.flagshipTrackNumber)}；重新整理後仍會保留。`
-    : "尚未設定追蹤號碼。";
 }
 
 function zonedParts(date, timeZone) {
@@ -531,7 +500,6 @@ function flagshipHistoryNumbers(items = []) {
 
 function renderFlagshipHistory() {
   if (!els.flagshipHistoryList) return;
-  renderFlagshipMarkerControls();
   if (!isFlagshipPlan()) {
     els.flagshipHistoryList.innerHTML = `<div class="empty-state">升級量化旗艦版後可查看歷史推理紀錄。</div>`;
     return;
@@ -581,7 +549,7 @@ function renderFlagshipHistory() {
             <span>同一套核心分析：近期熱度、長期熱度、遺漏平衡、區間分布</span>
             <span>${backtestText}</span>
           </div>
-          ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：<div class="flagship-history-actual-balls">${markedHistoryBalls(actualDraw || { ...record, numbers: record.actualNumbers }, markerIndex, record.actualNumbers)}</div></div>` : ""}
+          ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：<div class="flagship-history-actual-balls">${markedHistoryBalls(actualDraw || { ...record, numbers: record.actualNumbers }, markerIndex)}</div></div>` : ""}
         </article>
       `;
     })
@@ -727,9 +695,6 @@ function applyPlanAccess() {
   [els.flagshipLimitSelect, els.flagshipLimitApply].filter(Boolean).forEach((control) => {
     control.disabled = !flagship;
   });
-  [els.flagshipTrackNumber, els.flagshipTrackApply, els.flagshipTrackClear].filter(Boolean).forEach((control) => {
-    control.disabled = !flagship;
-  });
   Array.from(els.limit.options).forEach((option) => {
     option.disabled = !pro && Number(option.value) > 90;
   });
@@ -748,7 +713,6 @@ function applyPlanAccess() {
   els.crossYearSearch.classList.toggle("pro-required", !pro);
   updateNotificationUi();
   if (state.analysis) {
-    renderFlagshipMarkerControls();
     renderFlagshipPick();
     renderFlagshipHistory();
     renderModelOutput({ heavy: state.activeTab === "model" });
@@ -2671,36 +2635,6 @@ els.clearHistorySearch.addEventListener("click", () => {
   setStatus("已清除歷史查詢條件。");
 });
 
-if (els.flagshipTrackApply) {
-  els.flagshipTrackApply.addEventListener("click", () => {
-    if (!requireFlagship("歷史標記")) return;
-    const number = normalizeFlagshipTrackNumber(els.flagshipTrackNumber.value);
-    if (!number) {
-      setStatus("請輸入 1 到 39 的追蹤號碼。", true);
-      els.flagshipTrackNumber.focus();
-      return;
-    }
-    state.flagshipTrackNumber = number;
-    saveFlagshipTrackNumber();
-    renderFlagshipMarkerControls();
-    renderHistory();
-    renderFlagshipHistory();
-    setStatus(`已設定追蹤號碼 ${pad(number)}，歷史紀錄會自動標記。`);
-  });
-}
-
-if (els.flagshipTrackClear) {
-  els.flagshipTrackClear.addEventListener("click", () => {
-    if (!requireFlagship("歷史標記")) return;
-    state.flagshipTrackNumber = null;
-    saveFlagshipTrackNumber();
-    renderFlagshipMarkerControls();
-    renderHistory();
-    renderFlagshipHistory();
-    setStatus("已清除追蹤號碼；回補、連莊與連號標記仍會保留。");
-  });
-}
-
 if (els.notifyToggle) {
   els.notifyToggle.addEventListener("click", toggleNotifications);
 }
@@ -2721,7 +2655,6 @@ window.addEventListener("load", () => {
 state.plan = loadPlanPreview();
 state.backtestLimit = loadBacktestLimit();
 state.flagshipLimit = loadFlagshipLimit();
-state.flagshipTrackNumber = loadFlagshipTrackNumber();
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 initHistoryYears();

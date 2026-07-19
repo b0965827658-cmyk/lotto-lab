@@ -13,7 +13,7 @@
     <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
     <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
-    <link rel="stylesheet" href="/styles.css?v=65" />
+    <link rel="stylesheet" href="/styles.css?v=66" />
   </head>
   <body>
     <main class="shell">
@@ -331,16 +331,9 @@
             </div>
             <button id="flagshipHistoryRefresh" class="text-button" type="button">重新載入</button>
           </div>
-          <p class="fineprint">每期保存核心五碼與當時的四項推理摘要；下一期開獎後會自動補上命中結果。</p>
-          <div class="flagship-marker-tools" aria-label="旗艦歷史標記設定">
-            <label for="flagshipTrackNumber">追蹤號碼</label>
-            <input id="flagshipTrackNumber" type="number" min="1" max="39" inputmode="numeric" placeholder="例如 06" />
-            <button id="flagshipTrackApply" class="text-button" type="button">套用標記</button>
-            <button id="flagshipTrackClear" class="text-button" type="button">清除</button>
-          </div>
-          <p class="flagship-marker-status" id="flagshipMarkerStatus">尚未設定追蹤號碼。</p>
+          <p class="fineprint">每期保存核心五碼與當時的四項推理摘要；下一期開獎後會自動補上命中結果，命中號碼會以勾號與綠色標記顯示。</p>
           <div class="flagship-marker-legend" aria-label="歷史標記圖例">
-            <span><i class="flagship-marker-swatch marker-tracked"></i>追蹤號碼</span>
+            <span><i class="flagship-marker-swatch marker-hit"></i>命中號碼（勾號）</span>
             <span><i class="flagship-marker-swatch marker-return"></i>20 期以上未出後回補</span>
             <span><i class="flagship-marker-swatch marker-repeat"></i>連莊</span>
             <span><i class="flagship-marker-swatch marker-consecutive"></i>連號</span>
@@ -418,7 +411,6 @@
           </div>
           <p class="fineprint" id="recentScope">目前使用近 90 期分析；短期可切換近 10、20、36 期。</p>
           <div class="history-marker-legend" aria-label="號碼顏色說明">
-            <span><i class="flagship-marker-swatch marker-tracked"></i>自選追蹤號碼</span>
             <span><i class="flagship-marker-swatch marker-return"></i>20 期以上未出後回補</span>
             <span><i class="flagship-marker-swatch marker-repeat"></i>連莊</span>
             <span><i class="flagship-marker-swatch marker-consecutive"></i>連號</span>
@@ -452,6 +444,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=76"></script>
+    <script src="/app.js?v=77"></script>
   </body>
 </html>
