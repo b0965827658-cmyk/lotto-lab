@@ -526,7 +526,8 @@ function renderFlagshipHistory() {
             (draw) => String(draw.period || "") === String(record.actualPeriod || "") || draw.date === record.actualDate,
           )
         : null;
-      const outcome = record.hitCount === null || record.hitCount === undefined ? "待下一期開獎" : `${record.hitCount} 中`;
+      const outcome = record.hitCount === null || record.hitCount === undefined ? "待下一期開出" : `${record.hitCount} 中`;
+      const statusNote = actualAvailable ? "已補上實際開獎與命中結果" : "開獎後自動補上命中結果";
       const backtestText = summary.testedCount
         ? `回測 ${summary.testedCount} 期 · 均中 ${summary.averageHit ?? 0} · 最高 ${summary.bestHit ?? 0} 中`
         : "回測資料累積中";
@@ -537,7 +538,13 @@ function renderFlagshipHistory() {
               <strong>${record.latestDate || "-"}</strong>
               <span>分析期 ${record.latestPeriod || "-"} · 穩定核心邏輯</span>
             </div>
-            <span class="flagship-history-result ${actualAvailable ? "completed" : "pending"}">${outcome}</span>
+          </div>
+          <div class="flagship-history-status ${actualAvailable ? "completed" : "pending"}">
+            <div>
+              <span class="flagship-history-status-label">開獎狀態</span>
+              <strong>${outcome}</strong>
+            </div>
+            <span class="flagship-history-status-note">${statusNote}</span>
           </div>
           <div class="flagship-history-balls">${miniBalls(record.numbers, actualAvailable ? record.actualNumbers : [])}</div>
           <div class="flagship-history-meta">
