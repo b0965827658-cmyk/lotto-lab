@@ -1528,7 +1528,7 @@ RESEARCH_FEATURE_LABELS = {
     "recent": "近期熱度",
     "heat": "長期熱度",
     "gap": "遺漏平衡",
-    "interval": "區間",
+    "interval": "區間分布",
 }
 
 
@@ -2050,7 +2050,148 @@ def score_number(
     return base_score * 0.84 + evidence_score * 0.16
 
 
-CORE_ANALYSIS_METHOD = "核心分析：近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%"
+CORE_FEATURE_ORDER = ("recent", "heat", "gap", "interval")
+CORE_BASE_WEIGHTS = {
+    "recent": 0.45,
+    "heat": 0.20,
+    "gap": 0.15,
+    "interval": 0.20,
+}
+ADAPTIVE_PATTERN_VERSION = "dynamic-v1"
+CORE_ANALYSIS_METHOD = "核心基準：近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%"
+
+
+def normalize_core_weights(weights: dict[str, float] | None = None) -> dict[str, float]:
+    """Keep the adaptive layer bounded and deterministic."""
+    source = weights or CORE_BASE_WEIGHTS
+    values = {
+        key: max(0.0, float(source.get(key, CORE_BASE_WEIGHTS[key])))
+        for key in CORE_FEATURE_ORDER
+    }
+    total = sum(values.values()) or 1.0
+    return {key: values[key] / total for key in CORE_FEATURE_ORDER}
+
+
+def adaptive_core_weights(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    evaluation_limit: int = 36,
+    training_limit: int = 90,
+) -> dict[str, Any]:
+    """Calibrate the four core signals with walk-forward recent evidence.
+
+    Each target draw is scored only from older draws.  The result is gently
+    shrunk toward the explainable baseline so a small lucky streak cannot
+    replace the whole model.
+    """
+    ordered = canonical_analysis_draws(draws)
+    base_weights = normalize_core_weights()
+    target_limit = min(max(0, int(evaluation_limit)), max(0, len(ordered) - 20))
+    samples: dict[str, list[dict[str, float]]] = {key: [] for key in CORE_FEATURE_ORDER}
+
+    for target_index in range(target_limit):
+        target = ordered[target_index]
+        training = ordered[target_index + 1 : target_index + 1 + training_limit]
+        if len(training) < 20:
+            continue
+        components = simple_core_score_components(training, max_number)
+        recency_weight = 0.50 if target_index < 10 else 0.30 if target_index < 20 else 0.20
+        actual = set(target["numbers"])
+        for feature in CORE_FEATURE_ORDER:
+            ranked = sorted(
+                range(1, max_number + 1),
+                key=lambda number: (-components[number].get(feature, 0.0), number),
+            )
+            pick = ranked[: min(pick_count, max_number)]
+            hits = len(actual & set(pick))
+            samples[feature].append(
+                {
+                    "index": float(target_index),
+                    "weight": recency_weight,
+                    "hits": float(hits),
+                    "twoPlus": 1.0 if hits >= 2 else 0.0,
+                }
+            )
+
+    def metric(rows: list[dict[str, float]]) -> tuple[float, float, float]:
+        total_weight = sum(row["weight"] for row in rows)
+        if not rows or not total_weight:
+            return 0.0, 0.0, 0.0
+        average_hit = sum(row["hits"] * row["weight"] for row in rows) / total_weight
+        two_plus_rate = sum(row["twoPlus"] * row["weight"] for row in rows) / total_weight
+        quality = average_hit + two_plus_rate * 0.35
+        return quality, average_hit, two_plus_rate
+
+    quality_rows: dict[str, float] = {}
+    for feature in CORE_FEATURE_ORDER:
+        quality_rows[feature] = metric(samples[feature])[0]
+    quality_reference = sum(quality_rows.values()) / len(CORE_FEATURE_ORDER) if quality_rows else 0.0
+
+    raw_weights: dict[str, float] = {}
+    components: list[dict[str, Any]] = []
+    for feature in CORE_FEATURE_ORDER:
+        rows = samples[feature]
+        quality, average_hit, two_plus_rate = metric(rows)
+        recent_quality = metric([row for row in rows if row["index"] < 10])[0]
+        older_quality = metric([row for row in rows if row["index"] >= 10])[0]
+        if older_quality:
+            stability = max(
+                0.0,
+                1.0 - abs(recent_quality - older_quality) / max(0.65, abs(quality) + 0.65),
+            )
+        else:
+            stability = 0.75
+        sample_shrink = len(rows) / (len(rows) + 18) if rows else 0.0
+        relative_lift = (quality - quality_reference) / max(0.65, abs(quality_reference))
+        multiplier = 1.0 + max(
+            -0.22,
+            min(0.22, relative_lift * 0.55 * sample_shrink * (0.70 + stability * 0.30)),
+        )
+        raw_weights[feature] = base_weights[feature] * multiplier
+        components.append(
+            {
+                "id": feature,
+                "label": RESEARCH_FEATURE_LABELS.get(feature, feature),
+                "baseWeight": round(base_weights[feature] * 100),
+                "multiplier": round(multiplier, 3),
+                "averageHit": round(average_hit, 2),
+                "twoPlusRate": round(two_plus_rate * 100, 1),
+                "testedCount": len(rows),
+                "stability": round(stability * 100, 1),
+            }
+        )
+
+    weights = normalize_core_weights(raw_weights)
+    for item in components:
+        item["weight"] = round(weights[item["id"]] * 100)
+        item["delta"] = item["weight"] - item["baseWeight"]
+    components.sort(key=lambda item: (-item["weight"], item["id"]))
+    tested_count = max((len(rows) for rows in samples.values()), default=0)
+    leader = max(components, key=lambda item: (item["delta"], item["weight"]), default=None)
+    meaningful_change = bool(leader and leader["delta"] >= 2 and tested_count >= 8)
+    selected_label = leader["label"] if meaningful_change and leader else "綜合平衡"
+    weight_text = "・".join(f"{item['label']} {item['weight']}%" for item in components)
+    if meaningful_change and leader:
+        reason = (
+            f"{leader['label']}在近 {tested_count} 次逐期回測的平均命中 "
+            f"{leader['averageHit']:.2f}、2 中以上 {leader['twoPlusRate']:.1f}%，本期提高權重。"
+        )
+    else:
+        reason = "各訊號近期表現差距不大，維持平衡權重，避免追逐短期波動。"
+    method = f"近期動態版路：{selected_label}；{weight_text}。"
+    return {
+        "version": ADAPTIVE_PATTERN_VERSION,
+        "selected": leader["id"] if meaningful_change and leader else "balanced",
+        "selectedLabel": selected_label,
+        "weights": weights,
+        "components": components,
+        "testedCount": tested_count,
+        "evaluationLimit": target_limit,
+        "method": method,
+        "reason": reason,
+        "note": "每逢新一期資料進來才重新校準；同一期不反覆改寫推薦。回測只作權重參考，不代表預測或保證中獎。",
+    }
 
 
 def simple_core_score_components(
@@ -2113,10 +2254,11 @@ def simple_core_recommendation(
     draws: list[dict[str, Any]],
     max_number: int = 39,
     pick_count: int = 5,
+    core_weights: dict[str, float] | None = None,
 ) -> list[int]:
     """Return one deterministic recommendation from the four core signals."""
     components = simple_core_score_components(draws, max_number)
-    weights = {"recent": 0.45, "heat": 0.20, "gap": 0.15, "interval": 0.20}
+    weights = normalize_core_weights(core_weights)
     scores = {
         number: sum(values[key] * weight for key, weight in weights.items())
         for number, values in components.items()
@@ -2144,6 +2286,7 @@ def simple_core_candidate_pool(
     max_number: int = 39,
     pick_count: int = 5,
     candidate_count: int = 15,
+    core_weights: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Return a deterministic ranked pool built from the same core signals.
 
@@ -2152,14 +2295,21 @@ def simple_core_candidate_pool(
     Scores are ranking indexes, not winning probabilities.
     """
     components = simple_core_score_components(draws, max_number)
-    weights = {"recent": 0.45, "heat": 0.20, "gap": 0.15, "interval": 0.20}
+    weights = normalize_core_weights(core_weights)
     scores = {
         number: sum(values[key] * weight for key, weight in weights.items())
         for number, values in components.items()
     }
     ranked = sorted(scores, key=lambda number: (-scores[number], number))
     target = max(1, min(int(candidate_count), max_number))
-    core_pick = set(simple_core_recommendation(draws, max_number=max_number, pick_count=pick_count))
+    core_pick = set(
+        simple_core_recommendation(
+            draws,
+            max_number=max_number,
+            pick_count=pick_count,
+            core_weights=weights,
+        )
+    )
     selected = set(core_pick)
     for number in ranked:
         if len(selected) >= target:
@@ -2185,8 +2335,14 @@ def model_recommendation(
     profile_name: str = "balanced",
     candidate_budget: int | None = None,
     evidence: dict[str, float] | None = None,
+    core_weights: dict[str, float] | None = None,
 ) -> list[int]:
-    return simple_core_recommendation(draws, max_number=max_number, pick_count=pick_count)
+    return simple_core_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        core_weights=core_weights,
+    )
 
 
 def flagship_recommendation(
@@ -2196,9 +2352,15 @@ def flagship_recommendation(
     profile_name: str = "balanced",
     evidence: dict[str, float] | None = None,
     backtest: dict[str, Any] | None = None,
+    core_weights: dict[str, float] | None = None,
 ) -> list[int]:
     """Compatibility wrapper: flagship uses the same explainable core pick."""
-    return simple_core_recommendation(draws, max_number=max_number, pick_count=pick_count)
+    return simple_core_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        core_weights=core_weights,
+    )
 
     # Kept below for old snapshots only; new requests never run this legacy
     # six-signal branch.
@@ -2405,6 +2567,7 @@ def short_term_consensus(
     max_number: int = 39,
     pick_count: int = 5,
     profile_name: str = "balanced",
+    core_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Show the same core model over the three short windows."""
     ordered = list(draws)
@@ -2416,7 +2579,7 @@ def short_term_consensus(
         if len(rows) < 5:
             continue
         components = simple_core_score_components(rows, max_number)
-        weights_for_number = {"recent": 0.45, "heat": 0.20, "gap": 0.15, "interval": 0.20}
+        weights_for_number = normalize_core_weights(core_weights)
         scores = {
             number: sum(values[key] * weight for key, weight in weights_for_number.items())
             for number, values in components.items()
@@ -2428,7 +2591,12 @@ def short_term_consensus(
                 "window": window,
                 "drawCount": len(rows),
                 "leaders": leaders,
-                "recommendation": simple_core_recommendation(rows, max_number=max_number, pick_count=pick_count),
+                "recommendation": simple_core_recommendation(
+                    rows,
+                    max_number=max_number,
+                    pick_count=pick_count,
+                    core_weights=weights_for_number,
+                ),
             }
         )
     if not views:
@@ -2764,6 +2932,13 @@ def analyze(
         pick_count=pick_count,
         backtest_limit=backtest_limit,
     )
+    adaptive_pattern = adaptive_core_weights(
+        reference_draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        evaluation_limit=min(36, max(0, len(reference_draws) - 20)),
+    )
+    core_weights = adaptive_pattern["weights"]
     research_evidence = research_feature_evidence(reference_draws, max_number=max_number)
     evidence_map = {
         item["id"]: item["multiplier"] for item in research_evidence.get("features", [])
@@ -2775,24 +2950,33 @@ def analyze(
         seed_label=seed_label,
         profile_name=selected_profile,
         evidence=evidence_map,
+        core_weights=core_weights,
     )
     # All published tiers use the same deterministic core pick.  Pro adds
     # validation and history; the flagship tier adds presentation and saved
     # reasoning, rather than a second competing algorithm.
-    flagship_numbers = simple_core_recommendation(draws, max_number=max_number, pick_count=5)
+    flagship_numbers = simple_core_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=5,
+        core_weights=core_weights,
+    )
     adaptive_numbers = list(flagship_numbers)
     core_candidate_pool = simple_core_candidate_pool(
         draws,
         max_number=max_number,
         pick_count=pick_count,
         candidate_count=15,
+        core_weights=core_weights,
     )
     patterns = pattern_summary(draws, max_number, selected_profile)
+    patterns["adaptiveRecent"] = adaptive_pattern
     short_consensus = short_term_consensus(
         reference_draws,
         max_number=max_number,
         pick_count=pick_count,
         profile_name=selected_profile,
+        core_weights=core_weights,
     )
     tail_analysis = tail_analysis_summary(draws, max_number)
 
@@ -2807,21 +2991,17 @@ def analyze(
         "coreCandidateMethod": "同一套核心分析排序；15 碼是會員自選候選池，不代表 15 碼同時推薦或保證中獎。",
         "flagshipRecommendation": flagship_numbers,
         "adaptiveRecommendation": adaptive_numbers,
-        "adaptiveMethod": "與旗艦共用同一套核心分析，避免多套邏輯互相干擾。",
-        "flagshipMethod": CORE_ANALYSIS_METHOD,
-        "flagshipComponents": [
-            {"id": "recent", "label": "近期熱度", "weight": 45},
-            {"id": "heat", "label": "長期熱度", "weight": 20},
-            {"id": "gap", "label": "遺漏平衡", "weight": 15},
-            {"id": "interval", "label": "區間分布", "weight": 20},
-        ],
+        "adaptiveMethod": adaptive_pattern["method"],
+        "adaptiveRecentPattern": adaptive_pattern,
+        "flagshipMethod": adaptive_pattern["method"],
+        "flagshipComponents": adaptive_pattern["components"],
         "backtest": backtest,
         "modelProfiles": model_results,
         "patterns": patterns,
         "tailAnalysis": tail_analysis,
         "researchEvidence": research_evidence,
         "shortTermConsensus": short_consensus,
-        "note": f"主模型只看四個容易理解的訊號：近期熱度、長期熱度、遺漏平衡與區間分布；回測只用來檢查穩定度，不直接改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。",
+        "note": f"主模型保留四個容易理解的訊號：近期熱度、長期熱度、遺漏平衡與區間分布；會依近 {adaptive_pattern['testedCount']} 次逐期回測平滑校準權重，新一期資料進來後才重新計算，同一期不反覆改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。",
     }
 
 
@@ -2863,6 +3043,13 @@ def analyze_with_stable_backtest(
     evidence_map = {
         item["id"]: item["multiplier"] for item in research_evidence.get("features", [])
     }
+    adaptive_pattern = adaptive_core_weights(
+        fallback_draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        evaluation_limit=min(36, max(0, len(fallback_draws) - 20)),
+    )
+    core_weights = adaptive_pattern["weights"]
     analysis["backtest"] = fallback_backtest
     analysis["modelProfiles"] = model_results
     analysis["researchEvidence"] = research_evidence
@@ -2874,36 +3061,45 @@ def analyze_with_stable_backtest(
         seed_label=stable_analysis_seed(fallback_draws, f"fallback-window-{len(draws)}-backtest-{requested_limit}"),
         profile_name=selected_profile,
         evidence=evidence_map,
+        core_weights=core_weights,
     )
-    analysis["flagshipRecommendation"] = simple_core_recommendation(display_draws, max_number=max_number, pick_count=5)
+    analysis["flagshipRecommendation"] = simple_core_recommendation(
+        display_draws,
+        max_number=max_number,
+        pick_count=5,
+        core_weights=core_weights,
+    )
     analysis["coreCandidatePool"] = simple_core_candidate_pool(
         display_draws,
         max_number=max_number,
         pick_count=pick_count,
         candidate_count=15,
+        core_weights=core_weights,
     )
     analysis["coreCandidateMethod"] = "同一套核心分析排序；15 碼是會員自選候選池，不代表 15 碼同時推薦或保證中獎。"
     analysis["adaptiveRecommendation"] = list(analysis["flagshipRecommendation"])
-    analysis["adaptiveMethod"] = "與旗艦共用同一套核心分析，避免多套邏輯互相干擾。"
-    analysis["flagshipMethod"] = CORE_ANALYSIS_METHOD
-    analysis["flagshipComponents"] = [
-        {"id": "recent", "label": "近期熱度", "weight": 45},
-        {"id": "heat", "label": "長期熱度", "weight": 20},
-        {"id": "gap", "label": "遺漏平衡", "weight": 15},
-        {"id": "interval", "label": "區間分布", "weight": 20},
-    ]
+    analysis["adaptiveMethod"] = adaptive_pattern["method"]
+    analysis["adaptiveRecentPattern"] = adaptive_pattern
+    analysis["flagshipMethod"] = adaptive_pattern["method"]
+    analysis["flagshipComponents"] = adaptive_pattern["components"]
     analysis["shortTermConsensus"] = short_term_consensus(
         display_draws,
         max_number=max_number,
         pick_count=pick_count,
         profile_name=selected_profile,
+        core_weights=core_weights,
     )
+    analysis["patterns"]["adaptiveRecent"] = adaptive_pattern
     analysis["patterns"]["selectedProfile"] = selected_profile
     analysis["patterns"]["selectedLabel"] = MODEL_PROFILES.get(selected_profile, MODEL_PROFILES["balanced"])["label"]
     analysis["backtest"]["method"] = (
         f"目前選擇近 {len(draws)} 期，短期樣本不足以單獨回測；"
         f"模型回測已自動改用近 {len(fallback_draws)} 期穩定樣本。"
         f"{fallback_backtest.get('method', '')}"
+    )
+    analysis["note"] = (
+        f"主模型保留四個容易理解的訊號，會依近 {adaptive_pattern['testedCount']} 次逐期回測平滑校準權重；"
+        "新一期資料進來後才重新計算，同一期不反覆改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。"
     )
     return analysis
 
@@ -2997,10 +3193,10 @@ def build_payload(
         history = canonical_analysis_draws([latest, *taiwan_history(fetch_limit)])
         persist_draw_history([latest, *history])
         draws = history[:limit]
-        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}"
+        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}-{ADAPTIVE_PATTERN_VERSION}"
         analysis = dict(cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit)))
         flagship_draws = history[:requested_flagship_limit]
-        flagship_key = f"{cache_key_for_draws('flagship-analysis', game, requested_flagship_limit, history)}-backtest-{BACKTEST_DEFAULT_LIMIT}"
+        flagship_key = f"{cache_key_for_draws('flagship-analysis', game, requested_flagship_limit, history)}-backtest-{BACKTEST_DEFAULT_LIMIT}-{ADAPTIVE_PATTERN_VERSION}"
         flagship_analysis = analysis if (
             requested_flagship_limit == limit and requested_backtest_limit == BACKTEST_DEFAULT_LIMIT
         ) else cached(
@@ -3025,11 +3221,11 @@ def build_payload(
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         persist_draw_history(history)
         draws = history[:limit]
-        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}"
+        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}-{ADAPTIVE_PATTERN_VERSION}"
         latest = history[0]
         analysis = dict(cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit)))
         flagship_draws = history[:requested_flagship_limit]
-        flagship_key = f"{cache_key_for_draws('flagship-analysis', game, requested_flagship_limit, history)}-backtest-{BACKTEST_DEFAULT_LIMIT}"
+        flagship_key = f"{cache_key_for_draws('flagship-analysis', game, requested_flagship_limit, history)}-backtest-{BACKTEST_DEFAULT_LIMIT}-{ADAPTIVE_PATTERN_VERSION}"
         flagship_analysis = analysis if (
             requested_flagship_limit == limit and requested_backtest_limit == BACKTEST_DEFAULT_LIMIT
         ) else cached(
