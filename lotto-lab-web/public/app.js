@@ -7,6 +7,10 @@ const state = {
   subscription: null,
   analysisFocus: "balanced",
   latest: null,
+  latestByGame: {
+    tw539: null,
+    "ca-fantasy5": null,
+  },
   analysis: null,
   history: [],
   displayHistory: [],
@@ -125,6 +129,11 @@ const els = {
   period: $("#period"),
   date: $("#date"),
   latestBalls: $("#latestBalls"),
+  secondaryGameName: $("#secondaryGameName"),
+  secondaryPeriod: $("#secondaryPeriod"),
+  secondaryDate: $("#secondaryDate"),
+  secondaryLatestBalls: $("#secondaryLatestBalls"),
+  secondaryLatestStatus: $("#secondaryLatestStatus"),
   countdownTime: $("#countdownTime"),
   countdownBadge: $("#countdownBadge"),
   countdownGame: $("#countdownGame"),
@@ -661,13 +670,19 @@ function organizeAnalysisPanels() {
     latestPanel.querySelector(".flagship-panel"),
     latestPanel.querySelector(".backtest-panel"),
     latestPanel.querySelector(".pattern-panel"),
-    latestPanel.querySelector(".saved-panel"),
   ]);
-  movePanels(recentPanel, [
+  const recentPanels = [
     panelById("hotList"),
     panelById("coldList"),
     panelById("overdueList"),
-  ]);
+  ].filter(
+    (panel, index, list) => panel && panel.closest("[data-tab-panel]") === latestPanel && list.indexOf(panel) === index,
+  );
+  if (recentPanels.length) {
+    const fragment = document.createDocumentFragment();
+    recentPanels.forEach((panel) => fragment.appendChild(panel));
+    recentPanel.appendChild(fragment);
+  }
 }
 
 function loadPlanPreview() {
@@ -2038,9 +2053,46 @@ function renderSavedPicks() {
   });
 }
 
+function otherGame(game = state.game) {
+  return game === "tw539" ? "ca-fantasy5" : "tw539";
+}
+
+function renderLatestOverview() {
+  const current = state.latestByGame[state.game] || state.latest;
+  const secondaryGame = otherGame(state.game);
+  const secondary = state.latestByGame[secondaryGame];
+
+  if (current) {
+    els.gameName.textContent = current.name || gameLabel(state.game);
+    els.period.textContent = `期別 ${current.period || "-"}`;
+    els.date.textContent = `日期 ${current.date || "-"}`;
+    els.latestBalls.innerHTML = balls(current.numbers || []);
+  } else {
+    els.gameName.textContent = gameLabel(state.game);
+    els.period.textContent = "期別 -";
+    els.date.textContent = "日期 -";
+    els.latestBalls.innerHTML = '<span class="latest-placeholder">同步中...</span>';
+  }
+
+  if (!els.secondaryGameName) return;
+  els.secondaryGameName.textContent = gameLabel(secondaryGame);
+  if (secondary) {
+    els.secondaryPeriod.textContent = `期別 ${secondary.period || "-"}`;
+    els.secondaryDate.textContent = `日期 ${secondary.date || "-"}`;
+    els.secondaryLatestBalls.innerHTML = balls(secondary.numbers || []);
+    els.secondaryLatestStatus.textContent = "已同步最新資料";
+  } else {
+    els.secondaryPeriod.textContent = "期別 -";
+    els.secondaryDate.textContent = "日期 -";
+    els.secondaryLatestBalls.innerHTML = '<span class="latest-placeholder">同步中...</span>';
+    els.secondaryLatestStatus.textContent = "正在同步另一彩種";
+  }
+}
+
 function render(payload) {
   const { latest, history, analysis, updatedAt } = payload;
   state.latest = latest;
+  state.latestByGame[state.game] = latest;
   markDailyComparison(latest);
   state.analysis = analysis;
   state.history = history;
@@ -2049,10 +2101,7 @@ function render(payload) {
   els.historyScope.textContent = scopeText;
   if (els.recentScope) els.recentScope.textContent = scopeText;
   els.dashboard.hidden = false;
-  els.gameName.textContent = latest.name;
-  els.period.textContent = `期別 ${latest.period || "-"}`;
-  els.date.textContent = `日期 ${latest.date || "-"}`;
-  els.latestBalls.innerHTML = balls(latest.numbers);
+  renderLatestOverview();
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles, analysis.researchEvidence);
@@ -2067,16 +2116,16 @@ function render(payload) {
   if (state.activeTab === "model" && isFlagshipPlan()) loadFlagshipHistory({ silent: true });
   renderModelOutput({ heavy: state.activeTab === "model" });
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
+  refreshOtherLatest({ silent: true });
 }
 
 function renderLatestCard(latest) {
   if (!latest) return;
   state.latest = latest;
+  state.latestByGame[state.game] = latest;
   els.dashboard.hidden = false;
-  els.gameName.textContent = latest.name || gameLabel(state.game);
-  els.period.textContent = `期別 ${latest.period || "-"}`;
-  els.date.textContent = `日期 ${latest.date || "-"}`;
-  els.latestBalls.innerHTML = balls(latest.numbers || []);
+  renderLatestOverview();
+  refreshOtherLatest({ silent: true });
 }
 
 function renderPlans(subscription) {
@@ -2426,7 +2475,10 @@ async function refreshLatest(options = {}) {
     const nextLatest = payload.latest;
     const previousKey = readLastSeenDraw()[state.game] || "";
     const changed = drawKey(nextLatest) !== drawKey(state.latest);
-    if (!changed) return;
+    if (!changed) {
+      refreshOtherLatest({ silent: true });
+      return;
+    }
 
     renderLatestCard(nextLatest);
     await notifyIfLatestChanged(nextLatest, previousKey).catch(() => {});
@@ -2439,6 +2491,23 @@ async function refreshLatest(options = {}) {
     }
   } finally {
     state.latestRefreshInFlight = false;
+  }
+}
+
+async function refreshOtherLatest(options = {}) {
+  const requestedGame = otherGame(state.game);
+  try {
+    const payload = await fetchJsonWithTimeout(
+      `/api/latest?game=${requestedGame}&t=${Date.now()}`,
+      { timeoutMs: LATEST_FETCH_TIMEOUT_MS },
+    );
+    if (!payload.ok || !payload.latest) return;
+    state.latestByGame[requestedGame] = payload.latest;
+    renderLatestOverview();
+  } catch (error) {
+    if (!options.silent) {
+      setStatus(error.name === "AbortError" ? "另一彩種最新資料讀取逾時。" : "另一彩種最新資料暫時無法讀取。", true);
+    }
   }
 }
 
@@ -2517,6 +2586,8 @@ document.querySelectorAll(".segment").forEach((button) => {
     document.querySelectorAll(".segment").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
     state.game = button.dataset.game;
+    state.latest = state.latestByGame[state.game] || null;
+    renderLatestOverview();
     renderCountdown();
     load();
   });
