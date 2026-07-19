@@ -13,23 +13,15 @@
     <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
     <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
-    <link rel="stylesheet" href="/styles.css?v=69" />
+    <link rel="stylesheet" href="/styles.css?v=70" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
-        <div class="topbar-copy">
-          <div class="brand-lockup">
-            <img class="brand-logo" src="/logo-sniper-star-192.png?v=45" alt="" width="64" height="64" />
-            <div class="brand-copy">
-              <div class="brand-line">
-                <p class="eyebrow">摘星狙擊手</p>
-                <span class="target-badge"><span class="target-dot"></span>39 TARGET</span>
-              </div>
-              <h1>開獎號碼與統計選號</h1>
-            </div>
-          </div>
-          <p class="hero-subtitle"><span class="hero-rule"></span>鎖定開獎焦點，讓每一組參考號碼都有依據</p>
+        <div class="mini-brand">
+          <img class="brand-logo" src="/logo-sniper-star-192.png?v=47" alt="" width="44" height="44" />
+          <strong>摘星狙擊手</strong>
+          <span class="target-badge"><span class="target-dot"></span>39 TARGET</span>
         </div>
         <button id="refreshBtn" class="icon-button" title="重新整理" aria-label="重新整理">↻</button>
       </header>
@@ -38,25 +30,6 @@
         <div class="segmented" role="tablist" aria-label="彩種">
           <button class="segment active" data-game="tw539">今彩 539</button>
           <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
-        </div>
-        <label class="select-wrap">
-          分析資料（主模型採核心分析）
-          <select id="limitSelect">
-            <option value="10">近 10 期</option>
-            <option value="20">近 20 期</option>
-            <option value="36">近 36 期</option>
-            <option value="60">60 期</option>
-            <option value="90" selected>90 期</option>
-            <option value="120">120 期</option>
-            <option value="180">180 期</option>
-            <option value="365">365 期</option>
-          </select>
-        </label>
-        <div class="notify-quick">
-          <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
-          <span id="notifyBadge" class="count-pill">未啟用</span>
-          <button id="notifyTestBtn" class="text-button notify-test" type="button" hidden>測試</button>
-          <p class="fineprint" id="notifyText">開啟後，有新一期開獎時可收到通知。</p>
         </div>
       </section>
 
@@ -73,17 +46,35 @@
 
         <div class="tab-panel active" data-tab-panel="latest">
         <article class="panel latest-panel">
-          <div class="panel-head">
-            <div>
-              <p class="label">最新一期</p>
-              <h2 id="gameName">-</h2>
-            </div>
+          <div class="latest-draw-grid">
+            <section class="latest-draw-card">
+              <div class="panel-head compact">
+                <div>
+                  <p class="label">最新一期</p>
+                  <h2 id="gameName">-</h2>
+                </div>
+              </div>
+              <div class="meta">
+                <span id="period">期別 -</span>
+                <span id="date">日期 -</span>
+              </div>
+              <div class="balls" id="latestBalls"></div>
+            </section>
+            <section class="latest-draw-card latest-secondary-card">
+              <div class="panel-head compact">
+                <div>
+                  <p class="label">另一彩種最新一期</p>
+                  <h2 id="secondaryGameName">-</h2>
+                </div>
+              </div>
+              <div class="meta">
+                <span id="secondaryPeriod">期別 -</span>
+                <span id="secondaryDate">日期 -</span>
+              </div>
+              <div class="balls" id="secondaryLatestBalls"></div>
+              <p class="latest-sync-note" id="secondaryLatestStatus">同步中...</p>
+            </section>
           </div>
-          <div class="meta">
-            <span id="period">期別 -</span>
-            <span id="date">日期 -</span>
-          </div>
-          <div class="balls" id="latestBalls"></div>
         </article>
 
         <article class="panel countdown-panel">
@@ -241,6 +232,14 @@
             <p>開獎號碼與期別會盡量以官方資料及公開來源校對；若資料來源延遲、改版或異常，仍以台灣彩券與 California Lottery 官方公告為準。</p>
             <p>使用者應自行判斷投注風險，理性投注，避免超出可負擔範圍。本服務不代售彩券，也不處理兌獎、投注或獎金相關事務。</p>
           </div>
+          <div class="disclaimer-notify">
+            <div class="notify-quick">
+              <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
+              <span id="notifyBadge" class="count-pill">未啟用</span>
+              <button id="notifyTestBtn" class="text-button notify-test" type="button" hidden>測試</button>
+              <p class="fineprint" id="notifyText">開啟後，有新一期開獎時可收到通知。</p>
+            </div>
+          </div>
         </article>
         </div>
 
@@ -252,6 +251,22 @@
               <h2>調整偏好</h2>
             </div>
             <button id="resetModelBtn" class="text-button" hidden>重設</button>
+          </div>
+          <div class="model-window-control">
+            <label class="select-wrap" for="limitSelect">
+              <span>分析資料期數</span>
+              <select id="limitSelect">
+                <option value="10">近 10 期</option>
+                <option value="20">近 20 期</option>
+                <option value="36">近 36 期</option>
+                <option value="60">60 期</option>
+                <option value="90" selected>90 期</option>
+                <option value="120">120 期</option>
+                <option value="180">180 期</option>
+                <option value="365">365 期</option>
+              </select>
+            </label>
+            <span class="model-window-note">模型、近期號碼與參考統計共用此資料範圍</span>
           </div>
           <div class="core-logic-summary" aria-label="核心分析邏輯">
             <div class="core-logic-item">
@@ -444,6 +459,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=81"></script>
+    <script src="/app.js?v=82"></script>
   </body>
 </html>
