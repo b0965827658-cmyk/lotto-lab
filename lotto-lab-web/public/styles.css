@@ -1525,9 +1525,64 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 
 .saved-form {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr)) auto;
-  gap: 8px;
+  grid-template-columns: 1fr;
+  gap: 10px;
   margin: 14px 0;
+}
+
+.saved-number-picker {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(30px, 1fr));
+  gap: 8px;
+}
+
+.saved-number-ball {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #f1f6f2;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: clamp(12px, 2vw, 15px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  line-height: 1;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.saved-number-ball:hover,
+.saved-number-ball:focus-visible {
+  border-color: var(--green);
+  color: var(--green);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.saved-number-ball.is-selected {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+  box-shadow: inset 0 -5px 8px rgba(0, 0, 0, 0.14);
+}
+
+.saved-picker-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.saved-selection-meta {
+  min-width: 0;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.4;
 }
 
 .number-input {
@@ -2648,7 +2703,7 @@ th {
   }
 
   .saved-form {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
   .saved-form .save-button {

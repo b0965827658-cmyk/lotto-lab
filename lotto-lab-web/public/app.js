@@ -5,6 +5,7 @@ const state = {
   flagshipLimit: 120,
   plan: "free",
   subscription: null,
+  savedSelection: [],
   analysisFocus: "balanced",
   latest: null,
   latestByGame: {
@@ -156,7 +157,9 @@ const els = {
   drawCount: $("#drawCount"),
   plans: $("#planGrid"),
   savedForm: $("#savedForm"),
-  savedInputs: Array.from(document.querySelectorAll(".number-input")),
+  savedPicker: $("#savedNumberPicker"),
+  savedSelectionMeta: $("#savedSelectionMeta"),
+  clearSavedNumbers: $("#clearSavedNumbers"),
   savedList: $("#savedList"),
   usePick: $("#usePickBtn"),
   generate: $("#generateBtn"),
@@ -784,7 +787,11 @@ function loadSavedPicks() {
 }
 
 function saveSavedPicks(picks) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(picks));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(picks));
+  } catch {
+    setStatus("號碼已暫存於目前頁面，但瀏覽器拒絕長期儲存。", true);
+  }
 }
 
 function loadModelSnapshots() {
@@ -932,7 +939,22 @@ async function fetchJsonWithTimeout(url, options = {}) {
         ...(options.headers || {}),
       },
     });
-    return await response.json();
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (!response.ok) {
+      const error = new Error(
+        payload?.error || (response.status === 429 ? "請求太頻繁，請稍後再試。" : `伺服器回應 ${response.status}`),
+      );
+      error.status = response.status;
+      error.retryAfter = response.headers.get("Retry-After");
+      throw error;
+    }
+    if (!payload || typeof payload !== "object") throw new Error("伺服器回傳格式不正確。");
+    return payload;
   } finally {
     window.clearTimeout(timer);
   }
@@ -997,25 +1019,36 @@ function gameLabel(game) {
 }
 
 function parseSavedInputs() {
-  const values = els.savedInputs.map((input) => input.value.trim()).filter(Boolean);
-  if (values.length < 5 || values.length > 8) {
-    throw new Error("請輸入 5 到 8 個號碼。");
-  }
-  const numbers = values.map((value) => Number(value));
-  if (numbers.some((n) => !Number.isInteger(n) || n < 1 || n > 39)) {
-    throw new Error("號碼請輸入 1 到 39。");
-  }
-  const unique = new Set(numbers);
-  if (unique.size !== numbers.length) {
-    throw new Error("輸入的號碼不能重複。");
-  }
-  return [...unique].sort((a, b) => a - b);
+  const numbers = [...new Set(state.savedSelection.map(Number))]
+    .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39)
+    .sort((left, right) => left - right);
+  if (!numbers.length) throw new Error("請先點選至少 1 顆號碼球。");
+  return numbers;
 }
 
 function fillSavedInputs(numbers) {
-  els.savedInputs.forEach((input, index) => {
-    input.value = numbers[index] ?? "";
-  });
+  state.savedSelection = [...new Set((numbers || []).map(Number))]
+    .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39)
+    .sort((left, right) => left - right)
+    .slice(0, 39);
+  renderSavedNumberPicker();
+}
+
+function renderSavedNumberPicker() {
+  if (!els.savedPicker) return;
+  const selected = new Set(state.savedSelection);
+  els.savedPicker.innerHTML = Array.from({ length: 39 }, (_, index) => index + 1)
+    .map((number) => {
+      const active = selected.has(number);
+      return `<button class="saved-number-ball${active ? " is-selected" : ""}" type="button" data-saved-number="${number}" aria-pressed="${active}" aria-label="${pad(number)}號">${pad(number)}</button>`;
+    })
+    .join("");
+  if (els.savedSelectionMeta) {
+    els.savedSelectionMeta.textContent = state.savedSelection.length
+      ? `已選 ${state.savedSelection.length} 顆：${state.savedSelection.map(pad).join("、")}`
+      : "已選 0 顆，請點選號碼球";
+  }
+  if (els.clearSavedNumbers) els.clearSavedNumbers.disabled = state.savedSelection.length === 0;
 }
 
 function matchCount(numbers, winners) {
@@ -1636,7 +1669,13 @@ function renderCoreCandidatePool() {
 }
 
 function savePick(numbers) {
-  const normalized = [...numbers].sort((a, b) => a - b);
+  const normalized = [...new Set((numbers || []).map(Number))]
+    .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39)
+    .sort((a, b) => a - b);
+  if (!normalized.length || normalized.length > 39) {
+    setStatus("自選號碼請選 1 到 39 顆。", true);
+    return false;
+  }
   const picks = loadSavedPicks();
   const duplicate = picks.some((pick) => pick.game === state.game && pick.numbers.join(",") === normalized.join(","));
   if (duplicate) {
@@ -2040,7 +2079,7 @@ function renderSavedPicks() {
         <div class="saved-item">
           <div>
             <div class="saved-balls">${miniBalls(pick.numbers, latestNumbers)}</div>
-            <p class="saved-meta">${gameLabel(pick.game)} · ${savedAt} · 回測 ${backtest.testedCount} 期${comparisonReady ? "" : " · 等待今日開獎"}</p>
+            <p class="saved-meta">${gameLabel(pick.game)} · ${savedAt} · ${pick.numbers.length} 顆${comparisonReady ? "" : " · 等待今日開獎"}</p>
             <div class="score-card">
               <div class="score-main">
                 <strong>${score.total}</strong>
@@ -2270,12 +2309,12 @@ async function syncPushSubscription() {
 }
 
 async function postSubscription(action, subscription) {
-  const response = await fetch("/api/push-subscription", {
+  const payload = await fetchJsonWithTimeout("/api/push-subscription", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, subscription, game: state.game, savedPicks: notificationSavedPicks() }),
+    timeoutMs: 15000,
   });
-  const payload = await response.json();
   if (!payload.ok) throw new Error(payload.error || "通知訂閱失敗");
   state.notifications.subscriberCount = payload.subscriberCount || state.notifications.subscriberCount || 0;
   return payload;
@@ -2711,6 +2750,22 @@ els.savedForm.addEventListener("submit", (event) => {
   }
 });
 
+if (els.savedPicker) {
+  els.savedPicker.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-saved-number]");
+    if (!button) return;
+    const number = Number(button.dataset.savedNumber);
+    state.savedSelection = state.savedSelection.includes(number)
+      ? state.savedSelection.filter((item) => item !== number)
+      : [...state.savedSelection, number].sort((left, right) => left - right);
+    renderSavedNumberPicker();
+  });
+}
+
+if (els.clearSavedNumbers) {
+  els.clearSavedNumbers.addEventListener("click", () => fillSavedInputs([]));
+}
+
 els.usePick.addEventListener("click", () => {
   const numbers = currentReferenceNumbers();
   if (numbers.length !== 5) {
@@ -2814,6 +2869,7 @@ initHistoryYears();
 syncBacktestControls();
 syncFlagshipControls();
 renderModelControls();
+renderSavedNumberPicker();
 applyPlanAccess();
 updateNotificationUi();
 startCountdown();
