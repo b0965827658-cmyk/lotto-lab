@@ -1532,8 +1532,9 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 
 .saved-number-picker {
   display: grid;
-  grid-template-columns: repeat(8, minmax(30px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(13, minmax(0, 1fr));
+  gap: 7px 5px;
+  width: 100%;
 }
 
 .saved-number-ball {
@@ -1548,11 +1549,11 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   background: #f1f6f2;
   color: var(--muted);
   cursor: pointer;
-  font-size: clamp(12px, 2vw, 15px);
+  font-size: clamp(10px, 1.8vw, 15px);
   font-variant-numeric: tabular-nums;
   font-weight: 900;
   line-height: 1;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 .saved-number-ball:hover,
@@ -1564,10 +1565,11 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 }
 
 .saved-number-ball.is-selected {
-  border-color: var(--green);
+  border-color: #0e543f;
   background: var(--green);
   color: #fff;
-  box-shadow: inset 0 -5px 8px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 0 0 2px rgba(22, 106, 82, 0.24), 0 0 14px rgba(22, 106, 82, 0.58), inset 0 -5px 8px rgba(0, 0, 0, 0.14);
+  transform: scale(1.06);
 }
 
 .saved-picker-toolbar {
@@ -2955,12 +2957,12 @@ th {
 
 @media (max-width: 420px) {
   .saved-number-picker {
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(13, minmax(0, 1fr));
+    gap: 5px 3px;
   }
 
   .saved-number-ball {
-    font-size: 12px;
+    font-size: 10px;
   }
 
   .saved-picker-toolbar {
