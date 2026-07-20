@@ -59,6 +59,7 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "300"))
 LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "10"))
+STALE_CACHE_MAX_AGE_SECONDS = int(os.environ.get("LOTTO_STALE_CACHE_MAX_AGE_SECONDS", "86400"))
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 BACKTEST_DEFAULT_LIMIT = 24
@@ -108,6 +109,7 @@ cache_inflight: dict[str, threading.Event] = {}
 flagship_snapshot_memory: dict[str, list[int]] = {}
 flagship_snapshot_lock = threading.RLock()
 rate_limit_hits: dict[tuple[str, str], list[float]] = {}
+rate_limit_lock = threading.RLock()
 notify_lock = threading.Lock()
 database_ready = False
 database_lock = threading.RLock()
@@ -635,13 +637,13 @@ def sanitize_saved_picks(value: Any) -> list[dict[str, Any]]:
             continue
         game = str(item.get("game", "")).strip()
         raw_numbers = item.get("numbers", [])
-        if game not in ALLOWED_GAMES or not isinstance(raw_numbers, list) or not 5 <= len(raw_numbers) <= 8:
+        if game not in ALLOWED_GAMES or not isinstance(raw_numbers, list) or not 1 <= len(raw_numbers) <= 39:
             continue
         try:
             numbers = sorted({int(number) for number in raw_numbers})
         except (TypeError, ValueError):
             continue
-        if not 5 <= len(numbers) <= 8 or any(number < 1 or number > 39 for number in numbers):
+        if not 1 <= len(numbers) <= 39 or any(number < 1 or number > 39 for number in numbers):
             continue
         key = f"{game}:{','.join(str(number) for number in numbers)}"
         if key in seen:
@@ -926,11 +928,16 @@ def auto_notify_loop() -> None:
 
 def cached(key: str, loader, ttl_seconds: int | None = None):
     ttl = CACHE_TTL_SECONDS if ttl_seconds is None else max(1, ttl_seconds)
+    stale_value = None
+    stale_created_at = 0.0
     while True:
         with cache_lock:
             hit = cache.get(key)
             if hit and time.time() - hit.created_at < ttl:
                 return hit.value
+            if hit and stale_value is None:
+                stale_value = hit.value
+                stale_created_at = hit.created_at
             pending = cache_inflight.get(key)
             if pending is None:
                 pending = threading.Event()
@@ -944,6 +951,8 @@ def cached(key: str, loader, ttl_seconds: int | None = None):
         with cache_lock:
             cache_inflight.pop(key, None)
             pending.set()
+        if stale_value is not None and time.time() - stale_created_at <= max(60, STALE_CACHE_MAX_AGE_SECONDS):
+            return stale_value
         raise
 
     with cache_lock:
@@ -1215,6 +1224,20 @@ def taiwan_latest() -> dict[str, Any]:
         candidates = [item for item in candidates if item.get("date") and len(item.get("numbers", [])) >= 5]
         if candidates:
             return max(candidates, key=lambda item: (item.get("date", ""), str(item.get("period", ""))))
+
+        # A short upstream outage should not blank the app.  Use the most
+        # recent persisted or bundled draw until a live source recovers.
+        try:
+            candidates.extend(load_database_history("tw539", 1))
+        except Exception:
+            pass
+        try:
+            candidates.extend(bundled_taiwan_history()[:1])
+        except Exception:
+            pass
+        candidates = [item for item in candidates if item.get("date") and len(item.get("numbers", [])) >= 5]
+        if candidates:
+            return max(candidates, key=lambda item: (item.get("date", ""), str(item.get("period", ""))))
         raise RuntimeError("目前沒有回傳今彩 539 最新資料")
 
     return cached("taiwan-latest", load, LATEST_CACHE_TTL_SECONDS)
@@ -1299,7 +1322,10 @@ def bundled_taiwan_history() -> list[dict[str, Any]]:
 
 
 def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
-    fast_history = pilio_taiwan_history(limit)
+    try:
+        fast_history = pilio_taiwan_history(limit)
+    except Exception:
+        fast_history = []
     if len(fast_history) >= limit:
         return fast_history[:limit]
     bundled = bundled_taiwan_history()
@@ -3284,13 +3310,16 @@ class Handler(SimpleHTTPRequestHandler):
         max_hits, window_seconds = limit
         now = time.time()
         key = (self.client_key(), path)
-        hits = [hit for hit in rate_limit_hits.get(key, []) if now - hit < window_seconds]
-        if len(hits) >= max_hits:
-            retry_after = max(1, int(window_seconds - (now - hits[0])))
+        with rate_limit_lock:
+            hits = [hit for hit in rate_limit_hits.get(key, []) if now - hit < window_seconds]
+            if len(hits) >= max_hits:
+                retry_after = max(1, int(window_seconds - (now - hits[0])))
+                rate_limit_hits[key] = hits
+                return True, retry_after
+            hits.append(now)
             rate_limit_hits[key] = hits
-            return True, retry_after
-        hits.append(now)
-        rate_limit_hits[key] = hits
+            if len(rate_limit_hits) > 10000:
+                rate_limit_hits.clear()
         return False, 0
 
     def verify_origin(self) -> bool:
@@ -3312,7 +3341,15 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path.startswith("/api/") and self.reject_if_rate_limited(parsed.path):
             return
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "service": "lotto-lab", "time": datetime.now().isoformat(timespec="seconds")})
+            self.send_json(
+                {
+                    "ok": True,
+                    "service": "lotto-lab",
+                    "time": datetime.now().isoformat(timespec="seconds"),
+                    "storageBackend": database_backend() if database_ready else "file-fallback",
+                    "storageReady": database_ready,
+                }
+            )
             return
         if parsed.path == "/api/config":
             self.send_json(
@@ -3542,7 +3579,12 @@ class Handler(SimpleHTTPRequestHandler):
         for key, value in (extra_headers or {}).items():
             self.send_header(key, value)
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Mobile browsers can cancel a slow request during a refresh.
+            # The request is already complete from the server's perspective.
+            pass
 
 
 def main():
