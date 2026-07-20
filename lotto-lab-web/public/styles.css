@@ -2706,6 +2706,10 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .saved-selection-meta {
+    overflow-wrap: anywhere;
+  }
+
   .saved-form .save-button {
     grid-column: 1 / -1;
   }
@@ -2945,6 +2949,22 @@ th {
 
   .core-candidate-footer {
     align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 420px) {
+  .saved-number-picker {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .saved-number-ball {
+    font-size: 12px;
+  }
+
+  .saved-picker-toolbar {
+    align-items: flex-start;
     flex-direction: column;
   }
 }
