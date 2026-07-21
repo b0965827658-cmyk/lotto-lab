@@ -1533,7 +1533,7 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 .saved-number-picker {
   display: grid;
   grid-template-columns: repeat(13, minmax(0, 1fr));
-  gap: 7px 5px;
+  gap: 8px 4px;
   width: 100%;
 }
 
@@ -1549,7 +1549,7 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   background: #f1f6f2;
   color: var(--muted);
   cursor: pointer;
-  font-size: clamp(10px, 1.8vw, 15px);
+  font-size: clamp(11px, 1.9vw, 16px);
   font-variant-numeric: tabular-nums;
   font-weight: 900;
   line-height: 1;
@@ -2712,6 +2712,12 @@ th {
     overflow-wrap: anywhere;
   }
 
+  .saved-number-picker {
+    width: calc(100% + 16px);
+    margin-inline: -8px;
+    gap: 7px 3px;
+  }
+
   .saved-form .save-button {
     grid-column: 1 / -1;
   }
@@ -2958,11 +2964,13 @@ th {
 @media (max-width: 420px) {
   .saved-number-picker {
     grid-template-columns: repeat(13, minmax(0, 1fr));
-    gap: 5px 3px;
+    width: calc(100% + 20px);
+    margin-inline: -10px;
+    gap: 6px 2px;
   }
 
   .saved-number-ball {
-    font-size: 10px;
+    font-size: clamp(10px, 3.2vw, 13px);
   }
 
   .saved-picker-toolbar {
