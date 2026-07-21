@@ -222,6 +222,11 @@ const els = {
   patternRepeat: $("#patternRepeat"),
   patternGrid: $("#patternGrid"),
   patternLines: $("#patternLines"),
+  recentPatternAutoBadge: $("#recentPatternAutoBadge"),
+  recentPatternAutoSummary: $("#recentPatternAutoSummary"),
+  recentPatternAutoSignals: $("#recentPatternAutoSignals"),
+  recentPatternAutoWindows: $("#recentPatternAutoWindows"),
+  recentPatternAutoNote: $("#recentPatternAutoNote"),
   tailAnalysisBadge: $("#tailAnalysisBadge"),
   tailAnalysisSummary: $("#tailAnalysisSummary"),
   tailHotList: $("#tailHotList"),
@@ -1958,6 +1963,183 @@ function renderModelBacktest(backtest, profiles = []) {
   }
 }
 
+function recentPatternWindow(draws, size) {
+  const rows = draws.slice(0, size);
+  if (!rows.length) return null;
+  const totalNumbers = rows.length * 5;
+  const zoneLabels = ["01-10", "11-20", "21-30", "31-39"];
+  const zoneCounts = [0, 0, 0, 0];
+  const tailCounts = new Map();
+  const oddCounts = new Map();
+  const consecutiveCounts = [];
+
+  rows.forEach((draw) => {
+    const numbers = normalizedPick(draw.numbers, 5);
+    numbers.forEach((number) => {
+      zoneCounts[Math.min(3, Math.floor((number - 1) / 10))] += 1;
+      const tail = number % 10;
+      tailCounts.set(tail, (tailCounts.get(tail) || 0) + 1);
+    });
+    const odd = numbers.filter((number) => number % 2 === 1).length;
+    oddCounts.set(odd, (oddCounts.get(odd) || 0) + 1);
+    consecutiveCounts.push(numbers.filter((number, index) => index > 0 && number - numbers[index - 1] === 1).length);
+  });
+
+  const transitions = rows.slice(0, -1).map((draw, index) => {
+    const current = new Set(normalizedPick(draw.numbers, 5));
+    const previous = new Set(normalizedPick(rows[index + 1].numbers, 5));
+    return [...current].filter((number) => previous.has(number)).length;
+  });
+  const average = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  const percentage = (value, total) => total ? Math.round((value / total) * 100) : 0;
+  const mode = (map) => [...map.entries()].sort((left, right) => right[1] - left[1] || left[0] - right[0])[0] || [0, 0];
+  const zoneIndex = zoneCounts.reduce((best, count, index) => count > zoneCounts[best] ? index : best, 0);
+  const topTails = [...tailCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0] - right[0])
+    .slice(0, 3);
+  const [oddMode, oddModeCount] = mode(oddCounts);
+  const repeatAverage = average(transitions);
+  const consecutiveRate = percentage(consecutiveCounts.filter((count) => count > 0).length, rows.length);
+  const repeatRate = percentage(transitions.filter((count) => count > 0).length, transitions.length);
+  const tailShare = topTails.length ? topTails[0][1] / totalNumbers : 0;
+  const zoneShare = zoneCounts[zoneIndex] / totalNumbers;
+
+  return {
+    size: rows.length,
+    requestedSize: size,
+    latestRepeat: transitions[0] || 0,
+    repeatAverage,
+    repeatRate,
+    consecutiveRate,
+    oddMode,
+    oddModeCount,
+    oddModeRate: percentage(oddModeCount, rows.length),
+    zone: zoneLabels[zoneIndex],
+    zoneShare,
+    topTails,
+    tailShare,
+    sumAverage: Math.round(average(rows.map((draw) => normalizedPick(draw.numbers, 5).reduce((sum, number) => sum + number, 0)))),
+  };
+}
+
+function buildRecentPatternAutoAnalysis() {
+  const draws = (state.history || []).filter((draw) => normalizedPick(draw.numbers, 5).length === 5);
+  const windows = [10, 20, 36]
+    .map((size) => recentPatternWindow(draws, size))
+    .filter(Boolean);
+  if (!windows.length) return null;
+
+  const recent = windows[0];
+  const longest = windows[windows.length - 1];
+  const signals = [
+    {
+      key: "repeat",
+      title: "連莊走勢",
+      score: recent.repeatRate + recent.repeatAverage * 10,
+      value: `近 ${recent.requestedSize} 期 ${recent.repeatAverage.toFixed(2)} 顆／期`,
+      description: `最近一期與前一期重疊 ${recent.latestRepeat} 顆，觀察是否延續。`,
+    },
+    {
+      key: "consecutive",
+      title: "連號走勢",
+      score: recent.consecutiveRate,
+      value: `${recent.consecutiveRate}% 有連號`,
+      description: "統計每期是否出現相鄰號碼，避免只看單一期。",
+    },
+    {
+      key: "interval",
+      title: "區間集中",
+      score: recent.zoneShare * 100,
+      value: `${recent.zone} 占 ${Math.round(recent.zoneShare * 100)}%`,
+      description: "找出近期號碼較集中的區間，作為版路觀察。",
+    },
+    {
+      key: "tail",
+      title: "尾數聚焦",
+      score: recent.tailShare * 100,
+      value: `${recent.topTails.map(([tail]) => `${tail}尾`).join("、") || "資料不足"}`,
+      description: "整理近期出現較多的尾數，僅作輔助訊號。",
+    },
+    {
+      key: "oddEven",
+      title: "奇偶結構",
+      score: recent.oddModeRate,
+      value: `${recent.oddMode} 奇 ${5 - recent.oddMode} 偶`,
+      description: `近 ${recent.requestedSize} 期最常見的奇偶配置。`,
+    },
+  ].sort((left, right) => right.score - left.score || left.key.localeCompare(right.key));
+
+  const lead = signals[0];
+  const repeatDelta = recent.repeatAverage - longest.repeatAverage;
+  const trend = repeatDelta >= 0.25
+    ? "近期連莊比近 36 期平均更活躍。"
+    : repeatDelta <= -0.25
+      ? "近期連莊比近 36 期平均收斂，先保留觀察。"
+      : "近 10 期與近 36 期的連莊強度接近。";
+  return { windows, signals, lead, trend };
+}
+
+function renderRecentPatternAuto() {
+  if (!els.recentPatternAutoSummary) return;
+  const result = buildRecentPatternAutoAnalysis();
+  if (!result) {
+    els.recentPatternAutoBadge.textContent = "資料累積中";
+    els.recentPatternAutoSummary.innerHTML = `<div class="empty-state">資料累積後會自動整理近期版路。</div>`;
+    els.recentPatternAutoSignals.innerHTML = "";
+    els.recentPatternAutoWindows.innerHTML = "";
+    return;
+  }
+
+  const { windows, signals, lead, trend } = result;
+  const adaptive = state.analysis?.adaptiveRecentPattern;
+  els.recentPatternAutoBadge.textContent = `近 ${windows.map((item) => item.requestedSize).join("／")} 期`;
+  els.recentPatternAutoSummary.innerHTML = `
+    <div class="recent-pattern-auto-lead">
+      <span>目前主導版路</span>
+      <strong>${lead.title}</strong>
+      <em>${lead.description}</em>
+    </div>
+    <div class="recent-pattern-auto-stat">
+      <span>近期重疊</span>
+      <strong>${windows[0].repeatAverage.toFixed(2)} 顆</strong>
+      <em>近 ${windows[0].requestedSize} 期平均</em>
+    </div>
+    <div class="recent-pattern-auto-stat">
+      <span>連號期比例</span>
+      <strong>${windows[0].consecutiveRate}%</strong>
+      <em>近 ${windows[0].requestedSize} 期</em>
+    </div>
+    <div class="recent-pattern-auto-stat">
+      <span>集中區間</span>
+      <strong>${windows[0].zone}</strong>
+      <em>號碼占比 ${Math.round(windows[0].zoneShare * 100)}%</em>
+    </div>
+  `;
+  els.recentPatternAutoSignals.innerHTML = signals
+    .slice(0, 5)
+    .map((signal, index) => `
+      <div class="recent-pattern-auto-signal${index === 0 ? " is-lead" : ""}">
+        <strong>${signal.title}</strong>
+        <span>${signal.value}</span>
+      </div>
+    `)
+    .join("");
+  els.recentPatternAutoWindows.innerHTML = windows
+    .map((item) => `
+      <div class="recent-pattern-auto-window">
+        <strong>近 ${item.size}${item.size === item.requestedSize ? "" : `／${item.requestedSize}`} 期</strong>
+        <span>連莊 ${item.repeatAverage.toFixed(2)} 顆／期</span>
+        <span>連號 ${item.consecutiveRate}%</span>
+        <span>熱門尾數 ${item.topTails.map(([tail]) => `${tail}尾`).join("、") || "-"}</span>
+        <span>奇偶 ${item.oddMode}奇${5 - item.oddMode}偶</span>
+        <span>均和 ${item.sumAverage}</span>
+      </div>
+    `)
+    .join("");
+  const adaptiveText = adaptive?.selectedLabel ? `核心權重目前偏向「${adaptive.selectedLabel}」。` : "核心權重會隨新資料重新校準。";
+  els.recentPatternAutoNote.textContent = `${trend}${adaptiveText} 新一期資料進來後自動重算；版路是統計觀察，不代表預測或保證中獎。`;
+}
+
 function renderPatterns(patterns, profiles = [], researchEvidence = null) {
   if (!patterns) {
     els.patternModel.textContent = "-";
@@ -2215,6 +2397,7 @@ function render(payload) {
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles, analysis.researchEvidence);
+  renderRecentPatternAuto();
   renderTailAnalysis(analysis.tailAnalysis);
   els.hot.innerHTML = rankRows(analysis.hot, "count");
   els.cold.innerHTML = rankRows(analysis.cold, "count");
