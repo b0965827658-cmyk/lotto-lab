@@ -1004,7 +1004,7 @@ function coreWeightSummary(analysis = state.analysis) {
     })
     .filter(Boolean)
     .join("・");
-  return text || "近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%";
+  return text || "近期熱度 55%・長期熱度 20%・遺漏平衡 5%・區間分布 20%";
 }
 
 function renderModelControls() {
@@ -2011,39 +2011,38 @@ function renderTailAnalysis(tailAnalysis) {
   const recommendedTails = Array.isArray(tailAnalysis.recommendedTails) ? tailAnalysis.recommendedTails : [];
   const avoidTails = Array.isArray(tailAnalysis.avoidTails) ? tailAnalysis.avoidTails : [];
   const windows = Array.isArray(tailAnalysis.windows) ? tailAnalysis.windows : [10, 20, 36];
-  const scoreWindow = Number(tailAnalysis.scoreWindow || Math.max(...windows, 36));
   const chip = (tail, tone = "") => {
     const row = rowByTail.get(Number(tail));
-    const score = row ? (row.scoreLabel ?? `${Number(row.score) >= 0 ? "+" : ""}${row.score}`) : "";
+    const score = row ? ` ${row.score}` : "";
     return `<span class="tail-pill ${tone}"><strong>${tail}尾</strong><small>${score} 分</small></span>`;
   };
-  const strongest = [...rows].sort((left, right) => Number(right.score || 0) - Number(left.score || 0) || left.tail - right.tail)[0];
+  const strongest = rows[0];
   const freshest = [...rows].sort((left, right) => (right.momentum || 0) - (left.momentum || 0) || left.tail - right.tail)[0];
-  const activeCount = rows.filter((row) => Number(row.score || 0) > 0).length;
-  els.tailAnalysisBadge.textContent = `${tailAnalysis.version || "獨立"} · 近${scoreWindow}期逐期 +1／-1`;
+  const activeCount = rows.filter((row) => row.status !== "避開").length;
+  els.tailAnalysisBadge.textContent = `${tailAnalysis.version || "獨立"} · 近 ${windows.join("／")} 期`;
   els.tailAnalysisSummary.innerHTML = `
     <div>
-      <span>目前最高分</span>
+      <span>近期最強</span>
       <strong>${strongest ? `${strongest.tail}尾` : "-"}</strong>
-      <em>${strongest ? `${strongest.scoreLabel || strongest.score} 分` : "資料不足"}</em>
+      <em>${strongest ? `${strongest.score} 分` : "資料不足"}</em>
     </div>
     <div>
-      <span>近期變化</span>
+      <span>動能上升</span>
       <strong>${freshest ? `${freshest.tail}尾` : "-"}</strong>
       <em>${freshest ? `${freshest.momentum >= 0 ? "+" : ""}${freshest.momentum}%` : "資料不足"}</em>
     </div>
     <div>
-      <span>正分尾數</span>
+      <span>可用尾數</span>
       <strong>${activeCount} / 10</strong>
-      <em>完整列出 0 尾～9 尾</em>
+      <em>依 4 期未出規則篩選</em>
     </div>
   `;
   els.tailHotList.innerHTML = recommendedTails.length
     ? recommendedTails.map((tail, index) => chip(tail, index < 2 ? "hot" : "")).join("")
     : `<span class="tail-analysis-empty">資料不足</span>`;
-  els.tailAvoidList.innerHTML = rows.length
-    ? rows.map((row) => chip(row.tail, Number(row.score || 0) > 0 ? "hot" : Number(row.score || 0) < 0 ? "avoid" : "")).join("")
-    : `<span class="tail-analysis-empty">資料不足</span>`;
+  els.tailAvoidList.innerHTML = avoidTails.length
+    ? avoidTails.map((tail) => chip(tail, "avoid")).join("")
+    : `<span class="tail-analysis-empty">目前沒有連續 4 期未出的尾數</span>`;
   if (els.tailRecommendationBalls) {
     const recommendation = normalizedPick(tailAnalysis.recommendation);
     els.tailRecommendationBalls.innerHTML = recommendation.length === 5 ? balls(recommendation) : `<span class="tail-analysis-empty">資料累積中</span>`;
@@ -2051,12 +2050,12 @@ function renderTailAnalysis(tailAnalysis) {
   if (els.tailAnalysisMeta) {
     els.tailAnalysisMeta.innerHTML = `
       <span>優先尾數：${recommendedTails.map((tail) => `${tail}尾`).join("、") || "資料不足"}</span>
-      <span>連續 4 期未出：${avoidTails.map((tail) => `${tail}尾`).join("、") || "無"}</span>
-      <span>計分規則：有出 +1／沒出 -1</span>
+      <span>避開：${avoidTails.map((tail) => `${tail}尾`).join("、") || "無"}</span>
+      <span>固定短期分析</span>
     `;
   }
   if (els.tailAnalysisNote) {
-    els.tailAnalysisNote.textContent = `${tailAnalysis.method || "獨立尾數統計分析。"} ${tailAnalysis.scoreRule || "每期有出尾數 +1、沒出尾數 -1。"} ${tailAnalysis.note || ""}`.trim();
+    els.tailAnalysisNote.textContent = `${tailAnalysis.method || "獨立尾數統計分析。"} ${tailAnalysis.note || ""}`.trim();
   }
 }
 
