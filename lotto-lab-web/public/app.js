@@ -2137,7 +2137,11 @@ function renderRecentPatternAuto() {
     `)
     .join("");
   const adaptiveText = adaptive?.selectedLabel ? `核心權重目前偏向「${adaptive.selectedLabel}」。` : "核心權重會隨新資料重新校準。";
-  els.recentPatternAutoNote.textContent = `${trend}${adaptiveText} 新一期資料進來後自動重算；版路是統計觀察，不代表預測或保證中獎。`;
+  const validation = state.analysis?.recentPatternValidation;
+  const strategyText = state.analysis?.recentPatternStrategy === "recent-pattern"
+    ? `近期版路已通過 ${validation?.testedCount || 0} 次逐期驗證，本期採用版路候選。`
+    : `近期版路已完成 ${validation?.testedCount || 0} 次逐期驗證，目前核心模型較穩，先不強行切換。`;
+  els.recentPatternAutoNote.textContent = `${trend}${adaptiveText} ${strategyText} 新一期資料進來後自動重算；版路是統計觀察，不代表預測或保證中獎。`;
 }
 
 function renderPatterns(patterns, profiles = [], researchEvidence = null) {
