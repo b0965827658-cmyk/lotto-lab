@@ -982,7 +982,7 @@ def _freeze_flagship_recommendation(
 ) -> tuple[list[int], dict[str, Any]]:
     """Publish one flagship pool per draw/window so every visitor sees the same result."""
     snapshot_key = (
-        f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:"
+        f"{game}:{ADAPTIVE_PATTERN_VERSION}:{latest.get('date', '')}:{latest.get('period', '')}:"
         f"window-{selected_limit}:{snapshot_tag}"
     )
     if snapshot_key in flagship_snapshot_memory:
@@ -2083,7 +2083,7 @@ CORE_BASE_WEIGHTS = {
     "gap": 0.15,
     "interval": 0.20,
 }
-ADAPTIVE_PATTERN_VERSION = "dynamic-v1"
+ADAPTIVE_PATTERN_VERSION = "dynamic-v2-gated-recent-pattern"
 CORE_ANALYSIS_METHOD = "核心基準：近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%"
 
 
@@ -2305,6 +2305,210 @@ def simple_core_recommendation(
             best_score = combo_score
             best_combo = sorted_combo
     return list(best_combo or tuple(pool[:pick_count]))
+
+
+RECENT_PATTERN_SIGNAL_WEIGHTS = {
+    "multiWindow": 0.30,
+    "drag": 0.24,
+    "repeatSignal": 0.20,
+    "neighbor": 0.14,
+    "tailMomentum": 0.12,
+}
+RECENT_PATTERN_EVALUATION_LIMIT = 18
+RECENT_PATTERN_TRAINING_LIMIT = 90
+RECENT_PATTERN_MIN_TESTED = 12
+RECENT_PATTERN_MIN_ADVANTAGE = 0.08
+
+
+def recent_pattern_score_components(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+) -> dict[int, float]:
+    """Score the recent-transition branch without feeding it into the core model."""
+    profile = pattern_profile(draws, max_number)
+    return {
+        number: sum(
+            profile["numberScores"][number].get(signal, 0.0) * weight
+            for signal, weight in RECENT_PATTERN_SIGNAL_WEIGHTS.items()
+        )
+        for number in range(1, max_number + 1)
+    }
+
+
+def _recommendation_from_number_scores(
+    scores: dict[int, float],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> list[int]:
+    """Select a stable combination from a deterministic score table."""
+    pool = sorted(scores, key=lambda number: (-scores[number], number))[: min(18, max_number)]
+    if len(pool) <= pick_count:
+        return sorted(pool)
+    best_combo: tuple[int, ...] | None = None
+    best_score = float("-inf")
+    for combo in itertools.combinations(pool, pick_count):
+        sorted_combo = tuple(sorted(combo))
+        number_score = sum(scores[number] for number in sorted_combo) / pick_count
+        shape_score = combo_spread_score(list(sorted_combo), max_number)
+        combo_score = number_score * 0.88 + shape_score * 0.12
+        if combo_score > best_score or (
+            combo_score == best_score and (best_combo is None or sorted_combo < best_combo)
+        ):
+            best_score = combo_score
+            best_combo = sorted_combo
+    return list(best_combo or tuple(pool[:pick_count]))
+
+
+def recent_pattern_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> list[int]:
+    """Return the standalone recent-pattern candidate used by the validation gate."""
+    return _recommendation_from_number_scores(
+        recent_pattern_score_components(draws, max_number),
+        max_number=max_number,
+        pick_count=pick_count,
+    )
+
+
+def _strategy_quality(rows: list[dict[str, float]]) -> tuple[float, float, float]:
+    if not rows:
+        return 0.0, 0.0, 0.0
+    total_weight = sum(row["weight"] for row in rows) or 1.0
+    average_hit = sum(row["hits"] * row["weight"] for row in rows) / total_weight
+    two_plus_rate = sum(row["twoPlus"] * row["weight"] for row in rows) / total_weight
+    return average_hit + two_plus_rate * 0.35, average_hit, two_plus_rate
+
+
+def recent_pattern_validation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    evaluation_limit: int = RECENT_PATTERN_EVALUATION_LIMIT,
+    training_limit: int = RECENT_PATTERN_TRAINING_LIMIT,
+) -> dict[str, Any]:
+    """Compare recent-pattern and core picks with strict walk-forward isolation."""
+    ordered = canonical_analysis_draws(draws)
+    target_limit = min(max(0, int(evaluation_limit)), max(0, len(ordered) - 36))
+    core_rows: list[dict[str, float]] = []
+    pattern_rows: list[dict[str, float]] = []
+    for target_index in range(target_limit):
+        target = ordered[target_index]
+        training = ordered[target_index + 1 : target_index + 1 + training_limit]
+        if len(training) < 36:
+            continue
+        core_pick = simple_core_recommendation(
+            training,
+            max_number=max_number,
+            pick_count=pick_count,
+            core_weights=CORE_BASE_WEIGHTS,
+        )
+        pattern_pick = recent_pattern_recommendation(
+            training,
+            max_number=max_number,
+            pick_count=pick_count,
+        )
+        actual = set(target["numbers"])
+        recency_weight = 0.50 if target_index < 6 else 0.30 if target_index < 12 else 0.20
+        core_hits = len(actual & set(core_pick))
+        pattern_hits = len(actual & set(pattern_pick))
+        core_rows.append(
+            {
+                "index": float(target_index),
+                "weight": recency_weight,
+                "hits": float(core_hits),
+                "twoPlus": 1.0 if core_hits >= 2 else 0.0,
+            }
+        )
+        pattern_rows.append(
+            {
+                "index": float(target_index),
+                "weight": recency_weight,
+                "hits": float(pattern_hits),
+                "twoPlus": 1.0 if pattern_hits >= 2 else 0.0,
+            }
+        )
+
+    core_quality, core_average, core_two_plus = _strategy_quality(core_rows)
+    pattern_quality, pattern_average, pattern_two_plus = _strategy_quality(pattern_rows)
+    tested_count = min(len(core_rows), len(pattern_rows))
+    advantage = pattern_quality - core_quality
+    two_plus_delta = pattern_two_plus - core_two_plus
+    eligible = tested_count >= RECENT_PATTERN_MIN_TESTED
+    enabled = bool(
+        eligible
+        and advantage >= RECENT_PATTERN_MIN_ADVANTAGE
+        and two_plus_delta >= -0.05
+    )
+    if not eligible:
+        reason = f"目前只有 {tested_count} 次隔離回測，先沿用核心模型。"
+    elif enabled:
+        reason = (
+            f"近期版路近 {tested_count} 次回測品質高出核心 {advantage:.2f}，"
+            "通過門檻後才接管本期參考。"
+        )
+    else:
+        reason = (
+            f"近期版路近 {tested_count} 次回測尚未穩定領先核心 "
+            f"（差 {advantage:+.2f}），先保留為觀察候選。"
+        )
+    return {
+        "version": ADAPTIVE_PATTERN_VERSION,
+        "testedCount": tested_count,
+        "evaluationLimit": target_limit,
+        "trainingLimit": training_limit,
+        "coreAverageHit": round(core_average, 2),
+        "coreTwoPlusRate": round(core_two_plus * 100, 1),
+        "coreQuality": round(core_quality, 3),
+        "recentPatternAverageHit": round(pattern_average, 2),
+        "recentPatternTwoPlusRate": round(pattern_two_plus * 100, 1),
+        "recentPatternQuality": round(pattern_quality, 3),
+        "advantage": round(advantage, 3),
+        "twoPlusDelta": round(two_plus_delta * 100, 1),
+        "eligible": eligible,
+        "enabled": enabled,
+        "strategy": "recent-pattern" if enabled else "core",
+        "reason": reason,
+        "method": "近期版路獨立回測：多窗重疊 30%・拖牌 24%・連莊 20%・鄰近號 14%・尾數動能 12%；只有逐期驗證穩定領先核心才接管。",
+    }
+
+
+def select_published_recommendation(
+    draws: list[dict[str, Any]],
+    validation_draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    core_weights: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Choose one published pick while keeping the recent-pattern branch gated."""
+    core_pick = simple_core_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        core_weights=core_weights,
+    )
+    pattern_pick = recent_pattern_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+    )
+    validation = recent_pattern_validation(
+        validation_draws,
+        max_number=max_number,
+        pick_count=pick_count,
+    )
+    selected = pattern_pick if validation["enabled"] else core_pick
+    strategy = validation["strategy"]
+    return {
+        "recommendation": selected,
+        "coreRecommendation": core_pick,
+        "recentPatternRecommendation": pattern_pick,
+        "recentPatternValidation": validation,
+        "recentPatternStrategy": strategy,
+        "recentPatternMethod": validation["method"],
+        "recentPatternNote": validation["reason"],
+    }
 
 
 def simple_core_candidate_pool(
@@ -2951,7 +3155,6 @@ def analyze(
     for n in frequency:
         score = (frequency[n] / max_freq) * 0.58 + (gaps[n] / max_gap) * 0.42
         scored.append((score, n))
-    seed_label = stable_analysis_seed(draws, f"analysis-window-{len(draws)}")
     selected_profile, backtest, model_results = choose_model_profile(
         draws,
         max_number=max_number,
@@ -2966,27 +3169,17 @@ def analyze(
     )
     core_weights = adaptive_pattern["weights"]
     research_evidence = research_feature_evidence(reference_draws, max_number=max_number)
-    evidence_map = {
-        item["id"]: item["multiplier"] for item in research_evidence.get("features", [])
-    }
-    recommendation = model_recommendation(
+    published_selection = select_published_recommendation(
         draws,
+        reference_draws,
         max_number=max_number,
         pick_count=pick_count,
-        seed_label=seed_label,
-        profile_name=selected_profile,
-        evidence=evidence_map,
         core_weights=core_weights,
     )
-    # All published tiers use the same deterministic core pick.  Pro adds
-    # validation and history; the flagship tier adds presentation and saved
-    # reasoning, rather than a second competing algorithm.
-    flagship_numbers = simple_core_recommendation(
-        draws,
-        max_number=max_number,
-        pick_count=5,
-        core_weights=core_weights,
-    )
+    recommendation = published_selection["recommendation"]
+    # All published tiers use the same gated pick. Pro adds validation and
+    # history; the flagship tier adds presentation and saved reasoning.
+    flagship_numbers = list(recommendation[:5])
     adaptive_numbers = list(flagship_numbers)
     core_candidate_pool = simple_core_candidate_pool(
         draws,
@@ -3013,6 +3206,12 @@ def analyze(
         "overdue": [{"number": n, "gap": gaps[n]} for n in overdue],
         "frequency": [{"number": n, "count": frequency[n], "gap": gaps[n]} for n in frequency],
         "recommendation": recommendation,
+        "coreRecommendation": published_selection["coreRecommendation"],
+        "recentPatternRecommendation": published_selection["recentPatternRecommendation"],
+        "recentPatternValidation": published_selection["recentPatternValidation"],
+        "recentPatternStrategy": published_selection["recentPatternStrategy"],
+        "recentPatternMethod": published_selection["recentPatternMethod"],
+        "recentPatternNote": published_selection["recentPatternNote"],
         "coreCandidatePool": core_candidate_pool,
         "coreCandidateMethod": "同一套核心分析排序；15 碼是會員自選候選池，不代表 15 碼同時推薦或保證中獎。",
         "flagshipRecommendation": flagship_numbers,
@@ -3027,7 +3226,7 @@ def analyze(
         "tailAnalysis": tail_analysis,
         "researchEvidence": research_evidence,
         "shortTermConsensus": short_consensus,
-        "note": f"主模型保留四個容易理解的訊號：近期熱度、長期熱度、遺漏平衡與區間分布；會依近 {adaptive_pattern['testedCount']} 次逐期回測平滑校準權重，新一期資料進來後才重新計算，同一期不反覆改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。",
+        "note": f"主模型保留四個容易理解的訊號：近期熱度、長期熱度、遺漏平衡與區間分布；近期版路另行逐期驗證，只有通過門檻才接管，否則沿用核心結果。核心權重近 {adaptive_pattern['testedCount']} 次逐期回測平滑校準，新一期資料進來後才重新計算，同一期不反覆改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。",
     }
 
 
@@ -3080,21 +3279,21 @@ def analyze_with_stable_backtest(
     analysis["modelProfiles"] = model_results
     analysis["researchEvidence"] = research_evidence
     analysis["tailAnalysis"] = tail_analysis_summary(display_draws, max_number)
-    analysis["recommendation"] = model_recommendation(
+    published_selection = select_published_recommendation(
         display_draws,
+        fallback_draws,
         max_number=max_number,
         pick_count=pick_count,
-        seed_label=stable_analysis_seed(fallback_draws, f"fallback-window-{len(draws)}-backtest-{requested_limit}"),
-        profile_name=selected_profile,
-        evidence=evidence_map,
         core_weights=core_weights,
     )
-    analysis["flagshipRecommendation"] = simple_core_recommendation(
-        display_draws,
-        max_number=max_number,
-        pick_count=5,
-        core_weights=core_weights,
-    )
+    analysis["recommendation"] = published_selection["recommendation"]
+    analysis["coreRecommendation"] = published_selection["coreRecommendation"]
+    analysis["recentPatternRecommendation"] = published_selection["recentPatternRecommendation"]
+    analysis["recentPatternValidation"] = published_selection["recentPatternValidation"]
+    analysis["recentPatternStrategy"] = published_selection["recentPatternStrategy"]
+    analysis["recentPatternMethod"] = published_selection["recentPatternMethod"]
+    analysis["recentPatternNote"] = published_selection["recentPatternNote"]
+    analysis["flagshipRecommendation"] = list(published_selection["recommendation"][:5])
     analysis["coreCandidatePool"] = simple_core_candidate_pool(
         display_draws,
         max_number=max_number,
@@ -3124,7 +3323,8 @@ def analyze_with_stable_backtest(
         f"{fallback_backtest.get('method', '')}"
     )
     analysis["note"] = (
-        f"主模型保留四個容易理解的訊號，會依近 {adaptive_pattern['testedCount']} 次逐期回測平滑校準權重；"
+        f"主模型保留四個容易理解的訊號；近期版路另行逐期驗證，只有通過門檻才接管，否則沿用核心結果。"
+        f"核心權重近 {adaptive_pattern['testedCount']} 次逐期回測平滑校準；"
         "新一期資料進來後才重新計算，同一期不反覆改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。"
     )
     return analysis
