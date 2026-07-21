@@ -539,18 +539,6 @@ def persist_flagship_analysis_history(
         )
 
 
-def merge_draw_history(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    merged: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for group in groups:
-        for draw in group:
-            key = database_draw_key(draw)
-            if all(key):
-                merged[key] = draw
-    values = list(merged.values())
-    values.sort(key=lambda item: (item.get("date", ""), str(item.get("period", ""))), reverse=True)
-    return values
-
-
 def draw_source_priority(draw: dict[str, Any]) -> int:
     source = str(draw.get("source", ""))
     if "台灣彩券" in source or "政府資料" in source:
@@ -560,9 +548,37 @@ def draw_source_priority(draw: dict[str, Any]) -> int:
     return 1
 
 
+def draw_identity_key(draw: dict[str, Any]) -> tuple[str, str]:
+    """Use the draw date as identity because feeds use different period formats."""
+    game, period, date = database_draw_key(draw)
+    return (game, date or period)
+
+
+def merge_draw_history(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge feeds without counting the same daily draw twice.
+
+    The Taiwan feed uses official period numbers while the SQLite/live feed can
+    use a date-shaped period.  A period-only key therefore duplicates the same
+    draw.  These games have one draw per date, so the date is the stable key.
+    """
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for group in groups:
+        for draw in group:
+            game, period, date = database_draw_key(draw)
+            if not game or not (date or period):
+                continue
+            key = draw_identity_key(draw)
+            existing = merged.get(key)
+            if existing is None or draw_source_priority(draw) > draw_source_priority(existing):
+                merged[key] = draw
+    values = list(merged.values())
+    values.sort(key=lambda item: (item.get("date", ""), str(item.get("period", ""))), reverse=True)
+    return values
+
+
 def canonical_analysis_draws(draws: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize and deterministically order rows before any model calculation."""
-    merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
     for draw in draws:
         if not isinstance(draw, dict):
             continue
@@ -572,7 +588,7 @@ def canonical_analysis_draws(draws: list[dict[str, Any]]) -> list[dict[str, Any]
             continue
         clean = dict(draw)
         clean.update({"game": game, "period": period, "date": date, "numbers": numbers})
-        key = (game, period, date)
+        key = draw_identity_key(clean)
         existing = merged.get(key)
         if existing is None or (
             draw_source_priority(clean), tuple(clean["numbers"])
@@ -1798,39 +1814,21 @@ def pattern_profile(draws: list[dict[str, Any]], max_number: int = 39) -> dict[s
 
 
 def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
-    """Show an independent 0-9 tail balance without feeding the main model.
-
-    A tail is counted once per draw: it earns +1 when it appears at least once
-    in that draw and -1 when it does not appear.  This keeps repeated numbers
-    with the same tail from inflating the result and makes the score easy to
-    explain in the UI.
-    """
+    """Show a simple, independent tail summary without feeding the main model."""
     ordered = canonical_analysis_draws(draws)
     stats = number_stats(ordered, max_number)
     window_sizes = (10, 20, 36)
 
-    def window_tail_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def window_tail_counts(rows: list[dict[str, Any]]) -> tuple[dict[int, int], dict[int, int]]:
         counts = {tail: 0 for tail in range(10)}
         coverage = {tail: 0 for tail in range(10)}
-        balance = {tail: 0 for tail in range(10)}
         for draw in rows:
             seen = {number % 10 for number in draw["numbers"]}
-            for tail in range(10):
-                if tail in seen:
-                    coverage[tail] += 1
-                    balance[tail] += 1
-                else:
-                    balance[tail] -= 1
+            for tail in seen:
+                coverage[tail] += 1
             for number in draw["numbers"]:
                 counts[number % 10] += 1
-        periods = len(rows)
-        return {
-            "periods": periods,
-            "counts": counts,
-            "coverage": coverage,
-            "balance": balance,
-            "misses": {tail: periods - coverage[tail] for tail in range(10)},
-        }
+        return counts, coverage
 
     def tail_gap(tail: int) -> int:
         return next(
@@ -1842,28 +1840,27 @@ def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> 
             len(ordered),
         )
 
-    window_data: dict[int, dict[str, Any]] = {}
+    window_data: dict[int, dict[str, dict[int, int]]] = {}
     for size in window_sizes:
         rows = ordered[: min(size, len(ordered))]
-        window_data[size] = window_tail_stats(rows)
-
-    available_windows = [size for size in window_sizes if window_data[size]["periods"]]
-    score_window = max(available_windows, default=36)
-    score_data = window_data[score_window]
+        counts, coverage = window_tail_counts(rows)
+        window_data[size] = {"counts": counts, "coverage": coverage}
 
     tail_rows: list[dict[str, Any]] = []
     for tail in range(10):
         count10 = window_data[10]["counts"][tail]
         count20 = window_data[20]["counts"][tail]
         count36 = window_data[36]["counts"][tail]
-        size10 = max(1, window_data[10]["periods"])
-        size20 = max(1, window_data[20]["periods"])
-        size36 = max(1, window_data[36]["periods"])
+        size10 = max(1, min(10, len(ordered)))
+        size20 = max(1, min(20, len(ordered)))
+        size36 = max(1, min(36, len(ordered)))
         rate10 = count10 / (size10 * 5)
         rate20 = count20 / (size20 * 5)
         rate36 = count36 / (size36 * 5)
         gap = tail_gap(tail)
-        balance_score = int(score_data["balance"][tail])
+        raw_score = rate10 * 0.50 + rate20 * 0.30 + rate36 * 0.20
+        if gap >= 4:
+            raw_score *= 0.55
         tail_rows.append(
             {
                 "tail": tail,
@@ -1874,33 +1871,23 @@ def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> 
                 "coverage10": window_data[10]["coverage"][tail],
                 "coverage20": window_data[20]["coverage"][tail],
                 "coverage36": window_data[36]["coverage"][tail],
-                "score10": window_data[10]["balance"][tail],
-                "score20": window_data[20]["balance"][tail],
-                "score36": window_data[36]["balance"][tail],
-                "balanceScore": balance_score,
-                "openCount": score_data["coverage"][tail],
-                "missCount": score_data["misses"][tail],
                 "gap": gap,
-                "momentum": round((rate10 - rate36) * 100, 1) if ordered else 0,
+                "momentum": round((rate10 - rate36) * 100, 1),
+                "rawScore": raw_score,
             }
         )
 
-    ranked = sorted(tail_rows, key=lambda item: (-item["balanceScore"], item["gap"], item["tail"]))
-    recommended_tails = [item for item in ranked if item["balanceScore"] > 0 and item["gap"] < 4][:5]
-    if len(recommended_tails) < 5:
-        selected = {item["tail"] for item in recommended_tails}
-        recommended_tails.extend(
-            item for item in ranked if item["tail"] not in selected and item["gap"] < 4
-        )
-        recommended_tails = recommended_tails[:5]
+    ranked = sorted(tail_rows, key=lambda item: (-item["rawScore"], item["gap"], item["tail"]))
+    recommended_tails = [item for item in ranked if item["gap"] < 4][:5]
     recommended_tail_set = {item["tail"] for item in recommended_tails}
+    top_score = max((item["rawScore"] for item in ranked), default=0.0) or 1.0
 
     numbers_by_tail: dict[int, list[int]] = {tail: [] for tail in range(10)}
     for number in range(1, max_number + 1):
         numbers_by_tail[number % 10].append(number)
     number_candidates: list[tuple[float, int]] = []
     for item in recommended_tails:
-        tail_score = item["balanceScore"]
+        tail_score = item["rawScore"] / top_score
         numbers = sorted(
             numbers_by_tail[item["tail"]],
             key=lambda number: (
@@ -1940,50 +1927,30 @@ def tail_analysis_summary(draws: list[dict[str, Any]], max_number: int = 39) -> 
 
     selected_tail_ranks = {item["tail"]: index for index, item in enumerate(ranked)}
     for item in tail_rows:
-        item["score"] = item["balanceScore"]
-        item["scoreLabel"] = f"{item['score']:+d}"
-        if item["tail"] in recommended_tail_set and selected_tail_ranks[item["tail"]] < 3:
+        item["score"] = round((item["rawScore"] / top_score) * 100, 1)
+        if item["gap"] >= 4:
+            item["status"] = "避開"
+        elif item["tail"] in recommended_tail_set and selected_tail_ranks[item["tail"]] < 3:
             item["status"] = "優先"
-        elif item["score"] > 0:
-            item["status"] = "偏正"
-        elif item["score"] < 0:
-            item["status"] = "偏負"
         else:
-            item["status"] = "平衡"
+            item["status"] = "觀察"
+        item.pop("rawScore", None)
         item["numbers"] = [
             number
             for number in numbers_by_tail[item["tail"]]
             if stats["gaps"].get(number, len(ordered)) <= 25
         ][:4]
 
-    tail_rows.sort(key=lambda item: item["tail"])
-    window_scores = {
-        str(size): {
-            "periods": window_data[size]["periods"],
-            "rows": [
-                {
-                    "tail": tail,
-                    "score": window_data[size]["balance"][tail],
-                    "openCount": window_data[size]["coverage"][tail],
-                    "missCount": window_data[size]["misses"][tail],
-                }
-                for tail in range(10)
-            ],
-        }
-        for size in window_sizes
-    }
+    tail_rows.sort(key=lambda item: (-item["score"], item["gap"], item["tail"]))
     return {
         "version": "獨立",
-        "windows": available_windows,
-        "scoreWindow": score_window,
-        "scoreRule": "每期有出尾數 +1、沒出尾數 -1；同一期同尾數只計一次。",
+        "windows": [size for size in window_sizes if ordered[:size]],
         "rows": tail_rows,
-        "windowScores": window_scores,
         "recommendedTails": [item["tail"] for item in recommended_tails],
         "avoidTails": [item["tail"] for item in tail_rows if item["gap"] >= 4],
         "recommendation": sorted(recommendation[:5]),
-        "method": f"獨立尾數分數：近{score_window}期逐期累計，有出 +1、沒出 -1；0尾到9尾完整列出。",
-        "note": "此分數只反映歷史分布，不代表下一期必然開出；彩券每期仍是隨機事件。",
+        "method": "獨立尾數統計：近10期 50%・近20期 30%・近36期 20%；只供查看，不參與主推薦、旗艦版或自適應集成。",
+        "note": "尾數只反映歷史分布與近期動能，不代表下一期必然開出；彩券每期仍是隨機事件。",
     }
 
 
@@ -2127,13 +2094,13 @@ def score_number(
 
 CORE_FEATURE_ORDER = ("recent", "heat", "gap", "interval")
 CORE_BASE_WEIGHTS = {
-    "recent": 0.45,
+    "recent": 0.55,
     "heat": 0.20,
-    "gap": 0.15,
+    "gap": 0.05,
     "interval": 0.20,
 }
-ADAPTIVE_PATTERN_VERSION = "dynamic-v1"
-CORE_ANALYSIS_METHOD = "核心基準：近期熱度 45%・長期熱度 20%・遺漏平衡 15%・區間分布 20%"
+ADAPTIVE_PATTERN_VERSION = "dynamic-v2-dedup"
+CORE_ANALYSIS_METHOD = "核心基準：近期熱度 55%・長期熱度 20%・遺漏平衡 5%・區間分布 20%"
 
 
 def normalize_core_weights(weights: dict[str, float] | None = None) -> dict[str, float]:
@@ -2296,13 +2263,13 @@ def simple_core_score_components(
         number: stats["frequency"].get(number, 0) / max(1, len(ordered) * 5)
         for number in range(1, max_number + 1)
     })
+    # Longitudinal testing does not show a reliable "magic" cold-number
+    # return point. Keep omission as a light guardrail instead of pulling every
+    # pick toward an arbitrary eight-draw gap or banning numbers after 25 draws.
     gap_balance = {
-        number: max(0.0, 1.0 - abs(stats["gaps"].get(number, len(ordered)) - 8) / 20)
+        number: 0.97 if stats["gaps"].get(number, len(ordered)) > 25 else 1.0
         for number in range(1, max_number + 1)
     }
-    for number, gap in stats["gaps"].items():
-        if gap > 25:
-            gap_balance[number] *= 0.25
 
     recent_rows = ordered[: min(36, len(ordered))]
     zone_counts = [0, 0, 0, 0]
