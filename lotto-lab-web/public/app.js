@@ -562,7 +562,7 @@ function renderFlagshipHistory() {
           <div class="flagship-history-balls">${miniBalls(record.numbers, actualAvailable ? record.actualNumbers : [])}</div>
           <div class="flagship-history-meta">
             <span>${record.method || "六維綜合推理"}</span>
-            <span>模型 ${record.profile || "綜合"}</span>
+            <span>邏輯 ${record.profile || "綜合"}</span>
             <span>${components || coreWeightSummary()}</span>
           </div>
           <div class="flagship-history-reasoning">
@@ -644,8 +644,8 @@ function activateTab(tabName) {
   els.tabPanels.forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
   });
-  if (tabName === "model" && state.analysis) {
-    renderModelOutput({ heavy: true });
+  if ((tabName === "model" || tabName === "sniper") && state.analysis) {
+    renderModelOutput({ heavy: tabName === "model" });
     loadFlagshipHistory({ silent: true });
   }
 }
@@ -653,27 +653,24 @@ function activateTab(tabName) {
 function organizeAnalysisPanels() {
   const latestPanel = document.querySelector('[data-tab-panel="latest"]');
   const recentPanel = document.querySelector('[data-tab-panel="recent"]');
+  const sniperPanel = document.querySelector('[data-tab-panel="sniper"]');
   const modelPanel = document.querySelector('[data-tab-panel="model"]');
-  if (!latestPanel || !recentPanel || !modelPanel) return;
+  if (!latestPanel || !recentPanel || !sniperPanel || !modelPanel) return;
 
   const panelById = (id) => document.getElementById(id)?.closest(".panel");
-  const movePanels = (destination, panels) => {
-    const movable = panels.filter(
-      (panel, index, list) => panel && panel.closest("[data-tab-panel]") === latestPanel && list.indexOf(panel) === index,
-    );
+  const movePanels = (destination, source, selectors) => {
+    const movable = selectors
+      .map((selector) => source.querySelector(selector))
+      .filter((panel, index, list) => panel && panel.closest("[data-tab-panel]") === source && list.indexOf(panel) === index);
     if (!movable.length) return;
     const fragment = document.createDocumentFragment();
     movable.forEach((panel) => fragment.appendChild(panel));
     destination.insertBefore(fragment, destination.firstElementChild);
   };
 
-  movePanels(modelPanel, [
-    latestPanel.querySelector(".countdown-panel"),
-    latestPanel.querySelector(".pick-panel"),
-    latestPanel.querySelector(".flagship-panel"),
-    latestPanel.querySelector(".backtest-panel"),
-    latestPanel.querySelector(".pattern-panel"),
-  ]);
+  movePanels(modelPanel, latestPanel, [".countdown-panel", ".backtest-panel", ".pattern-panel"]);
+  movePanels(sniperPanel, modelPanel, [".tail-analysis-panel", ".core-candidate-panel", ".flagship-history-panel"]);
+  movePanels(sniperPanel, latestPanel, [".pick-panel", ".flagship-panel"]);
   const recentPanels = [
     panelById("hotList"),
     panelById("coldList"),
@@ -773,8 +770,11 @@ function applyPlanAccess() {
   if (state.analysis) {
     renderFlagshipPick();
     renderFlagshipHistory();
+    renderTailAnalysis(state.analysis.tailAnalysis);
     renderModelOutput({ heavy: state.activeTab === "model" });
-    if (flagship && state.activeTab === "model") loadFlagshipHistory({ silent: true });
+    if (flagship && (state.activeTab === "model" || state.activeTab === "sniper")) {
+      loadFlagshipHistory({ silent: true });
+    }
   }
 }
 
@@ -1627,9 +1627,9 @@ function renderFlagshipPick() {
 
 function renderCoreCandidatePool() {
   if (!els.coreCandidateBalls || !els.coreCandidateMeta || !els.coreCandidateSave) return;
-  if (!isProPlan()) {
+  if (!isFlagshipPlan()) {
     els.coreCandidateBalls.innerHTML = "";
-    els.coreCandidateMeta.textContent = "Pro 訂閱版專屬";
+    els.coreCandidateMeta.textContent = "旗艦會員專屬";
     els.coreCandidateSave.disabled = true;
     return;
   }
@@ -1647,7 +1647,7 @@ function renderCoreCandidatePool() {
       const number = Number(item.number);
       const selected = state.coreCandidateSelection.includes(number);
       const core = item.isCorePick ? " is-core-pick" : "";
-      return `<button class="core-candidate-ball${selected ? " is-selected" : ""}${core}" type="button" data-core-number="${number}" aria-pressed="${selected}" title="${item.isCorePick ? "核心推薦號碼" : "模型候選號碼"}">${pad(number)}</button>`;
+      return `<button class="core-candidate-ball${selected ? " is-selected" : ""}${core}" type="button" data-core-number="${number}" aria-pressed="${selected}" title="${item.isCorePick ? "核心推薦號碼" : "邏輯候選號碼"}">${pad(number)}</button>`;
     })
     .join("");
   els.coreCandidateMeta.textContent = `已選 ${state.coreCandidateSelection.length}／5；金色外框為核心推薦五碼`;
@@ -1707,7 +1707,7 @@ function renderCandidates() {
   }
   const candidates = generateCandidates();
   if (!candidates.length) {
-    els.candidates.innerHTML = `<div class="empty-state">模型回測暫時忙碌，請稍後再按一次重新產生。</div>`;
+    els.candidates.innerHTML = `<div class="empty-state">回測驗證暫時忙碌，請稍後再按一次重新產生。</div>`;
     return;
   }
   els.candidates.innerHTML = candidates
@@ -1805,17 +1805,17 @@ function renderModelOutput({ heavy = state.activeTab === "model" } = {}) {
     if (heavy) {
       renderCandidates();
     } else {
-      els.candidates.innerHTML = `<div class="empty-state">切換到「模型」分頁後載入高分組合。</div>`;
+      els.candidates.innerHTML = `<div class="empty-state">切換到「邏輯推理」分頁後載入高分組合。</div>`;
     }
   }
   if (els.modeSnapshots) els.modeSnapshots.innerHTML = "";
 }
 
-function scheduleModelRender(message = "模型設定已更新。") {
+function scheduleModelRender(message = "邏輯推理設定已更新。") {
   if (state.modelRenderTimer) {
     window.clearTimeout(state.modelRenderTimer);
   }
-  setStatus("模型正在重新計算...");
+  setStatus("邏輯推理正在重新計算...");
   state.modelRenderTimer = window.setTimeout(() => {
     state.modelRenderTimer = null;
     renderModelOutput();
@@ -1830,7 +1830,7 @@ function renderModelBacktest(backtest, profiles = []) {
     els.avgHit.textContent = "-";
     els.threePlusRate.textContent = "-";
     els.bestHit.textContent = "-";
-    els.backtestRecent.innerHTML = `<div class="empty-state">累積更多期數後會顯示模型回測。</div>`;
+    els.backtestRecent.innerHTML = `<div class="empty-state">累積更多期數後會顯示回測驗證。</div>`;
     els.backtestMethod.textContent = "";
     return;
   }
@@ -1996,6 +1996,15 @@ function renderPatterns(patterns, profiles = [], researchEvidence = null) {
 
 function renderTailAnalysis(tailAnalysis) {
   if (!els.tailAnalysisSummary || !els.tailHotList || !els.tailAvoidList) return;
+  if (!isFlagshipPlan()) {
+    els.tailAnalysisSummary.innerHTML = "";
+    els.tailHotList.innerHTML = "";
+    els.tailAvoidList.innerHTML = "";
+    if (els.tailRecommendationBalls) els.tailRecommendationBalls.innerHTML = "";
+    if (els.tailAnalysisMeta) els.tailAnalysisMeta.innerHTML = "";
+    if (els.tailAnalysisNote) els.tailAnalysisNote.textContent = "旗艦會員專屬。";
+    return;
+  }
   if (!tailAnalysis) {
     els.tailAnalysisSummary.innerHTML = `<div class="empty-state">資料累積後會顯示尾數分析。</div>`;
     els.tailHotList.innerHTML = "";
@@ -2180,7 +2189,9 @@ function render(payload) {
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderFlagshipPick();
   renderFlagshipHistory();
-  if (state.activeTab === "model" && isFlagshipPlan()) loadFlagshipHistory({ silent: true });
+  if ((state.activeTab === "model" || state.activeTab === "sniper") && isFlagshipPlan()) {
+    loadFlagshipHistory({ silent: true });
+  }
   renderModelOutput({ heavy: state.activeTab === "model" });
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
   refreshOtherLatest({ silent: true });
@@ -2550,7 +2561,7 @@ async function refreshLatest(options = {}) {
     renderLatestCard(nextLatest);
     await notifyIfLatestChanged(nextLatest, previousKey).catch(() => {});
     writeLastSeenDraw(state.game, nextLatest);
-    setStatus("最新開獎號碼已更新，正在同步模型分析...");
+    setStatus("最新開獎號碼已更新，正在同步邏輯推理...");
     await load({ silent: true, skipCache: true });
   } catch (error) {
     if (!options.silent) {
@@ -2729,7 +2740,7 @@ if (els.flagshipHistoryRefresh) {
 
 if (els.coreCandidateSave) {
   els.coreCandidateSave.addEventListener("click", () => {
-    if (!requirePro("核心候選 15 碼")) return;
+    if (!requireFlagship("核心候選 15 碼")) return;
     if (state.coreCandidateSelection.length !== 5) {
       setStatus("請先從候選 15 碼選滿 5 顆。", true);
       return;
@@ -2784,7 +2795,7 @@ els.generate.addEventListener("click", () => {
 
 els.focusButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    if (!requirePro("模型模式切換")) return;
+    if (!requirePro("邏輯模式切換")) return;
     const preset = FOCUS_PRESETS[button.dataset.focus];
     if (!preset) return;
     state.analysisFocus = button.dataset.focus;
@@ -2798,22 +2809,22 @@ els.focusButtons.forEach((button) => {
 
 els.modelInputs.forEach((input) => {
   input.addEventListener("input", () => {
-    if (!requirePro("模型權重調整")) return;
+    if (!requirePro("邏輯權重調整")) return;
     state.modelWeights[input.dataset.weight] = Number(input.value);
     saveModelWeights();
     renderModelControls();
-    scheduleModelRender("模型設定已更新。");
+    scheduleModelRender("邏輯推理設定已更新。");
   });
 });
 
 els.resetModel.addEventListener("click", () => {
-  if (!requirePro("模型設定重設")) return;
+  if (!requirePro("邏輯推理設定重設")) return;
   state.analysisFocus = "balanced";
   state.modelWeights = { ...FOCUS_PRESETS.balanced.weights };
   saveAnalysisFocus();
   saveModelWeights();
   renderModelControls();
-  scheduleModelRender("模型設定已重設。");
+  scheduleModelRender("邏輯推理設定已重設。");
 });
 
 els.historyKeyword.addEventListener("input", () => {

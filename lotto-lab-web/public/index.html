@@ -13,7 +13,7 @@
     <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
     <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
-    <link rel="stylesheet" href="/styles.css?v=75" />
+    <link rel="stylesheet" href="/styles.css?v=76" />
   </head>
   <body>
     <main class="shell">
@@ -40,7 +40,8 @@
           <button class="page-tab active" type="button" data-tab="latest">最新開獎</button>
           <button class="page-tab" type="button" data-tab="recent">近期號碼</button>
           <button class="page-tab" type="button" data-tab="history">紀錄查詢</button>
-          <button class="page-tab" type="button" data-tab="model">模型</button>
+          <button class="page-tab" type="button" data-tab="model">邏輯推理</button>
+          <button class="page-tab" type="button" data-tab="sniper">五星狙擊手</button>
           <button class="page-tab" type="button" data-tab="subscription">升級訂閱</button>
         </nav>
 
@@ -92,7 +93,7 @@
           </div>
         </article>
 
-        <article class="panel pick-panel">
+        <article class="panel pick-panel" data-tier="pro" data-lock-title="Pro 統計參考選號" data-lock-text="訂閱後可查看依核心邏輯產生的統計參考選號。">
           <p class="label">統計參考選號</p>
           <div class="balls accent" id="pickBalls"></div>
           <div class="pick-meta" id="pickMeta"></div>
@@ -115,17 +116,17 @@
                 <p class="label">自適應集成</p>
                 <strong>自適應集成五碼</strong>
               </div>
-              <span class="adaptive-badge">獨立模型</span>
+              <span class="adaptive-badge">獨立推理</span>
             </div>
             <div class="balls adaptive-balls" id="adaptiveBalls" aria-label="自適應集成五碼"></div>
             <div class="pick-meta adaptive-meta" id="adaptiveMeta"></div>
           </div>
         </article>
 
-        <article class="panel backtest-panel" data-tier="pro" data-lock-title="Pro 模型回測" data-lock-text="訂閱後可查看近期命中表現與模型排名。">
+        <article class="panel backtest-panel" data-tier="pro" data-lock-title="Pro 回測驗證" data-lock-text="訂閱後可查看近期命中表現與邏輯排名。">
           <div class="panel-head compact">
             <div>
-              <p class="label">模型回測</p>
+              <p class="label">回測驗證</p>
               <h2>最近表現</h2>
             </div>
             <div class="backtest-tools" aria-label="回測期數設定">
@@ -240,11 +241,13 @@
         </article>
         </div>
 
+        <div class="tab-panel" data-tab-panel="sniper"></div>
+
         <div class="tab-panel" data-tab-panel="model">
-        <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 核心分析" data-lock-text="訂閱後可查看核心分析說明與回測結果。">
+        <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看核心分析說明與回測結果。">
           <div class="panel-head compact">
             <div>
-              <p class="label">模型設定</p>
+              <p class="label">邏輯推理設定</p>
               <h2>調整偏好</h2>
             </div>
             <button id="resetModelBtn" class="text-button" hidden>重設</button>
@@ -263,7 +266,7 @@
                 <option value="365">365 期</option>
               </select>
             </label>
-            <span class="model-window-note">模型、近期號碼與參考統計共用此資料範圍</span>
+            <span class="model-window-note">邏輯推理、近期號碼與參考統計共用此資料範圍</span>
           </div>
           <div class="core-logic-summary" aria-label="核心分析邏輯">
             <div class="core-logic-item">
@@ -286,13 +289,13 @@
           <p class="fineprint" id="modelSummary">所有方案共用這套核心分析；回測只用來檢查表現，不再反覆改寫推薦號碼。</p>
         </article>
 
-        <article class="panel core-candidate-panel" data-tier="pro" data-lock-title="Pro 核心候選 15 碼" data-lock-text="訂閱後可查看依核心分析排序的 15 碼候選池，並自行組合 5 碼。">
+        <article class="panel core-candidate-panel" data-tier="flagship" data-lock-title="旗艦核心候選 15 碼" data-lock-text="升級量化旗艦版後，可查看依核心分析排序的 15 碼候選池，並自行組合 5 碼。">
           <div class="panel-head compact">
             <div>
               <p class="label">會員自選池</p>
               <h2>核心候選 15 碼</h2>
             </div>
-            <span class="count-pill">模型分數排序</span>
+            <span class="count-pill">邏輯分數排序</span>
           </div>
           <p class="fineprint">沿用近期熱度、長期熱度、遺漏平衡與區間分布，列出分數較高的 15 碼供會員自行選擇；不是保證中獎清單。</p>
           <div class="core-candidate-balls" id="coreCandidateBalls" aria-label="核心候選 15 碼"></div>
@@ -302,11 +305,11 @@
           </div>
         </article>
 
-        <article class="panel tail-analysis-panel" data-tier="pro" data-lock-title="Pro 尾數分析模組" data-lock-text="訂閱後可查看近 10、20、36 期的獨立尾數動能與參考號碼。">
+        <article class="panel tail-analysis-panel" data-tier="flagship" data-lock-title="旗艦尾數焦點 5 碼" data-lock-text="升級量化旗艦版後，可查看近 10、20、36 期的獨立尾數動能與參考號碼。">
           <div class="panel-head compact">
             <div>
               <p class="label">獨立分析模組</p>
-              <h2>尾數分析模組</h2>
+              <h2>尾數焦點 5 碼</h2>
             </div>
             <span id="tailAnalysisBadge" class="count-pill">獨立 · 近 10／20／36 期</span>
           </div>
@@ -361,7 +364,7 @@
             </div>
             <span class="count-pill">含區間</span>
           </div>
-          <p class="fineprint">每個模式各自產生一組，保留最高命中與 3 中以上次數；點卡片可切換到該模式。</p>
+          <p class="fineprint">每個邏輯模式各自產生一組，保留最高命中與 3 中以上次數；點卡片可切換到該模式。</p>
           <div class="mode-snapshot-list" id="modeSnapshotList"></div>
         </article>
 
@@ -448,7 +451,7 @@
           <div>
             <p class="label">訂閱方案</p>
             <h2>Pro 統計分析與量化旗艦版</h2>
-            <p class="fineprint">Pro 解鎖進階模型；量化旗艦版再提供每期 5 碼高分候選池與拖牌、尾數獨立訊號。</p>
+            <p class="fineprint">Pro 解鎖進階邏輯推理；量化旗艦版再提供五星狙擊手專區的旗艦 5 碼、核心候選與尾數焦點。</p>
             <p class="subscription-disclaimer">本訂閱附加功能僅用於輔助提高中獎機率與統計參考，並非百發百中，也不保證中獎。請理性投注，賽事每天有，祝您中獎。</p>
           </div>
           <div class="plan-grid" id="planGrid"></div>
@@ -456,6 +459,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=85"></script>
+    <script src="/app.js?v=86"></script>
   </body>
 </html>

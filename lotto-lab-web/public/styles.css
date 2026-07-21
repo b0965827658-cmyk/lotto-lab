@@ -344,6 +344,14 @@ select {
   grid-column: 1 / -1;
 }
 
+.tab-panel[data-tab-panel="sniper"] .pick-panel,
+.tab-panel[data-tab-panel="sniper"] .flagship-panel,
+.tab-panel[data-tab-panel="sniper"] .tail-analysis-panel,
+.tab-panel[data-tab-panel="sniper"] .core-candidate-panel,
+.tab-panel[data-tab-panel="sniper"] .flagship-history-panel {
+  grid-column: 1 / -1;
+}
+
 .panel {
   min-width: 0;
   border: 1px solid var(--line);
@@ -1532,9 +1540,8 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 
 .saved-number-picker {
   display: grid;
-  grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: 8px 4px;
-  width: 100%;
+  grid-template-columns: repeat(8, minmax(30px, 1fr));
+  gap: 8px;
 }
 
 .saved-number-ball {
@@ -1549,11 +1556,11 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   background: #f1f6f2;
   color: var(--muted);
   cursor: pointer;
-  font-size: clamp(11px, 1.9vw, 16px);
+  font-size: clamp(12px, 2vw, 15px);
   font-variant-numeric: tabular-nums;
   font-weight: 900;
   line-height: 1;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
 }
 
 .saved-number-ball:hover,
@@ -1565,11 +1572,10 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 }
 
 .saved-number-ball.is-selected {
-  border-color: #b87800;
-  background: #f2b51d;
-  color: #342707;
-  box-shadow: 0 0 0 2px rgba(242, 181, 29, 0.28), 0 0 14px rgba(242, 181, 29, 0.7), inset 0 -5px 8px rgba(147, 91, 0, 0.2);
-  transform: scale(1.06);
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+  box-shadow: inset 0 -5px 8px rgba(0, 0, 0, 0.14);
 }
 
 .saved-picker-toolbar {
@@ -2712,12 +2718,6 @@ th {
     overflow-wrap: anywhere;
   }
 
-  .saved-number-picker {
-    width: calc(100% + 16px);
-    margin-inline: -8px;
-    gap: 7px 3px;
-  }
-
   .saved-form .save-button {
     grid-column: 1 / -1;
   }
@@ -2963,14 +2963,12 @@ th {
 
 @media (max-width: 420px) {
   .saved-number-picker {
-    grid-template-columns: repeat(10, minmax(0, 1fr));
-    width: calc(100% + 20px);
-    margin-inline: -10px;
-    gap: 6px 2px;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .saved-number-ball {
-    font-size: clamp(10px, 3.2vw, 13px);
+    font-size: 12px;
   }
 
   .saved-picker-toolbar {
