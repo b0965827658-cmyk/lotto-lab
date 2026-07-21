@@ -107,33 +107,6 @@ const FOCUS_PRESETS = {
 };
 
 const MODE_SNAPSHOT_KEYS = ["balanced", "classic", "hot", "overdue", "interval", "pattern", "backtest"];
-const CANDIDATE_LOGIC_PRESETS = [
-  {
-    key: "hot",
-    label: "熱號追擊",
-    description: "優先追蹤近期熱度較高的號碼，再用回測與分散條件篩選。",
-  },
-  {
-    key: "interval",
-    label: "區間追擊",
-    description: "鎖定近期較集中的落點區間，兼顧區間分布與號碼熱度。",
-  },
-  {
-    key: "pattern",
-    label: "版路追擊",
-    description: "參考連號、拖牌、鄰近號與奇偶大小等近期版路訊號。",
-  },
-  {
-    key: "overdue",
-    label: "冷號回補",
-    description: "挑選遺漏較久且仍通過核心條件的號碼，避免單純追最冷。",
-  },
-  {
-    key: "balanced",
-    label: "綜合推理",
-    description: "整合熱度、區間、版路、遺漏與回測，作為整體參考。",
-  },
-];
 const VALIDATION_RECORDS = [
   {
     game: "tw539",
@@ -222,11 +195,6 @@ const els = {
   patternRepeat: $("#patternRepeat"),
   patternGrid: $("#patternGrid"),
   patternLines: $("#patternLines"),
-  recentPatternAutoBadge: $("#recentPatternAutoBadge"),
-  recentPatternAutoSummary: $("#recentPatternAutoSummary"),
-  recentPatternAutoSignals: $("#recentPatternAutoSignals"),
-  recentPatternAutoWindows: $("#recentPatternAutoWindows"),
-  recentPatternAutoNote: $("#recentPatternAutoNote"),
   tailAnalysisBadge: $("#tailAnalysisBadge"),
   tailAnalysisSummary: $("#tailAnalysisSummary"),
   tailHotList: $("#tailHotList"),
@@ -594,7 +562,7 @@ function renderFlagshipHistory() {
           <div class="flagship-history-balls">${miniBalls(record.numbers, actualAvailable ? record.actualNumbers : [])}</div>
           <div class="flagship-history-meta">
             <span>${record.method || "六維綜合推理"}</span>
-            <span>邏輯 ${record.profile || "綜合"}</span>
+            <span>模型 ${record.profile || "綜合"}</span>
             <span>${components || coreWeightSummary()}</span>
           </div>
           <div class="flagship-history-reasoning">
@@ -676,8 +644,8 @@ function activateTab(tabName) {
   els.tabPanels.forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
   });
-  if ((tabName === "model" || tabName === "sniper") && state.analysis) {
-    renderModelOutput({ heavy: tabName === "model" });
+  if (tabName === "model" && state.analysis) {
+    renderModelOutput({ heavy: true });
     loadFlagshipHistory({ silent: true });
   }
 }
@@ -685,24 +653,27 @@ function activateTab(tabName) {
 function organizeAnalysisPanels() {
   const latestPanel = document.querySelector('[data-tab-panel="latest"]');
   const recentPanel = document.querySelector('[data-tab-panel="recent"]');
-  const sniperPanel = document.querySelector('[data-tab-panel="sniper"]');
   const modelPanel = document.querySelector('[data-tab-panel="model"]');
-  if (!latestPanel || !recentPanel || !sniperPanel || !modelPanel) return;
+  if (!latestPanel || !recentPanel || !modelPanel) return;
 
   const panelById = (id) => document.getElementById(id)?.closest(".panel");
-  const movePanels = (destination, source, selectors) => {
-    const movable = selectors
-      .map((selector) => source.querySelector(selector))
-      .filter((panel, index, list) => panel && panel.closest("[data-tab-panel]") === source && list.indexOf(panel) === index);
+  const movePanels = (destination, panels) => {
+    const movable = panels.filter(
+      (panel, index, list) => panel && panel.closest("[data-tab-panel]") === latestPanel && list.indexOf(panel) === index,
+    );
     if (!movable.length) return;
     const fragment = document.createDocumentFragment();
     movable.forEach((panel) => fragment.appendChild(panel));
     destination.insertBefore(fragment, destination.firstElementChild);
   };
 
-  movePanels(modelPanel, latestPanel, [".countdown-panel", ".backtest-panel", ".pattern-panel"]);
-  movePanels(sniperPanel, modelPanel, [".tail-analysis-panel", ".core-candidate-panel", ".flagship-history-panel"]);
-  movePanels(sniperPanel, latestPanel, [".pick-panel", ".flagship-panel"]);
+  movePanels(modelPanel, [
+    latestPanel.querySelector(".countdown-panel"),
+    latestPanel.querySelector(".pick-panel"),
+    latestPanel.querySelector(".flagship-panel"),
+    latestPanel.querySelector(".backtest-panel"),
+    latestPanel.querySelector(".pattern-panel"),
+  ]);
   const recentPanels = [
     panelById("hotList"),
     panelById("coldList"),
@@ -802,11 +773,8 @@ function applyPlanAccess() {
   if (state.analysis) {
     renderFlagshipPick();
     renderFlagshipHistory();
-    renderTailAnalysis(state.analysis.tailAnalysis);
     renderModelOutput({ heavy: state.activeTab === "model" });
-    if (flagship && (state.activeTab === "model" || state.activeTab === "sniper")) {
-      loadFlagshipHistory({ silent: true });
-    }
+    if (flagship && state.activeTab === "model") loadFlagshipHistory({ silent: true });
   }
 }
 
@@ -1659,9 +1627,9 @@ function renderFlagshipPick() {
 
 function renderCoreCandidatePool() {
   if (!els.coreCandidateBalls || !els.coreCandidateMeta || !els.coreCandidateSave) return;
-  if (!isFlagshipPlan()) {
+  if (!isProPlan()) {
     els.coreCandidateBalls.innerHTML = "";
-    els.coreCandidateMeta.textContent = "旗艦會員專屬";
+    els.coreCandidateMeta.textContent = "Pro 訂閱版專屬";
     els.coreCandidateSave.disabled = true;
     return;
   }
@@ -1679,7 +1647,7 @@ function renderCoreCandidatePool() {
       const number = Number(item.number);
       const selected = state.coreCandidateSelection.includes(number);
       const core = item.isCorePick ? " is-core-pick" : "";
-      return `<button class="core-candidate-ball${selected ? " is-selected" : ""}${core}" type="button" data-core-number="${number}" aria-pressed="${selected}" title="${item.isCorePick ? "核心推薦號碼" : "邏輯候選號碼"}">${pad(number)}</button>`;
+      return `<button class="core-candidate-ball${selected ? " is-selected" : ""}${core}" type="button" data-core-number="${number}" aria-pressed="${selected}" title="${item.isCorePick ? "核心推薦號碼" : "模型候選號碼"}">${pad(number)}</button>`;
     })
     .join("");
   els.coreCandidateMeta.textContent = `已選 ${state.coreCandidateSelection.length}／5；金色外框為核心推薦五碼`;
@@ -1737,24 +1705,17 @@ function renderCandidates() {
     els.candidates.innerHTML = `<div class="empty-state">資料讀取後會產生候選組合。</div>`;
     return;
   }
-  const candidates = CANDIDATE_LOGIC_PRESETS.map((preset) => {
-    const candidate = withTemporaryFocus(preset.key, () => generateCandidates()[0]);
-    return candidate ? { ...preset, candidate } : null;
-  }).filter(Boolean);
+  const candidates = generateCandidates();
   if (!candidates.length) {
-    els.candidates.innerHTML = `<div class="empty-state">回測驗證暫時忙碌，請稍後再按一次重新產生。</div>`;
+    els.candidates.innerHTML = `<div class="empty-state">模型回測暫時忙碌，請稍後再按一次重新產生。</div>`;
     return;
   }
   els.candidates.innerHTML = candidates
     .map(
-      ({ key, label, description, candidate }) => `
-        <div class="candidate-item" data-logic="${key}">
-          <div class="candidate-copy">
-            <div class="candidate-title-row">
-              <strong class="candidate-name">${label}</strong>
-              <span class="candidate-logic-tag">邏輯推理</span>
-            </div>
-            <p class="candidate-description">${description}</p>
+      (candidate, index) => `
+        <div class="candidate-item">
+          <div class="candidate-rank">#${index + 1}</div>
+          <div>
             <div class="saved-balls">${miniBalls(candidate.numbers)}</div>
             <div class="candidate-meta">
               <span>${candidate.score.total} · ${candidate.score.label}</span>
@@ -1844,17 +1805,17 @@ function renderModelOutput({ heavy = state.activeTab === "model" } = {}) {
     if (heavy) {
       renderCandidates();
     } else {
-      els.candidates.innerHTML = `<div class="empty-state">切換到「邏輯推理」分頁後載入高分組合。</div>`;
+      els.candidates.innerHTML = `<div class="empty-state">切換到「模型」分頁後載入高分組合。</div>`;
     }
   }
   if (els.modeSnapshots) els.modeSnapshots.innerHTML = "";
 }
 
-function scheduleModelRender(message = "邏輯推理設定已更新。") {
+function scheduleModelRender(message = "模型設定已更新。") {
   if (state.modelRenderTimer) {
     window.clearTimeout(state.modelRenderTimer);
   }
-  setStatus("邏輯推理正在重新計算...");
+  setStatus("模型正在重新計算...");
   state.modelRenderTimer = window.setTimeout(() => {
     state.modelRenderTimer = null;
     renderModelOutput();
@@ -1869,7 +1830,7 @@ function renderModelBacktest(backtest, profiles = []) {
     els.avgHit.textContent = "-";
     els.threePlusRate.textContent = "-";
     els.bestHit.textContent = "-";
-    els.backtestRecent.innerHTML = `<div class="empty-state">累積更多期數後會顯示回測驗證。</div>`;
+    els.backtestRecent.innerHTML = `<div class="empty-state">累積更多期數後會顯示模型回測。</div>`;
     els.backtestMethod.textContent = "";
     return;
   }
@@ -1963,187 +1924,6 @@ function renderModelBacktest(backtest, profiles = []) {
   }
 }
 
-function recentPatternWindow(draws, size) {
-  const rows = draws.slice(0, size);
-  if (!rows.length) return null;
-  const totalNumbers = rows.length * 5;
-  const zoneLabels = ["01-10", "11-20", "21-30", "31-39"];
-  const zoneCounts = [0, 0, 0, 0];
-  const tailCounts = new Map();
-  const oddCounts = new Map();
-  const consecutiveCounts = [];
-
-  rows.forEach((draw) => {
-    const numbers = normalizedPick(draw.numbers, 5);
-    numbers.forEach((number) => {
-      zoneCounts[Math.min(3, Math.floor((number - 1) / 10))] += 1;
-      const tail = number % 10;
-      tailCounts.set(tail, (tailCounts.get(tail) || 0) + 1);
-    });
-    const odd = numbers.filter((number) => number % 2 === 1).length;
-    oddCounts.set(odd, (oddCounts.get(odd) || 0) + 1);
-    consecutiveCounts.push(numbers.filter((number, index) => index > 0 && number - numbers[index - 1] === 1).length);
-  });
-
-  const transitions = rows.slice(0, -1).map((draw, index) => {
-    const current = new Set(normalizedPick(draw.numbers, 5));
-    const previous = new Set(normalizedPick(rows[index + 1].numbers, 5));
-    return [...current].filter((number) => previous.has(number)).length;
-  });
-  const average = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-  const percentage = (value, total) => total ? Math.round((value / total) * 100) : 0;
-  const mode = (map) => [...map.entries()].sort((left, right) => right[1] - left[1] || left[0] - right[0])[0] || [0, 0];
-  const zoneIndex = zoneCounts.reduce((best, count, index) => count > zoneCounts[best] ? index : best, 0);
-  const topTails = [...tailCounts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0] - right[0])
-    .slice(0, 3);
-  const [oddMode, oddModeCount] = mode(oddCounts);
-  const repeatAverage = average(transitions);
-  const consecutiveRate = percentage(consecutiveCounts.filter((count) => count > 0).length, rows.length);
-  const repeatRate = percentage(transitions.filter((count) => count > 0).length, transitions.length);
-  const tailShare = topTails.length ? topTails[0][1] / totalNumbers : 0;
-  const zoneShare = zoneCounts[zoneIndex] / totalNumbers;
-
-  return {
-    size: rows.length,
-    requestedSize: size,
-    latestRepeat: transitions[0] || 0,
-    repeatAverage,
-    repeatRate,
-    consecutiveRate,
-    oddMode,
-    oddModeCount,
-    oddModeRate: percentage(oddModeCount, rows.length),
-    zone: zoneLabels[zoneIndex],
-    zoneShare,
-    topTails,
-    tailShare,
-    sumAverage: Math.round(average(rows.map((draw) => normalizedPick(draw.numbers, 5).reduce((sum, number) => sum + number, 0)))),
-  };
-}
-
-function buildRecentPatternAutoAnalysis() {
-  const draws = (state.history || []).filter((draw) => normalizedPick(draw.numbers, 5).length === 5);
-  const windows = [10, 20, 36]
-    .map((size) => recentPatternWindow(draws, size))
-    .filter(Boolean);
-  if (!windows.length) return null;
-
-  const recent = windows[0];
-  const longest = windows[windows.length - 1];
-  const signals = [
-    {
-      key: "repeat",
-      title: "連莊走勢",
-      score: recent.repeatRate + recent.repeatAverage * 10,
-      value: `近 ${recent.requestedSize} 期 ${recent.repeatAverage.toFixed(2)} 顆／期`,
-      description: `最近一期與前一期重疊 ${recent.latestRepeat} 顆，觀察是否延續。`,
-    },
-    {
-      key: "consecutive",
-      title: "連號走勢",
-      score: recent.consecutiveRate,
-      value: `${recent.consecutiveRate}% 有連號`,
-      description: "統計每期是否出現相鄰號碼，避免只看單一期。",
-    },
-    {
-      key: "interval",
-      title: "區間集中",
-      score: recent.zoneShare * 100,
-      value: `${recent.zone} 占 ${Math.round(recent.zoneShare * 100)}%`,
-      description: "找出近期號碼較集中的區間，作為版路觀察。",
-    },
-    {
-      key: "tail",
-      title: "尾數聚焦",
-      score: recent.tailShare * 100,
-      value: `${recent.topTails.map(([tail]) => `${tail}尾`).join("、") || "資料不足"}`,
-      description: "整理近期出現較多的尾數，僅作輔助訊號。",
-    },
-    {
-      key: "oddEven",
-      title: "奇偶結構",
-      score: recent.oddModeRate,
-      value: `${recent.oddMode} 奇 ${5 - recent.oddMode} 偶`,
-      description: `近 ${recent.requestedSize} 期最常見的奇偶配置。`,
-    },
-  ].sort((left, right) => right.score - left.score || left.key.localeCompare(right.key));
-
-  const lead = signals[0];
-  const repeatDelta = recent.repeatAverage - longest.repeatAverage;
-  const trend = repeatDelta >= 0.25
-    ? "近期連莊比近 36 期平均更活躍。"
-    : repeatDelta <= -0.25
-      ? "近期連莊比近 36 期平均收斂，先保留觀察。"
-      : "近 10 期與近 36 期的連莊強度接近。";
-  return { windows, signals, lead, trend };
-}
-
-function renderRecentPatternAuto() {
-  if (!els.recentPatternAutoSummary) return;
-  const result = buildRecentPatternAutoAnalysis();
-  if (!result) {
-    els.recentPatternAutoBadge.textContent = "資料累積中";
-    els.recentPatternAutoSummary.innerHTML = `<div class="empty-state">資料累積後會自動整理近期版路。</div>`;
-    els.recentPatternAutoSignals.innerHTML = "";
-    els.recentPatternAutoWindows.innerHTML = "";
-    return;
-  }
-
-  const { windows, signals, lead, trend } = result;
-  const adaptive = state.analysis?.adaptiveRecentPattern;
-  els.recentPatternAutoBadge.textContent = `近 ${windows.map((item) => item.requestedSize).join("／")} 期`;
-  els.recentPatternAutoSummary.innerHTML = `
-    <div class="recent-pattern-auto-lead">
-      <span>目前主導版路</span>
-      <strong>${lead.title}</strong>
-      <em>${lead.description}</em>
-    </div>
-    <div class="recent-pattern-auto-stat">
-      <span>近期重疊</span>
-      <strong>${windows[0].repeatAverage.toFixed(2)} 顆</strong>
-      <em>近 ${windows[0].requestedSize} 期平均</em>
-    </div>
-    <div class="recent-pattern-auto-stat">
-      <span>連號期比例</span>
-      <strong>${windows[0].consecutiveRate}%</strong>
-      <em>近 ${windows[0].requestedSize} 期</em>
-    </div>
-    <div class="recent-pattern-auto-stat">
-      <span>集中區間</span>
-      <strong>${windows[0].zone}</strong>
-      <em>號碼占比 ${Math.round(windows[0].zoneShare * 100)}%</em>
-    </div>
-  `;
-  els.recentPatternAutoSignals.innerHTML = signals
-    .slice(0, 5)
-    .map((signal, index) => `
-      <div class="recent-pattern-auto-signal${index === 0 ? " is-lead" : ""}">
-        <strong>${signal.title}</strong>
-        <span>${signal.value}</span>
-      </div>
-    `)
-    .join("");
-  els.recentPatternAutoWindows.innerHTML = windows
-    .map((item) => `
-      <div class="recent-pattern-auto-window">
-        <strong>近 ${item.size}${item.size === item.requestedSize ? "" : `／${item.requestedSize}`} 期</strong>
-        <span>連莊 ${item.repeatAverage.toFixed(2)} 顆／期</span>
-        <span>連號 ${item.consecutiveRate}%</span>
-        <span>熱門尾數 ${item.topTails.map(([tail]) => `${tail}尾`).join("、") || "-"}</span>
-        <span>奇偶 ${item.oddMode}奇${5 - item.oddMode}偶</span>
-        <span>均和 ${item.sumAverage}</span>
-      </div>
-    `)
-    .join("");
-  const adaptiveText = adaptive?.selectedLabel ? `核心權重目前偏向「${adaptive.selectedLabel}」。` : "核心權重會隨新資料重新校準。";
-  const validation = state.analysis?.recentPatternValidation;
-  const strategyText = state.analysis?.recentPatternStrategy === "recent-pattern"
-    ? `近期版路已通過 ${validation?.testedCount || 0} 次逐期驗證，本期採用版路候選。`
-    : `近期版路已完成 ${validation?.testedCount || 0} 次逐期驗證，目前核心模型較穩，先不強行切換。`;
-  els.recentPatternAutoNote.textContent = `${trend}${adaptiveText} ${strategyText} 新一期資料進來後自動重算；版路是統計觀察，不代表預測或保證中獎。`;
-}
-
 function renderPatterns(patterns, profiles = [], researchEvidence = null) {
   if (!patterns) {
     els.patternModel.textContent = "-";
@@ -2216,15 +1996,6 @@ function renderPatterns(patterns, profiles = [], researchEvidence = null) {
 
 function renderTailAnalysis(tailAnalysis) {
   if (!els.tailAnalysisSummary || !els.tailHotList || !els.tailAvoidList) return;
-  if (!isFlagshipPlan()) {
-    els.tailAnalysisSummary.innerHTML = "";
-    els.tailHotList.innerHTML = "";
-    els.tailAvoidList.innerHTML = "";
-    if (els.tailRecommendationBalls) els.tailRecommendationBalls.innerHTML = "";
-    if (els.tailAnalysisMeta) els.tailAnalysisMeta.innerHTML = "";
-    if (els.tailAnalysisNote) els.tailAnalysisNote.textContent = "旗艦會員專屬。";
-    return;
-  }
   if (!tailAnalysis) {
     els.tailAnalysisSummary.innerHTML = `<div class="empty-state">資料累積後會顯示尾數分析。</div>`;
     els.tailHotList.innerHTML = "";
@@ -2240,38 +2011,39 @@ function renderTailAnalysis(tailAnalysis) {
   const recommendedTails = Array.isArray(tailAnalysis.recommendedTails) ? tailAnalysis.recommendedTails : [];
   const avoidTails = Array.isArray(tailAnalysis.avoidTails) ? tailAnalysis.avoidTails : [];
   const windows = Array.isArray(tailAnalysis.windows) ? tailAnalysis.windows : [10, 20, 36];
+  const scoreWindow = Number(tailAnalysis.scoreWindow || Math.max(...windows, 36));
   const chip = (tail, tone = "") => {
     const row = rowByTail.get(Number(tail));
-    const score = row ? ` ${row.score}` : "";
+    const score = row ? (row.scoreLabel ?? `${Number(row.score) >= 0 ? "+" : ""}${row.score}`) : "";
     return `<span class="tail-pill ${tone}"><strong>${tail}尾</strong><small>${score} 分</small></span>`;
   };
-  const strongest = rows[0];
+  const strongest = [...rows].sort((left, right) => Number(right.score || 0) - Number(left.score || 0) || left.tail - right.tail)[0];
   const freshest = [...rows].sort((left, right) => (right.momentum || 0) - (left.momentum || 0) || left.tail - right.tail)[0];
-  const activeCount = rows.filter((row) => row.status !== "避開").length;
-  els.tailAnalysisBadge.textContent = `${tailAnalysis.version || "獨立"} · 近 ${windows.join("／")} 期`;
+  const activeCount = rows.filter((row) => Number(row.score || 0) > 0).length;
+  els.tailAnalysisBadge.textContent = `${tailAnalysis.version || "獨立"} · 近${scoreWindow}期逐期 +1／-1`;
   els.tailAnalysisSummary.innerHTML = `
     <div>
-      <span>近期最強</span>
+      <span>目前最高分</span>
       <strong>${strongest ? `${strongest.tail}尾` : "-"}</strong>
-      <em>${strongest ? `${strongest.score} 分` : "資料不足"}</em>
+      <em>${strongest ? `${strongest.scoreLabel || strongest.score} 分` : "資料不足"}</em>
     </div>
     <div>
-      <span>動能上升</span>
+      <span>近期變化</span>
       <strong>${freshest ? `${freshest.tail}尾` : "-"}</strong>
       <em>${freshest ? `${freshest.momentum >= 0 ? "+" : ""}${freshest.momentum}%` : "資料不足"}</em>
     </div>
     <div>
-      <span>可用尾數</span>
+      <span>正分尾數</span>
       <strong>${activeCount} / 10</strong>
-      <em>依 4 期未出規則篩選</em>
+      <em>完整列出 0 尾～9 尾</em>
     </div>
   `;
   els.tailHotList.innerHTML = recommendedTails.length
     ? recommendedTails.map((tail, index) => chip(tail, index < 2 ? "hot" : "")).join("")
     : `<span class="tail-analysis-empty">資料不足</span>`;
-  els.tailAvoidList.innerHTML = avoidTails.length
-    ? avoidTails.map((tail) => chip(tail, "avoid")).join("")
-    : `<span class="tail-analysis-empty">目前沒有連續 4 期未出的尾數</span>`;
+  els.tailAvoidList.innerHTML = rows.length
+    ? rows.map((row) => chip(row.tail, Number(row.score || 0) > 0 ? "hot" : Number(row.score || 0) < 0 ? "avoid" : "")).join("")
+    : `<span class="tail-analysis-empty">資料不足</span>`;
   if (els.tailRecommendationBalls) {
     const recommendation = normalizedPick(tailAnalysis.recommendation);
     els.tailRecommendationBalls.innerHTML = recommendation.length === 5 ? balls(recommendation) : `<span class="tail-analysis-empty">資料累積中</span>`;
@@ -2279,12 +2051,12 @@ function renderTailAnalysis(tailAnalysis) {
   if (els.tailAnalysisMeta) {
     els.tailAnalysisMeta.innerHTML = `
       <span>優先尾數：${recommendedTails.map((tail) => `${tail}尾`).join("、") || "資料不足"}</span>
-      <span>避開：${avoidTails.map((tail) => `${tail}尾`).join("、") || "無"}</span>
-      <span>固定短期分析</span>
+      <span>連續 4 期未出：${avoidTails.map((tail) => `${tail}尾`).join("、") || "無"}</span>
+      <span>計分規則：有出 +1／沒出 -1</span>
     `;
   }
   if (els.tailAnalysisNote) {
-    els.tailAnalysisNote.textContent = `${tailAnalysis.method || "獨立尾數統計分析。"} ${tailAnalysis.note || ""}`.trim();
+    els.tailAnalysisNote.textContent = `${tailAnalysis.method || "獨立尾數統計分析。"} ${tailAnalysis.scoreRule || "每期有出尾數 +1、沒出尾數 -1。"} ${tailAnalysis.note || ""}`.trim();
   }
 }
 
@@ -2401,7 +2173,6 @@ function render(payload) {
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles, analysis.researchEvidence);
-  renderRecentPatternAuto();
   renderTailAnalysis(analysis.tailAnalysis);
   els.hot.innerHTML = rankRows(analysis.hot, "count");
   els.cold.innerHTML = rankRows(analysis.cold, "count");
@@ -2410,9 +2181,7 @@ function render(payload) {
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderFlagshipPick();
   renderFlagshipHistory();
-  if ((state.activeTab === "model" || state.activeTab === "sniper") && isFlagshipPlan()) {
-    loadFlagshipHistory({ silent: true });
-  }
+  if (state.activeTab === "model" && isFlagshipPlan()) loadFlagshipHistory({ silent: true });
   renderModelOutput({ heavy: state.activeTab === "model" });
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
   refreshOtherLatest({ silent: true });
@@ -2782,7 +2551,7 @@ async function refreshLatest(options = {}) {
     renderLatestCard(nextLatest);
     await notifyIfLatestChanged(nextLatest, previousKey).catch(() => {});
     writeLastSeenDraw(state.game, nextLatest);
-    setStatus("最新開獎號碼已更新，正在同步邏輯推理...");
+    setStatus("最新開獎號碼已更新，正在同步模型分析...");
     await load({ silent: true, skipCache: true });
   } catch (error) {
     if (!options.silent) {
@@ -2961,7 +2730,7 @@ if (els.flagshipHistoryRefresh) {
 
 if (els.coreCandidateSave) {
   els.coreCandidateSave.addEventListener("click", () => {
-    if (!requireFlagship("核心候選 15 碼")) return;
+    if (!requirePro("核心候選 15 碼")) return;
     if (state.coreCandidateSelection.length !== 5) {
       setStatus("請先從候選 15 碼選滿 5 顆。", true);
       return;
@@ -3016,7 +2785,7 @@ els.generate.addEventListener("click", () => {
 
 els.focusButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    if (!requirePro("邏輯模式切換")) return;
+    if (!requirePro("模型模式切換")) return;
     const preset = FOCUS_PRESETS[button.dataset.focus];
     if (!preset) return;
     state.analysisFocus = button.dataset.focus;
@@ -3030,22 +2799,22 @@ els.focusButtons.forEach((button) => {
 
 els.modelInputs.forEach((input) => {
   input.addEventListener("input", () => {
-    if (!requirePro("邏輯權重調整")) return;
+    if (!requirePro("模型權重調整")) return;
     state.modelWeights[input.dataset.weight] = Number(input.value);
     saveModelWeights();
     renderModelControls();
-    scheduleModelRender("邏輯推理設定已更新。");
+    scheduleModelRender("模型設定已更新。");
   });
 });
 
 els.resetModel.addEventListener("click", () => {
-  if (!requirePro("邏輯推理設定重設")) return;
+  if (!requirePro("模型設定重設")) return;
   state.analysisFocus = "balanced";
   state.modelWeights = { ...FOCUS_PRESETS.balanced.weights };
   saveAnalysisFocus();
   saveModelWeights();
   renderModelControls();
-  scheduleModelRender("邏輯推理設定已重設。");
+  scheduleModelRender("模型設定已重設。");
 });
 
 els.historyKeyword.addEventListener("input", () => {
