@@ -1742,9 +1742,8 @@ function renderCandidates() {
   }
   els.candidates.innerHTML = candidates
     .map(
-      ({ key, label, description, candidate }, index) => `
+      ({ key, label, description, candidate }) => `
         <div class="candidate-item" data-logic="${key}">
-          <div class="candidate-rank">#${index + 1}</div>
           <div class="candidate-copy">
             <div class="candidate-title-row">
               <strong class="candidate-name">${label}</strong>

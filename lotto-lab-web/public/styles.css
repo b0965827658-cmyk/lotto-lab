@@ -1875,24 +1875,13 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 
 .candidate-item {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #f9fbf8;
   padding: 12px;
-}
-
-.candidate-rank {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 8px;
-  background: #173f38;
-  color: #fff;
-  font-weight: 900;
 }
 
 .candidate-copy {
@@ -2868,10 +2857,6 @@ th {
 
   .mode-snapshot-list {
     grid-template-columns: 1fr;
-  }
-
-  .candidate-rank {
-    width: 100%;
   }
 
   .save-candidate {
