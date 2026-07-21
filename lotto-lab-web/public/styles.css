@@ -1532,7 +1532,7 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
 
 .saved-number-picker {
   display: grid;
-  grid-template-columns: repeat(13, minmax(0, 1fr));
+  grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: 8px 4px;
   width: 100%;
 }
@@ -2963,7 +2963,7 @@ th {
 
 @media (max-width: 420px) {
   .saved-number-picker {
-    grid-template-columns: repeat(13, minmax(0, 1fr));
+    grid-template-columns: repeat(10, minmax(0, 1fr));
     width: calc(100% + 20px);
     margin-inline: -10px;
     gap: 6px 2px;
