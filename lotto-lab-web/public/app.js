@@ -107,6 +107,33 @@ const FOCUS_PRESETS = {
 };
 
 const MODE_SNAPSHOT_KEYS = ["balanced", "classic", "hot", "overdue", "interval", "pattern", "backtest"];
+const CANDIDATE_LOGIC_PRESETS = [
+  {
+    key: "hot",
+    label: "熱號追擊",
+    description: "優先追蹤近期熱度較高的號碼，再用回測與分散條件篩選。",
+  },
+  {
+    key: "interval",
+    label: "區間追擊",
+    description: "鎖定近期較集中的落點區間，兼顧區間分布與號碼熱度。",
+  },
+  {
+    key: "pattern",
+    label: "版路追擊",
+    description: "參考連號、拖牌、鄰近號與奇偶大小等近期版路訊號。",
+  },
+  {
+    key: "overdue",
+    label: "冷號回補",
+    description: "挑選遺漏較久且仍通過核心條件的號碼，避免單純追最冷。",
+  },
+  {
+    key: "balanced",
+    label: "綜合推理",
+    description: "整合熱度、區間、版路、遺漏與回測，作為整體參考。",
+  },
+];
 const VALIDATION_RECORDS = [
   {
     game: "tw539",
@@ -1705,17 +1732,25 @@ function renderCandidates() {
     els.candidates.innerHTML = `<div class="empty-state">資料讀取後會產生候選組合。</div>`;
     return;
   }
-  const candidates = generateCandidates();
+  const candidates = CANDIDATE_LOGIC_PRESETS.map((preset) => {
+    const candidate = withTemporaryFocus(preset.key, () => generateCandidates()[0]);
+    return candidate ? { ...preset, candidate } : null;
+  }).filter(Boolean);
   if (!candidates.length) {
     els.candidates.innerHTML = `<div class="empty-state">回測驗證暫時忙碌，請稍後再按一次重新產生。</div>`;
     return;
   }
   els.candidates.innerHTML = candidates
     .map(
-      (candidate, index) => `
-        <div class="candidate-item">
+      ({ key, label, description, candidate }, index) => `
+        <div class="candidate-item" data-logic="${key}">
           <div class="candidate-rank">#${index + 1}</div>
-          <div>
+          <div class="candidate-copy">
+            <div class="candidate-title-row">
+              <strong class="candidate-name">${label}</strong>
+              <span class="candidate-logic-tag">邏輯推理</span>
+            </div>
+            <p class="candidate-description">${description}</p>
             <div class="saved-balls">${miniBalls(candidate.numbers)}</div>
             <div class="candidate-meta">
               <span>${candidate.score.total} · ${candidate.score.label}</span>

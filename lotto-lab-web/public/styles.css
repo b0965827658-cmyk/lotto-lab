@@ -1895,6 +1895,42 @@ body:not([data-plan="flagship"]) [data-tier="flagship"].locked::after {
   font-weight: 900;
 }
 
+.candidate-copy {
+  min-width: 0;
+}
+
+.candidate-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.candidate-name {
+  color: var(--green);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.candidate-logic-tag {
+  border: 1px solid rgba(22, 106, 82, 0.22);
+  border-radius: 999px;
+  background: #edf5f0;
+  color: var(--green);
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.candidate-description {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .candidate-meta {
   display: flex;
   flex-wrap: wrap;
