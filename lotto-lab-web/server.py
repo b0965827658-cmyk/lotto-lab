@@ -2101,7 +2101,7 @@ CORE_BASE_WEIGHTS = {
     "gap": 0.05,
     "interval": 0.20,
 }
-ADAPTIVE_PATTERN_VERSION = "dynamic-v4-refresh"
+ADAPTIVE_PATTERN_VERSION = "dynamic-v5-sniper-calibrated"
 CORE_ANALYSIS_METHOD = "核心基準：近期熱度 55%・長期熱度 20%・遺漏平衡 5%・區間分布 20%"
 
 
@@ -2117,16 +2117,8 @@ def normalize_core_weights(weights: dict[str, float] | None = None) -> dict[str,
 
 
 def flagship_core_weights(core_weights: dict[str, float] | None = None) -> dict[str, float]:
-    """Use a second bounded profile so the flagship tier is not a copy of the reference pick."""
-    weights = normalize_core_weights(core_weights)
-    return normalize_core_weights(
-        {
-            "recent": weights["recent"] * 0.90,
-            "heat": weights["heat"] * 1.25,
-            "gap": weights["gap"] * 1.85,
-            "interval": weights["interval"] * 0.80,
-        }
-    )
+    """Keep a safe fallback for older callers; live picks use calibration below."""
+    return normalize_core_weights(core_weights)
 
 
 def adaptive_core_weights(
@@ -2443,6 +2435,23 @@ def simple_core_recommendation(
     model pool, so the split remains explainable and deterministic.
     """
     components = simple_core_score_components(draws, max_number)
+    return _core_pick_from_components(
+        components,
+        max_number=max_number,
+        pick_count=pick_count,
+        core_weights=core_weights,
+        avoid_set=avoid_set,
+    )
+
+
+def _core_pick_from_components(
+    components: dict[int, dict[str, float]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    core_weights: dict[str, float] | None = None,
+    avoid_set: set[int] | None = None,
+) -> list[int]:
+    """Pick from already calculated components so calibration stays fast."""
     weights = normalize_core_weights(core_weights)
     scores = {
         number: sum(values[key] * weight for key, weight in weights.items())
@@ -2466,6 +2475,204 @@ def simple_core_recommendation(
             best_score = combo_score
             best_combo = sorted_combo
     return list(best_combo or tuple(pool[:pick_count]))
+
+
+SNIPER_PROFILE_CANDIDATES = (
+    ("dynamic", "動態核心", None),
+    ("baseline", "核心平衡", CORE_BASE_WEIGHTS),
+    ("recent", "近期動能", {"recent": 0.65, "heat": 0.15, "gap": 0.05, "interval": 0.15}),
+    ("gap", "遺漏平衡", {"recent": 0.60, "heat": 0.20, "gap": 0.10, "interval": 0.10}),
+    ("zone", "區間平衡", {"recent": 0.60, "heat": 0.15, "gap": 0.10, "interval": 0.15}),
+    ("sniper", "狙擊平衡", {"recent": 0.58, "heat": 0.22, "gap": 0.12, "interval": 0.08}),
+)
+
+
+def _sniper_profile_metrics(
+    draws: list[dict[str, Any]],
+    weights: dict[str, float],
+    max_number: int = 39,
+    pick_count: int = 5,
+    evaluation_limit: int = 36,
+    training_limit: int = 90,
+    walk_forward_rows: list[tuple[set[int], dict[int, dict[str, float]], float]] | None = None,
+) -> dict[str, Any]:
+    """Measure one explainable profile with strict walk-forward validation."""
+    rows: list[dict[str, Any]] = []
+    if walk_forward_rows is None:
+        ordered = canonical_analysis_draws(draws)
+        target_limit = min(max(0, int(evaluation_limit)), max(0, len(ordered) - 20))
+        walk_forward_rows = []
+        for target_index in range(target_limit):
+            target = ordered[target_index]
+            training = ordered[target_index + 1 : target_index + 1 + training_limit]
+            if len(training) < 20:
+                continue
+            walk_forward_rows.append(
+                (
+                    set(target["numbers"]),
+                    simple_core_score_components(training, max_number),
+                    0.50 if target_index < 10 else 0.30 if target_index < 20 else 0.20,
+                )
+            )
+    for actual, components, row_weight in walk_forward_rows:
+        pick = _core_pick_from_components(
+            components,
+            max_number=max_number,
+            pick_count=pick_count,
+            core_weights=weights,
+        )
+        rows.append({"hits": len(set(pick) & actual), "weight": row_weight})
+
+    total_weight = sum(row["weight"] for row in rows)
+    if not rows or not total_weight:
+        return {
+            "testedCount": 0,
+            "averageHit": 0.0,
+            "onePlusRate": 0.0,
+            "twoPlusRate": 0.0,
+            "zeroRate": 0.0,
+            "stability": 0.0,
+        }
+
+    weighted_hits = sum(row["hits"] * row["weight"] for row in rows)
+    weighted_one_plus = sum((row["hits"] >= 1) * row["weight"] for row in rows)
+    weighted_two_plus = sum((row["hits"] >= 2) * row["weight"] for row in rows)
+    average_hit = weighted_hits / total_weight
+    one_plus_rate = weighted_one_plus / total_weight
+    two_plus_rate = weighted_two_plus / total_weight
+    midpoint = max(1, len(rows) // 2)
+    recent_rows = rows[:midpoint]
+    older_rows = rows[midpoint:]
+    recent_average = sum(row["hits"] for row in recent_rows) / len(recent_rows)
+    older_average = sum(row["hits"] for row in older_rows) / len(older_rows) if older_rows else recent_average
+    stability = max(0.0, 1.0 - abs(recent_average - older_average) / 1.5)
+    return {
+        "testedCount": len(rows),
+        "averageHit": average_hit,
+        "onePlusRate": one_plus_rate,
+        "twoPlusRate": two_plus_rate,
+        "zeroRate": 1.0 - one_plus_rate,
+        "recentAverageHit": recent_average,
+        "olderAverageHit": older_average,
+        "stability": stability,
+    }
+
+
+def calibrate_sniper_core_weights(
+    draws: list[dict[str, Any]],
+    base_weights: dict[str, float] | None = None,
+    max_number: int = 39,
+    pick_count: int = 5,
+    evaluation_limit: int = 36,
+) -> dict[str, Any]:
+    """Select the flagship profile from identical walk-forward evidence.
+
+    The flagship used to apply a fixed cold-number boost after the main model
+    was calibrated. That made the paid pick less reliable and often forced a
+    lower-scoring replacement just to look different. This selector keeps the
+    strongest validated profile, even when it agrees with the reference pick.
+    """
+    dynamic_weights = normalize_core_weights(base_weights)
+    ordered = canonical_analysis_draws(draws)
+    target_limit = min(max(0, int(evaluation_limit)), max(0, len(ordered) - 20))
+    walk_forward_rows: list[tuple[set[int], dict[int, dict[str, float]], float]] = []
+    for target_index in range(target_limit):
+        target = ordered[target_index]
+        training = ordered[target_index + 1 : target_index + 1 + 90]
+        if len(training) < 20:
+            continue
+        walk_forward_rows.append(
+            (
+                set(target["numbers"]),
+                simple_core_score_components(training, max_number),
+                0.50 if target_index < 10 else 0.30 if target_index < 20 else 0.20,
+            )
+        )
+    profile_rows: list[dict[str, Any]] = []
+    for priority, (profile_id, label, candidate_weights) in enumerate(SNIPER_PROFILE_CANDIDATES):
+        weights = dynamic_weights if candidate_weights is None else normalize_core_weights(candidate_weights)
+        metrics = _sniper_profile_metrics(
+            draws,
+            weights,
+            max_number=max_number,
+            pick_count=pick_count,
+            evaluation_limit=evaluation_limit,
+            walk_forward_rows=walk_forward_rows,
+        )
+        # Average hits remains the main objective. One-hit and two-hit rates
+        # are secondary tie-break signals that discourage frequent 0-hit runs.
+        quality = (
+            metrics["averageHit"]
+            + metrics["onePlusRate"] * 0.08
+            + metrics["twoPlusRate"] * 0.25
+            + metrics["stability"] * 0.04
+        )
+        profile_rows.append(
+            {
+                "id": profile_id,
+                "label": label,
+                "priority": priority,
+                "weights": weights,
+                "quality": quality,
+                **metrics,
+            }
+        )
+
+    dynamic_row = next((row for row in profile_rows if row["id"] == "dynamic"), None)
+    best_row = max(
+        profile_rows or [],
+        key=lambda row: (row["quality"], row["averageHit"], row["onePlusRate"], -row["priority"]),
+        default={
+            "id": "dynamic",
+            "label": "動態核心",
+            "weights": dynamic_weights,
+            "quality": 0.0,
+            "testedCount": 0,
+            "averageHit": 0.0,
+            "onePlusRate": 0.0,
+            "twoPlusRate": 0.0,
+            "zeroRate": 0.0,
+            "stability": 0.0,
+        },
+    )
+    dynamic_quality = dynamic_row["quality"] if dynamic_row else 0.0
+    applied = (
+        best_row["testedCount"] >= 12
+        and best_row["id"] != "dynamic"
+        and best_row["quality"] >= dynamic_quality + 0.015
+    )
+    selected = best_row if applied else (dynamic_row or best_row)
+    method = (
+        f"狙擊手模式：近 {selected['testedCount']} 次逐期回測選用「{selected['label']}」；"
+        f"平均命中 {selected['averageHit']:.2f}、1 中以上 {selected['onePlusRate'] * 100:.1f}%、"
+        f"2 中以上 {selected['twoPlusRate'] * 100:.1f}%，同一期固定，新一期才更新。"
+    )
+    return {
+        "version": ADAPTIVE_PATTERN_VERSION,
+        "selected": selected["id"],
+        "selectedLabel": selected["label"],
+        "weights": selected["weights"],
+        "applied": applied,
+        "testedCount": selected["testedCount"],
+        "method": method,
+        "profiles": [
+            {
+                key: round(value, 4) if isinstance(value, float) else value
+                for key, value in row.items()
+                if key not in {"weights", "priority"}
+            }
+            | {"weights": row["weights"]}
+            for row in profile_rows
+        ],
+        "selectedMetrics": {
+            "averageHit": round(selected["averageHit"], 2),
+            "onePlusRate": round(selected["onePlusRate"] * 100, 1),
+            "twoPlusRate": round(selected["twoPlusRate"] * 100, 1),
+            "zeroRate": round(selected["zeroRate"] * 100, 1),
+            "stability": round(selected["stability"] * 100, 1),
+        },
+        "note": "狙擊手模式是歷史資料的排序模型，不是中獎機率保證；回測只用當時以前的資料，避免把開獎結果倒灌進推薦。",
+    }
 
 
 def simple_core_candidate_pool(
@@ -3159,29 +3366,23 @@ def analyze(
         evidence=evidence_map,
         core_weights=core_weights,
     )
-    # The flagship tier uses a second bounded profile.  It remains deterministic
-    # per draw, but does not silently mirror the public reference pick.
-    flagship_weights = flagship_core_weights(core_weights)
+    # The flagship tier is independently selected by walk-forward evidence.
+    # It may agree with the reference pick when that is the strongest validated
+    # result; forcing a different set would knowingly lower its quality.
+    sniper_pattern = calibrate_sniper_core_weights(
+        reference_draws,
+        base_weights=core_weights,
+        max_number=max_number,
+        pick_count=pick_count,
+        evaluation_limit=min(36, max(0, len(reference_draws) - 20)),
+    )
+    flagship_weights = sniper_pattern["weights"]
     flagship_numbers = flagship_recommendation(
         draws,
         max_number=max_number,
         pick_count=5,
         core_weights=flagship_weights,
     )
-    if set(flagship_numbers) == set(recommendation):
-        # If both profiles land on the identical set, use the fixed flagship
-        # tie-break profile and choose its best distinct combination so the
-        # paid module does not silently duplicate the public reference card.
-        flagship_weights = normalize_core_weights(
-            {"recent": 0.50, "heat": 0.25, "gap": 0.10, "interval": 0.15}
-        )
-        flagship_numbers = flagship_recommendation(
-            draws,
-            max_number=max_number,
-            pick_count=5,
-            core_weights=flagship_weights,
-            avoid_set=set(recommendation),
-        )
     adaptive_numbers = list(flagship_numbers)
     core_candidate_pool = simple_core_candidate_pool(
         draws,
@@ -3212,10 +3413,11 @@ def analyze(
         "coreCandidateMethod": "同一套核心分析排序；15 碼是會員自選候選池，不代表 15 碼同時推薦或保證中獎。",
         "flagshipRecommendation": flagship_numbers,
         "flagshipWeights": flagship_weights,
+        "flagshipCalibration": sniper_pattern,
         "adaptiveRecommendation": adaptive_numbers,
         "adaptiveMethod": adaptive_pattern["method"],
         "adaptiveRecentPattern": adaptive_pattern,
-        "flagshipMethod": "旗艦交叉驗證：加強長期熱度與遺漏平衡，保留近期熱度與區間約束；同一期固定，新一期才更新。",
+        "flagshipMethod": sniper_pattern["method"],
         "flagshipComponents": adaptive_pattern["components"],
         "backtest": backtest,
         "modelProfiles": model_results,
@@ -3295,25 +3497,22 @@ def analyze_with_stable_backtest(
         evidence=evidence_map,
         core_weights=core_weights,
     )
-    flagship_weights = flagship_core_weights(core_weights)
+    sniper_pattern = calibrate_sniper_core_weights(
+        fallback_draws,
+        base_weights=core_weights,
+        max_number=max_number,
+        pick_count=pick_count,
+        evaluation_limit=min(36, max(0, len(fallback_draws) - 20)),
+    )
+    flagship_weights = sniper_pattern["weights"]
     analysis["flagshipRecommendation"] = flagship_recommendation(
         display_draws,
         max_number=max_number,
         pick_count=5,
         core_weights=flagship_weights,
     )
-    if set(analysis["flagshipRecommendation"]) == set(analysis["recommendation"]):
-        flagship_weights = normalize_core_weights(
-            {"recent": 0.50, "heat": 0.25, "gap": 0.10, "interval": 0.15}
-        )
-        analysis["flagshipRecommendation"] = flagship_recommendation(
-            display_draws,
-            max_number=max_number,
-            pick_count=5,
-            core_weights=flagship_weights,
-            avoid_set=set(analysis["recommendation"]),
-        )
     analysis["flagshipWeights"] = flagship_weights
+    analysis["flagshipCalibration"] = sniper_pattern
     analysis["coreCandidatePool"] = simple_core_candidate_pool(
         display_draws,
         max_number=max_number,
@@ -3325,7 +3524,7 @@ def analyze_with_stable_backtest(
     analysis["adaptiveRecommendation"] = list(analysis["flagshipRecommendation"])
     analysis["adaptiveMethod"] = adaptive_pattern["method"]
     analysis["adaptiveRecentPattern"] = adaptive_pattern
-    analysis["flagshipMethod"] = "旗艦交叉驗證：加強長期熱度與遺漏平衡，保留近期熱度與區間約束；同一期固定，新一期才更新。"
+    analysis["flagshipMethod"] = sniper_pattern["method"]
     analysis["flagshipComponents"] = adaptive_pattern["components"]
     analysis["shortTermConsensus"] = short_term_consensus(
         display_draws,
