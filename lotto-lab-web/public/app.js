@@ -55,7 +55,7 @@ const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
-const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v4-dedup";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v6-refresh";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const DAILY_COMPARISON_STORAGE_KEY = "lotto-lab-daily-comparison-v1";
 const ANALYSIS_LIMIT_STORAGE_KEY = "lotto-lab-analysis-limit-v1";
@@ -64,6 +64,7 @@ const FLAGSHIP_LIMIT_STORAGE_KEY = "lotto-lab-flagship-limit";
 const POLL_INTERVAL_MS = 30 * 1000;
 const LATEST_FETCH_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 60000;
+const API_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
 const CANDIDATE_ATTEMPTS = 72;
@@ -858,6 +859,11 @@ function readCachedPayload(cacheKey) {
   const store = loadApiCacheStore();
   const record = store[cacheKey];
   if (!record?.payload) return null;
+  if (!record.savedAt || Date.now() - Number(record.savedAt) > API_CACHE_MAX_AGE_MS) {
+    delete store[cacheKey];
+    saveApiCacheStore(store);
+    return null;
+  }
   state.apiCache.set(cacheKey, record.payload);
   return record.payload;
 }
@@ -2323,7 +2329,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (state.serviceWorkerRegistration) return state.serviceWorkerRegistration;
-  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=91");
+  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=93");
   return state.serviceWorkerRegistration;
 }
 
