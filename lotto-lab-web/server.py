@@ -997,9 +997,10 @@ def _freeze_flagship_recommendation(
     profile_name_override: str | None = None,
 ) -> tuple[list[int], dict[str, Any]]:
     """Publish one flagship pool per draw/window so every visitor sees the same result."""
+    history_fingerprint = draw_fingerprint(history)
     snapshot_key = (
         f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:"
-        f"window-{selected_limit}:{snapshot_tag}"
+        f"window-{selected_limit}:{snapshot_tag}:data-{history_fingerprint}"
     )
     if snapshot_key in flagship_snapshot_memory:
         numbers = list(flagship_snapshot_memory[snapshot_key])
@@ -1037,7 +1038,7 @@ def _freeze_flagship_recommendation(
     profile_name = profile_name_override or str(
         (analysis.get("patterns") or {}).get("selectedProfile", "balanced")
     )
-    fingerprint = draw_fingerprint(history)
+    fingerprint = history_fingerprint
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     if database_ready:
@@ -2099,7 +2100,7 @@ CORE_BASE_WEIGHTS = {
     "gap": 0.05,
     "interval": 0.20,
 }
-ADAPTIVE_PATTERN_VERSION = "dynamic-v2-dedup"
+ADAPTIVE_PATTERN_VERSION = "dynamic-v3-refresh"
 CORE_ANALYSIS_METHOD = "核心基準：近期熱度 55%・長期熱度 20%・遺漏平衡 5%・區間分布 20%"
 
 
@@ -2112,6 +2113,19 @@ def normalize_core_weights(weights: dict[str, float] | None = None) -> dict[str,
     }
     total = sum(values.values()) or 1.0
     return {key: values[key] / total for key in CORE_FEATURE_ORDER}
+
+
+def flagship_core_weights(core_weights: dict[str, float] | None = None) -> dict[str, float]:
+    """Use a second bounded profile so the flagship tier is not a copy of the reference pick."""
+    weights = normalize_core_weights(core_weights)
+    return normalize_core_weights(
+        {
+            "recent": weights["recent"] * 0.90,
+            "heat": weights["heat"] * 1.25,
+            "gap": weights["gap"] * 1.85,
+            "interval": weights["interval"] * 0.80,
+        }
+    )
 
 
 def adaptive_core_weights(
@@ -2131,6 +2145,9 @@ def adaptive_core_weights(
     base_weights = normalize_core_weights()
     target_limit = min(max(0, int(evaluation_limit)), max(0, len(ordered) - 20))
     samples: dict[str, list[dict[str, float]]] = {key: [] for key in CORE_FEATURE_ORDER}
+    walk_forward_rows: list[
+        tuple[float, set[int], dict[int, dict[str, float]], list[dict[str, Any]]]
+    ] = []
 
     for target_index in range(target_limit):
         target = ordered[target_index]
@@ -2140,6 +2157,7 @@ def adaptive_core_weights(
         components = simple_core_score_components(training, max_number)
         recency_weight = 0.50 if target_index < 10 else 0.30 if target_index < 20 else 0.20
         actual = set(target["numbers"])
+        walk_forward_rows.append((recency_weight, actual, components, training))
         for feature in CORE_FEATURE_ORDER:
             ranked = sorted(
                 range(1, max_number + 1),
@@ -2205,16 +2223,127 @@ def adaptive_core_weights(
         )
 
     weights = normalize_core_weights(raw_weights)
+
+    # Independent feature scores do not always capture interactions between
+    # the four signals. Compare a few bounded, explainable profiles on the
+    # same walk-forward rows and only blend in a profile when it is clearly
+    # better than the current dynamic mix.
+    profile_candidates = [
+        ("baseline", "基準平衡", base_weights),
+        ("recent", "近期動能", {"recent": 0.65, "heat": 0.15, "gap": 0.05, "interval": 0.15}),
+        ("gap", "遺漏平衡", {"recent": 0.60, "heat": 0.20, "gap": 0.10, "interval": 0.10}),
+        ("zone", "近期區間", {"recent": 0.60, "heat": 0.15, "gap": 0.10, "interval": 0.15}),
+        ("heat", "熱度平衡", {"recent": 0.50, "heat": 0.25, "gap": 0.10, "interval": 0.15}),
+        ("dynamic", "動態校準", weights),
+    ]
+
+    def profile_quality(profile_weights: dict[str, float]) -> tuple[float, float, float]:
+        normalized = normalize_core_weights(profile_weights)
+        total_weight = sum(row[0] for row in walk_forward_rows)
+        if not walk_forward_rows or not total_weight:
+            return 0.0, 0.0, 0.0
+        hit_total = 0.0
+        two_plus_total = 0.0
+        for row_weight, actual, row_components, _training in walk_forward_rows:
+            scores = {
+                number: sum(row_components[number][key] * normalized[key] for key in CORE_FEATURE_ORDER)
+                for number in range(1, max_number + 1)
+            }
+            ranked = sorted(scores, key=lambda number: (-scores[number], number))
+            hits = len(set(ranked[: min(pick_count, max_number)]) & actual)
+            hit_total += hits * row_weight
+            two_plus_total += (1.0 if hits >= 2 else 0.0) * row_weight
+        average_hit = hit_total / total_weight
+        two_plus_rate = two_plus_total / total_weight
+        return average_hit + two_plus_rate * 0.35, average_hit, two_plus_rate
+
+    profile_rows = []
+    for profile_id, label, profile_weights in profile_candidates:
+        quality, average_hit, two_plus_rate = profile_quality(profile_weights)
+        profile_rows.append(
+            {
+                "id": profile_id,
+                "label": label,
+                "weights": normalize_core_weights(profile_weights),
+                "quality": quality,
+                "averageHit": average_hit,
+                "twoPlusRate": two_plus_rate,
+            }
+        )
+    tested_count = max((len(rows) for rows in samples.values()), default=0)
+    profile_map = {item["id"]: item for item in profile_rows}
+    fallback_profile = {
+        "id": "dynamic",
+        "label": "動態校準",
+        "weights": normalize_core_weights(weights),
+        "quality": 0.0,
+        "averageHit": 0.0,
+        "twoPlusRate": 0.0,
+    }
+    best_screen_profile = max(
+        profile_rows or [fallback_profile],
+        key=lambda item: (item["quality"], item["averageHit"], item["id"]),
+    )
+    calibration_ids = {"baseline", "gap", "dynamic", best_screen_profile["id"]}
+    exact_profile_rows = []
+    exact_rows = walk_forward_rows[: min(24, len(walk_forward_rows))]
+    for profile_id in calibration_ids:
+        profile = profile_map.get(profile_id)
+        if not profile or not exact_rows:
+            continue
+        total_weight = sum(row[0] for row in exact_rows)
+        hit_total = 0.0
+        two_plus_total = 0.0
+        for row_weight, actual, _row_components, training in exact_rows:
+            pick = simple_core_recommendation(
+                training,
+                max_number=max_number,
+                pick_count=pick_count,
+                core_weights=profile["weights"],
+            )
+            hits = len(set(pick) & actual)
+            hit_total += hits * row_weight
+            two_plus_total += (1.0 if hits >= 2 else 0.0) * row_weight
+        average_hit = hit_total / total_weight if total_weight else 0.0
+        two_plus_rate = two_plus_total / total_weight if total_weight else 0.0
+        exact_profile_rows.append(
+            {
+                **profile,
+                "quality": average_hit + two_plus_rate * 0.35,
+                "averageHit": average_hit,
+                "twoPlusRate": two_plus_rate,
+            }
+        )
+    exact_dynamic = next(
+        (item for item in exact_profile_rows if item["id"] == "dynamic"),
+        profile_map.get("dynamic", fallback_profile),
+    )
+    best_profile = max(
+        exact_profile_rows or profile_rows or [fallback_profile],
+        key=lambda item: (item["quality"], item["averageHit"], item["id"]),
+    )
+    profile_applied = (
+        tested_count >= 12
+        and best_profile["id"] != "dynamic"
+        and best_profile["quality"] >= exact_dynamic["quality"] + 0.04
+    )
+    if profile_applied:
+        weights = best_profile["weights"]
+    report_profile = best_profile if profile_applied else exact_dynamic
     for item in components:
         item["weight"] = round(weights[item["id"]] * 100)
         item["delta"] = item["weight"] - item["baseWeight"]
     components.sort(key=lambda item: (-item["weight"], item["id"]))
-    tested_count = max((len(rows) for rows in samples.values()), default=0)
     leader = max(components, key=lambda item: (item["delta"], item["weight"]), default=None)
     meaningful_change = bool(leader and leader["delta"] >= 2 and tested_count >= 8)
-    selected_label = leader["label"] if meaningful_change and leader else "綜合平衡"
+    selected_label = best_profile["label"] if profile_applied else (leader["label"] if meaningful_change and leader else "綜合平衡")
     weight_text = "・".join(f"{item['label']} {item['weight']}%" for item in components)
-    if meaningful_change and leader:
+    if profile_applied:
+        reason = (
+            f"近 {tested_count} 次逐期回測顯示「{best_profile['label']}」比目前動態組合穩定，"
+            f"平均命中 {best_profile['averageHit']:.2f}、2 中以上 {best_profile['twoPlusRate'] * 100:.1f}%，本期採用該組合。"
+        )
+    elif meaningful_change and leader:
         reason = (
             f"{leader['label']}在近 {tested_count} 次逐期回測的平均命中 "
             f"{leader['averageHit']:.2f}、2 中以上 {leader['twoPlusRate']:.1f}%，本期提高權重。"
@@ -2224,10 +2353,17 @@ def adaptive_core_weights(
     method = f"近期動態版路：{selected_label}；{weight_text}。"
     return {
         "version": ADAPTIVE_PATTERN_VERSION,
-        "selected": leader["id"] if meaningful_change and leader else "balanced",
+        "selected": best_profile["id"] if profile_applied else (leader["id"] if meaningful_change and leader else "balanced"),
         "selectedLabel": selected_label,
         "weights": weights,
         "components": components,
+        "profileCalibration": {
+            "selected": report_profile["id"],
+            "applied": profile_applied,
+            "testedCount": tested_count,
+            "averageHit": round(report_profile["averageHit"], 2),
+            "twoPlusRate": round(report_profile["twoPlusRate"] * 100, 1),
+        },
         "testedCount": tested_count,
         "evaluationLimit": target_limit,
         "method": method,
@@ -2396,7 +2532,7 @@ def flagship_recommendation(
     backtest: dict[str, Any] | None = None,
     core_weights: dict[str, float] | None = None,
 ) -> list[int]:
-    """Compatibility wrapper: flagship uses the same explainable core pick."""
+    """Return the deterministic flagship pick from its separate bounded profile."""
     return simple_core_recommendation(
         draws,
         max_number=max_number,
@@ -2706,6 +2842,7 @@ def rolling_backtest(
     pick_count: int = 5,
     profile_name: str = "balanced",
     backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+    core_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     ordered = list(draws)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
@@ -2726,6 +2863,7 @@ def rolling_backtest(
             seed_label=f"bt-{target.get('date')}-{target.get('period')}",
             profile_name=profile_name,
             candidate_budget=candidate_budget,
+            core_weights=core_weights,
         )
         hits = len(set(pick) & set(target["numbers"]))
         distribution[str(hits)] += 1
@@ -2799,6 +2937,27 @@ def model_quality(backtest: dict[str, Any]) -> float:
     )
 
 
+def model_result_row(profile_id: str, label: str, backtest: dict[str, Any]) -> dict[str, Any]:
+    """Keep the displayed model card tied to the exact pick generator it reports."""
+    return {
+        "id": profile_id,
+        "label": label,
+        "quality": round(model_quality(backtest), 2),
+        "averageHit": backtest["averageHit"],
+        "onePlusRate": backtest["onePlusRate"],
+        "twoPlusRate": backtest["twoPlusRate"],
+        "threePlusRate": backtest["threePlusRate"],
+        "bestHit": backtest["bestHit"],
+        "testedCount": backtest["testedCount"],
+        "recentAverageHit": backtest["recentAverageHit"],
+        "stability": backtest["stability"],
+        "validationCount": backtest["testedCount"],
+        "validationAverageHit": backtest["averageHit"],
+        "validationTwoPlusRate": backtest["twoPlusRate"],
+        "validationThreePlusRate": backtest["threePlusRate"],
+    }
+
+
 def choose_model_profile(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -2813,23 +2972,7 @@ def choose_model_profile(
         profile_name=selected,
         backtest_limit=backtest_limit,
     )
-    results = [{
-        "id": selected,
-        "label": "核心分析",
-        "quality": round(model_quality(backtest), 2),
-        "averageHit": backtest["averageHit"],
-        "onePlusRate": backtest["onePlusRate"],
-        "twoPlusRate": backtest["twoPlusRate"],
-        "threePlusRate": backtest["threePlusRate"],
-        "bestHit": backtest["bestHit"],
-        "testedCount": backtest["testedCount"],
-        "recentAverageHit": backtest["recentAverageHit"],
-        "stability": backtest["stability"],
-        "validationCount": backtest["testedCount"],
-        "validationAverageHit": backtest["averageHit"],
-        "validationTwoPlusRate": backtest["twoPlusRate"],
-        "validationThreePlusRate": backtest["threePlusRate"],
-    }]
+    results = [model_result_row(selected, "核心分析", backtest)]
     return selected, backtest, results
 
 
@@ -2981,6 +3124,17 @@ def analyze(
         evaluation_limit=min(36, max(0, len(reference_draws) - 20)),
     )
     core_weights = adaptive_pattern["weights"]
+    calibrated_backtest = rolling_backtest(
+        reference_draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        profile_name=selected_profile,
+        backtest_limit=backtest_limit,
+        core_weights=core_weights,
+    )
+    if calibrated_backtest.get("testedCount"):
+        backtest = calibrated_backtest
+        model_results = [model_result_row(selected_profile, "核心分析", backtest)]
     research_evidence = research_feature_evidence(reference_draws, max_number=max_number)
     evidence_map = {
         item["id"]: item["multiplier"] for item in research_evidence.get("features", [])
@@ -2994,15 +3148,28 @@ def analyze(
         evidence=evidence_map,
         core_weights=core_weights,
     )
-    # All published tiers use the same deterministic core pick.  Pro adds
-    # validation and history; the flagship tier adds presentation and saved
-    # reasoning, rather than a second competing algorithm.
-    flagship_numbers = simple_core_recommendation(
+    # The flagship tier uses a second bounded profile.  It remains deterministic
+    # per draw, but does not silently mirror the public reference pick.
+    flagship_weights = flagship_core_weights(core_weights)
+    flagship_numbers = flagship_recommendation(
         draws,
         max_number=max_number,
         pick_count=5,
-        core_weights=core_weights,
+        core_weights=flagship_weights,
     )
+    if set(flagship_numbers) == set(recommendation):
+        # If both profiles land on the identical set, use the fixed flagship
+        # tie-break profile so the paid module does not silently duplicate the
+        # public reference card.
+        flagship_weights = normalize_core_weights(
+            {"recent": 0.50, "heat": 0.25, "gap": 0.10, "interval": 0.15}
+        )
+        flagship_numbers = flagship_recommendation(
+            draws,
+            max_number=max_number,
+            pick_count=5,
+            core_weights=flagship_weights,
+        )
     adaptive_numbers = list(flagship_numbers)
     core_candidate_pool = simple_core_candidate_pool(
         draws,
@@ -3032,10 +3199,11 @@ def analyze(
         "coreCandidatePool": core_candidate_pool,
         "coreCandidateMethod": "同一套核心分析排序；15 碼是會員自選候選池，不代表 15 碼同時推薦或保證中獎。",
         "flagshipRecommendation": flagship_numbers,
+        "flagshipWeights": flagship_weights,
         "adaptiveRecommendation": adaptive_numbers,
         "adaptiveMethod": adaptive_pattern["method"],
         "adaptiveRecentPattern": adaptive_pattern,
-        "flagshipMethod": adaptive_pattern["method"],
+        "flagshipMethod": "旗艦交叉驗證：加強長期熱度與遺漏平衡，保留近期熱度與區間約束；同一期固定，新一期才更新。",
         "flagshipComponents": adaptive_pattern["components"],
         "backtest": backtest,
         "modelProfiles": model_results,
@@ -3092,8 +3260,18 @@ def analyze_with_stable_backtest(
         evaluation_limit=min(36, max(0, len(fallback_draws) - 20)),
     )
     core_weights = adaptive_pattern["weights"]
+    calibrated_backtest = rolling_backtest(
+        fallback_draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        profile_name=selected_profile,
+        backtest_limit=requested_limit,
+        core_weights=core_weights,
+    )
+    if calibrated_backtest.get("testedCount"):
+        fallback_backtest = calibrated_backtest
     analysis["backtest"] = fallback_backtest
-    analysis["modelProfiles"] = model_results
+    analysis["modelProfiles"] = [model_result_row(selected_profile, "核心分析", fallback_backtest)]
     analysis["researchEvidence"] = research_evidence
     analysis["tailAnalysis"] = tail_analysis_summary(display_draws, max_number)
     analysis["recommendation"] = model_recommendation(
@@ -3105,12 +3283,24 @@ def analyze_with_stable_backtest(
         evidence=evidence_map,
         core_weights=core_weights,
     )
-    analysis["flagshipRecommendation"] = simple_core_recommendation(
+    flagship_weights = flagship_core_weights(core_weights)
+    analysis["flagshipRecommendation"] = flagship_recommendation(
         display_draws,
         max_number=max_number,
         pick_count=5,
-        core_weights=core_weights,
+        core_weights=flagship_weights,
     )
+    if set(analysis["flagshipRecommendation"]) == set(analysis["recommendation"]):
+        flagship_weights = normalize_core_weights(
+            {"recent": 0.50, "heat": 0.25, "gap": 0.10, "interval": 0.15}
+        )
+        analysis["flagshipRecommendation"] = flagship_recommendation(
+            display_draws,
+            max_number=max_number,
+            pick_count=5,
+            core_weights=flagship_weights,
+        )
+    analysis["flagshipWeights"] = flagship_weights
     analysis["coreCandidatePool"] = simple_core_candidate_pool(
         display_draws,
         max_number=max_number,
@@ -3122,7 +3312,7 @@ def analyze_with_stable_backtest(
     analysis["adaptiveRecommendation"] = list(analysis["flagshipRecommendation"])
     analysis["adaptiveMethod"] = adaptive_pattern["method"]
     analysis["adaptiveRecentPattern"] = adaptive_pattern
-    analysis["flagshipMethod"] = adaptive_pattern["method"]
+    analysis["flagshipMethod"] = "旗艦交叉驗證：加強長期熱度與遺漏平衡，保留近期熱度與區間約束；同一期固定，新一期才更新。"
     analysis["flagshipComponents"] = adaptive_pattern["components"]
     analysis["shortTermConsensus"] = short_term_consensus(
         display_draws,

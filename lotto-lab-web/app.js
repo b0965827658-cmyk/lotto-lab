@@ -2,15 +2,28 @@ const state = {
   game: "tw539",
   limit: 90,
   backtestLimit: 24,
+  flagshipLimit: 120,
   plan: "free",
   subscription: null,
+  savedSelection: [],
   analysisFocus: "balanced",
   latest: null,
+  latestByGame: {
+    tw539: null,
+    "ca-fantasy5": null,
+  },
   analysis: null,
   history: [],
   displayHistory: [],
+  flagshipHistory: [],
+  flagshipHistoryLoading: false,
+  flagshipHistoryLatestKey: "",
+  coreCandidateSelection: [],
   requestId: 0,
   latestRequestId: 0,
+  latestRefreshInFlight: false,
+  autoRefreshTimer: null,
+  activeTab: "latest",
   apiCache: new Map(),
   candidateCache: new Map(),
   backtestCache: new Map(),
@@ -21,6 +34,7 @@ const state = {
     serverReady: false,
     publicKey: "",
     subscriberCount: 0,
+    autoNotifyIntervalSeconds: 30,
   },
   serviceWorkerRegistration: null,
   pushSubscription: null,
@@ -41,15 +55,28 @@ const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
-const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v2";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v5-refresh";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
+const DAILY_COMPARISON_STORAGE_KEY = "lotto-lab-daily-comparison-v1";
+const ANALYSIS_LIMIT_STORAGE_KEY = "lotto-lab-analysis-limit-v1";
 const BACKTEST_LIMIT_STORAGE_KEY = "lotto-lab-backtest-limit";
+const FLAGSHIP_LIMIT_STORAGE_KEY = "lotto-lab-flagship-limit";
 const POLL_INTERVAL_MS = 30 * 1000;
 const LATEST_FETCH_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 60000;
+const API_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
+const CANDIDATE_ATTEMPTS = 72;
 const BACKTEST_PRESETS = [7, 14, 21, 24, 28, 35, 60, 90, 180, 365];
+
+const CANDIDATE_REASONING_NAMES = [
+  "熱號追擊",
+  "區間追擊",
+  "版路追擊",
+  "冷號回補",
+  "綜合推理",
+];
 
 const FOCUS_PRESETS = {
   balanced: {
@@ -113,6 +140,11 @@ const els = {
   period: $("#period"),
   date: $("#date"),
   latestBalls: $("#latestBalls"),
+  secondaryGameName: $("#secondaryGameName"),
+  secondaryPeriod: $("#secondaryPeriod"),
+  secondaryDate: $("#secondaryDate"),
+  secondaryLatestBalls: $("#secondaryLatestBalls"),
+  secondaryLatestStatus: $("#secondaryLatestStatus"),
   countdownTime: $("#countdownTime"),
   countdownBadge: $("#countdownBadge"),
   countdownGame: $("#countdownGame"),
@@ -122,6 +154,11 @@ const els = {
   pickMeta: $("#pickMeta"),
   flagshipBalls: $("#flagshipBalls"),
   flagshipMeta: $("#flagshipMeta"),
+  coreCandidateBalls: $("#coreCandidateBalls"),
+  coreCandidateMeta: $("#coreCandidateMeta"),
+  coreCandidateSave: $("#coreCandidateSave"),
+  adaptiveBalls: $("#adaptiveBalls"),
+  adaptiveMeta: $("#adaptiveMeta"),
   note: $("#analysisNote"),
   hot: $("#hotList"),
   cold: $("#coldList"),
@@ -130,12 +167,16 @@ const els = {
   drawCount: $("#drawCount"),
   plans: $("#planGrid"),
   savedForm: $("#savedForm"),
-  savedInputs: Array.from(document.querySelectorAll(".number-input")),
+  savedPicker: $("#savedNumberPicker"),
+  savedSelectionMeta: $("#savedSelectionMeta"),
+  clearSavedNumbers: $("#clearSavedNumbers"),
   savedList: $("#savedList"),
   usePick: $("#usePickBtn"),
   generate: $("#generateBtn"),
   candidates: $("#candidateList"),
   modeSnapshots: $("#modeSnapshotList"),
+  flagshipHistoryList: $("#flagshipHistoryList"),
+  flagshipHistoryRefresh: $("#flagshipHistoryRefresh"),
   modelInputs: Array.from(document.querySelectorAll("[data-weight]")),
   focusButtons: Array.from(document.querySelectorAll("[data-focus]")),
   modelSummary: $("#modelSummary"),
@@ -148,10 +189,13 @@ const els = {
   historyToYear: $("#historyToYear"),
   crossYearSearch: $("#crossYearSearch"),
   historyScope: $("#historyScope"),
+  recentScope: $("#recentScope"),
   backtestBadge: $("#backtestBadge"),
   backtestSelect: $("#backtestLimitSelect"),
   backtestInput: $("#backtestLimitInput"),
   backtestApply: $("#backtestLimitApply"),
+  flagshipLimitSelect: $("#flagshipLimitSelect"),
+  flagshipLimitApply: $("#flagshipLimitApply"),
   avgHit: $("#avgHit"),
   threePlusRate: $("#threePlusRate"),
   bestHit: $("#bestHit"),
@@ -161,6 +205,13 @@ const els = {
   patternRepeat: $("#patternRepeat"),
   patternGrid: $("#patternGrid"),
   patternLines: $("#patternLines"),
+  tailAnalysisBadge: $("#tailAnalysisBadge"),
+  tailAnalysisSummary: $("#tailAnalysisSummary"),
+  tailHotList: $("#tailHotList"),
+  tailAvoidList: $("#tailAvoidList"),
+  tailRecommendationBalls: $("#tailRecommendationBalls"),
+  tailAnalysisMeta: $("#tailAnalysisMeta"),
+  tailAnalysisNote: $("#tailAnalysisNote"),
   notifyBadge: $("#notifyBadge"),
   notifyText: $("#notifyText"),
   notifyToggle: $("#notifyToggleBtn"),
@@ -173,6 +224,13 @@ const els = {
 
 function pad(n) {
   return String(n).padStart(2, "0");
+}
+
+function normalizedPick(value, count = 5) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(Number).filter((number) => Number.isInteger(number) && number >= 1 && number <= 39))]
+    .sort((left, right) => left - right)
+    .slice(0, count);
 }
 
 function hashString(value) {
@@ -199,9 +257,86 @@ function balls(numbers) {
 }
 
 function miniBalls(numbers, winners = []) {
-  const winnerSet = new Set(winners);
+  const winnerSet = new Set(winners.map(Number));
   return numbers
-    .map((n) => `<span class="mini-ball ${winnerSet.has(n) ? "hit" : ""}">${pad(n)}</span>`)
+    .map((n) => {
+      const hit = winnerSet.has(Number(n));
+      return `<span class="mini-ball ${hit ? "hit" : ""}"${hit ? ' title="命中號碼" aria-label="命中號碼"' : ""}>${pad(n)}${hit ? '<b class="hit-mark" aria-hidden="true">✓</b>' : ""}</span>`;
+    })
+    .join("");
+}
+
+function compareHistoryDraws(left, right) {
+  const dateCompare = String(left?.date || "").localeCompare(String(right?.date || ""));
+  if (dateCompare !== 0) return dateCompare;
+  return String(left?.period || "").localeCompare(String(right?.period || ""), undefined, { numeric: true });
+}
+
+function buildHistoryMarkerIndex(draws = []) {
+  const markerIndex = new Map();
+  const ordered = draws
+    .filter((draw) => draw && Array.isArray(draw.numbers) && draw.numbers.length)
+    .slice()
+    .sort(compareHistoryDraws);
+  const lastSeen = new Map();
+
+  ordered.forEach((draw, drawIndex) => {
+    const numbers = [...new Set(draw.numbers.map(Number))].sort((left, right) => left - right);
+    const previousNumbers = new Set((ordered[drawIndex - 1]?.numbers || []).map(Number));
+    const consecutiveNumbers = new Set();
+    for (let index = 0; index < numbers.length - 1; index += 1) {
+      if (numbers[index + 1] === numbers[index] + 1) {
+        consecutiveNumbers.add(numbers[index]);
+        consecutiveNumbers.add(numbers[index + 1]);
+      }
+    }
+
+    const drawMarkers = new Map();
+    numbers.forEach((number) => {
+      const gap = lastSeen.has(number) ? drawIndex - lastSeen.get(number) - 1 : null;
+      drawMarkers.set(number, {
+        returning: gap !== null && gap >= 20,
+        repeat: previousNumbers.has(number),
+        consecutive: consecutiveNumbers.has(number),
+        gap,
+      });
+      lastSeen.set(number, drawIndex);
+    });
+    markerIndex.set(drawKey(draw), drawMarkers);
+  });
+  return markerIndex;
+}
+
+function markerClasses(marker = {}) {
+  return [
+    marker.returning ? "marker-return" : "",
+    marker.repeat ? "marker-repeat" : "",
+    marker.consecutive ? "marker-consecutive" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function markerTitle(marker = {}) {
+  const labels = [];
+  if (marker.returning) labels.push(`20 期以上未出後回補${marker.gap !== null ? `（${marker.gap} 期）` : ""}`);
+  if (marker.repeat) labels.push("連莊");
+  if (marker.consecutive) labels.push("連號");
+  return labels.join("・");
+}
+
+function markedHistoryBalls(draw, markerIndex = new Map(), winners = []) {
+  const winnerSet = new Set(winners.map(Number));
+  const drawMarkers = markerIndex.get(drawKey(draw)) || new Map();
+  return (draw.numbers || [])
+    .map((number) => {
+      const marker = drawMarkers.get(Number(number)) || {};
+      const classes = ["mini-ball", "history-ball", winnerSet.has(Number(number)) ? "hit" : "", markerClasses(marker)]
+        .filter(Boolean)
+        .join(" ");
+      const title = markerTitle(marker);
+      return `<span class="${classes}"${title ? ` title="${title}"` : ""}>${pad(number)}</span>`;
+    })
     .join("");
 }
 
@@ -328,6 +463,14 @@ function rankRows(items, mode) {
     .join("");
 }
 
+function drawWeekday(value) {
+  const match = String(value || "").match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (!match) return "";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+  const labels = ["日", "一", "二", "三", "四", "五", "六"];
+  return `星期${labels[date.getDay()]}`;
+}
+
 function historyRows(draws) {
   if (!draws.length) {
     return `
@@ -336,13 +479,21 @@ function historyRows(draws) {
       </tr>
     `;
   }
+  const markerIndex = buildHistoryMarkerIndex(state.displayHistory);
   return draws
     .map(
       (draw) => `
         <tr>
-          <td>${draw.date || "-"}</td>
-          <td>${draw.period || "-"}</td>
-          <td class="number-text">${draw.numbers.map(pad).join(" · ")}</td>
+          <td class="history-date">
+            <strong>${draw.date || "-"}</strong>
+            <span>${drawWeekday(draw.date)}</span>
+          </td>
+          <td class="history-period">${draw.period || "-"}</td>
+          <td class="number-text">
+            <div class="history-balls" aria-label="開獎號碼 ${draw.numbers.map(pad).join("、")}">
+              ${markedHistoryBalls(draw, markerIndex)}
+            </div>
+          </td>
         </tr>
       `,
     )
@@ -364,6 +515,106 @@ function renderHistory() {
   const rows = filteredHistory();
   els.history.innerHTML = historyRows(rows);
   els.historyCount.textContent = `${rows.length} / ${state.displayHistory.length} 期`;
+}
+
+function flagshipHistoryNumbers(items = []) {
+  return items.map((item) => pad(item)).join("、") || "資料不足";
+}
+
+function renderFlagshipHistory() {
+  if (!els.flagshipHistoryList) return;
+  if (!isFlagshipPlan()) {
+    els.flagshipHistoryList.innerHTML = `<div class="empty-state">升級量化旗艦版後可查看歷史推理紀錄。</div>`;
+    return;
+  }
+  if (state.flagshipHistoryLoading) {
+    els.flagshipHistoryList.innerHTML = `<div class="empty-state">正在載入旗艦分析紀錄...</div>`;
+    return;
+  }
+  if (!state.flagshipHistory.length) {
+    els.flagshipHistoryList.innerHTML = `<div class="empty-state">目前還沒有保存的旗艦分析；完成一次數據分析後會自動建立紀錄。</div>`;
+    return;
+  }
+  const markerIndex = buildHistoryMarkerIndex(state.displayHistory);
+  els.flagshipHistoryList.innerHTML = state.flagshipHistory
+    .map((record) => {
+      const reasoning = record.reasoning || {};
+      const summary = reasoning.backtestSummary || {};
+      const components = (record.components || [])
+        .map((item) => `${item.label || item.id} ${item.weight || 0}%`)
+        .join(" · ");
+      const actualAvailable = record.actualPeriod && Array.isArray(record.actualNumbers) && record.actualNumbers.length;
+      const actualDraw = actualAvailable
+        ? state.displayHistory.find(
+            (draw) => String(draw.period || "") === String(record.actualPeriod || "") || draw.date === record.actualDate,
+          )
+        : null;
+      const outcome = record.hitCount === null || record.hitCount === undefined ? "待下一期開出" : `${record.hitCount} 中`;
+      const statusNote = actualAvailable ? "已補上實際開獎與命中結果" : "開獎後自動補上命中結果";
+      const backtestText = summary.testedCount
+        ? `回測 ${summary.testedCount} 期 · 均中 ${summary.averageHit ?? 0} · 最高 ${summary.bestHit ?? 0} 中`
+        : "回測資料累積中";
+      return `
+        <article class="flagship-history-item">
+          <div class="flagship-history-head">
+            <div>
+              <strong>${record.latestDate || "-"}</strong>
+              <span>分析期 ${record.latestPeriod || "-"} · 穩定核心邏輯</span>
+            </div>
+          </div>
+          <div class="flagship-history-status ${actualAvailable ? "completed" : "pending"}">
+            <div>
+              <span class="flagship-history-status-label">開獎狀態</span>
+              <strong>${outcome}</strong>
+            </div>
+            <span class="flagship-history-status-note">${statusNote}</span>
+          </div>
+          <div class="flagship-history-balls">${miniBalls(record.numbers, actualAvailable ? record.actualNumbers : [])}</div>
+          <div class="flagship-history-meta">
+            <span>${record.method || "六維綜合推理"}</span>
+            <span>模型 ${record.profile || "綜合"}</span>
+            <span>${components || coreWeightSummary()}</span>
+          </div>
+          <div class="flagship-history-reasoning">
+            <span>同一套核心分析：近期熱度、長期熱度、遺漏平衡、區間分布</span>
+            <span>${backtestText}</span>
+          </div>
+          ${actualAvailable ? `<div class="flagship-history-actual">後續開獎 ${record.actualDate || "-"}／${record.actualPeriod || "-"}：<div class="flagship-history-actual-balls">${markedHistoryBalls(actualDraw || { ...record, numbers: record.actualNumbers }, markerIndex)}</div></div>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function loadFlagshipHistory(options = {}) {
+  if (!els.flagshipHistoryList || !isFlagshipPlan()) {
+    renderFlagshipHistory();
+    return;
+  }
+  const force = Boolean(options.force);
+  const latestKey = drawKey(state.latest);
+  if (!force && state.flagshipHistoryLatestKey === latestKey && state.flagshipHistory.length) return;
+  state.flagshipHistoryLoading = true;
+  renderFlagshipHistory();
+  if (els.flagshipHistoryRefresh) els.flagshipHistoryRefresh.disabled = true;
+  try {
+    const payload = await fetchJsonWithTimeout(
+      `/api/flagship-history?game=${state.game}&limit=30&t=${Date.now()}`,
+      { timeoutMs: 15000 },
+    );
+    if (!payload.ok) throw new Error(payload.error || "旗艦歷史載入失敗");
+    state.flagshipHistory = Array.isArray(payload.history) ? payload.history : [];
+    state.flagshipHistoryLatestKey = latestKey;
+    renderFlagshipHistory();
+    if (!options.silent) setStatus(`已載入 ${state.flagshipHistory.length} 筆旗艦分析紀錄。`);
+  } catch (error) {
+    renderFlagshipHistory();
+    if (!options.silent) setStatus(error.name === "AbortError" ? "旗艦歷史載入逾時，請稍後再試。" : error.message, true);
+  } finally {
+    state.flagshipHistoryLoading = false;
+    if (els.flagshipHistoryRefresh) els.flagshipHistoryRefresh.disabled = false;
+    renderFlagshipHistory();
+  }
 }
 
 function setStatus(message, isError = false) {
@@ -394,6 +645,7 @@ function requireFlagship(feature) {
 }
 
 function activateTab(tabName) {
+  state.activeTab = tabName;
   els.tabButtons.forEach((button) => {
     const active = button.dataset.tab === tabName;
     button.classList.toggle("active", active);
@@ -402,6 +654,49 @@ function activateTab(tabName) {
   els.tabPanels.forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
   });
+  if (tabName === "model" && state.analysis) {
+    renderModelOutput({ heavy: true });
+    loadFlagshipHistory({ silent: true });
+  }
+}
+
+function organizeAnalysisPanels() {
+  const latestPanel = document.querySelector('[data-tab-panel="latest"]');
+  const recentPanel = document.querySelector('[data-tab-panel="recent"]');
+  const modelPanel = document.querySelector('[data-tab-panel="model"]');
+  if (!latestPanel || !recentPanel || !modelPanel) return;
+
+  const panelById = (id) => document.getElementById(id)?.closest(".panel");
+  const movePanels = (destination, panels) => {
+    const movable = panels.filter(
+      (panel, index, list) => panel && panel.closest("[data-tab-panel]") === latestPanel && list.indexOf(panel) === index,
+    );
+    if (!movable.length) return;
+    const fragment = document.createDocumentFragment();
+    movable.forEach((panel) => fragment.appendChild(panel));
+    destination.insertBefore(fragment, destination.firstElementChild);
+  };
+
+  // Keep the countdown with the latest draw. The other analysis modules
+  // belong together on the logic tab in a stable order.
+  movePanels(modelPanel, [
+    latestPanel.querySelector(".pick-panel"),
+    latestPanel.querySelector(".flagship-panel"),
+    latestPanel.querySelector(".backtest-panel"),
+    latestPanel.querySelector(".pattern-panel"),
+  ]);
+  const recentPanels = [
+    panelById("hotList"),
+    panelById("coldList"),
+    panelById("overdueList"),
+  ].filter(
+    (panel, index, list) => panel && panel.closest("[data-tab-panel]") === latestPanel && list.indexOf(panel) === index,
+  );
+  if (recentPanels.length) {
+    const fragment = document.createDocumentFragment();
+    recentPanels.forEach((panel) => fragment.appendChild(panel));
+    recentPanel.appendChild(fragment);
+  }
 }
 
 function loadPlanPreview() {
@@ -419,6 +714,25 @@ function normalizeBacktestLimit(value) {
   return Math.max(7, Math.min(365, number));
 }
 
+const ANALYSIS_LIMIT_PRESETS = [10, 20, 36, 60, 90, 120, 180, 365];
+
+function normalizeAnalysisLimit(value) {
+  const number = Number(value);
+  return ANALYSIS_LIMIT_PRESETS.includes(number) ? number : 90;
+}
+
+function loadAnalysisLimit() {
+  return normalizeAnalysisLimit(localStorage.getItem(ANALYSIS_LIMIT_STORAGE_KEY) || 90);
+}
+
+function saveAnalysisLimit() {
+  localStorage.setItem(ANALYSIS_LIMIT_STORAGE_KEY, String(state.limit));
+}
+
+function syncAnalysisLimitControl() {
+  if (els.limit) els.limit.value = String(state.limit);
+}
+
 function loadBacktestLimit() {
   return normalizeBacktestLimit(localStorage.getItem(BACKTEST_LIMIT_STORAGE_KEY) || 24);
 }
@@ -427,11 +741,28 @@ function saveBacktestLimit() {
   localStorage.setItem(BACKTEST_LIMIT_STORAGE_KEY, String(state.backtestLimit));
 }
 
+function normalizeFlagshipLimit(value) {
+  return 120;
+}
+
+function loadFlagshipLimit() {
+  return 120;
+}
+
+function saveFlagshipLimit() {
+  localStorage.setItem(FLAGSHIP_LIMIT_STORAGE_KEY, String(state.flagshipLimit));
+}
+
 function syncBacktestControls() {
   if (!els.backtestSelect || !els.backtestInput) return;
   const value = String(state.backtestLimit);
   els.backtestInput.value = value;
   els.backtestSelect.value = BACKTEST_PRESETS.includes(state.backtestLimit) ? value : "custom";
+}
+
+function syncFlagshipControls() {
+  if (!els.flagshipLimitSelect) return;
+  els.flagshipLimitSelect.value = String(state.flagshipLimit);
 }
 
 function applyPlanAccess() {
@@ -449,12 +780,16 @@ function applyPlanAccess() {
   [els.backtestSelect, els.backtestInput, els.backtestApply].filter(Boolean).forEach((control) => {
     control.disabled = !pro;
   });
+  [els.flagshipLimitSelect, els.flagshipLimitApply].filter(Boolean).forEach((control) => {
+    control.disabled = !flagship;
+  });
   Array.from(els.limit.options).forEach((option) => {
     option.disabled = !pro && Number(option.value) > 90;
   });
   if (!pro && state.limit > 90) {
     state.limit = 90;
-    els.limit.value = "90";
+    saveAnalysisLimit();
+    syncAnalysisLimitControl();
   }
   els.focusButtons.forEach((button) => {
     button.disabled = !pro;
@@ -467,9 +802,10 @@ function applyPlanAccess() {
   els.crossYearSearch.classList.toggle("pro-required", !pro);
   updateNotificationUi();
   if (state.analysis) {
-    renderCandidates();
-    renderModeSnapshots();
     renderFlagshipPick();
+    renderFlagshipHistory();
+    renderModelOutput({ heavy: state.activeTab === "model" });
+    if (flagship && state.activeTab === "model") loadFlagshipHistory({ silent: true });
   }
 }
 
@@ -482,7 +818,11 @@ function loadSavedPicks() {
 }
 
 function saveSavedPicks(picks) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(picks));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(picks));
+  } catch {
+    setStatus("號碼已暫存於目前頁面，但瀏覽器拒絕長期儲存。", true);
+  }
 }
 
 function loadModelSnapshots() {
@@ -519,6 +859,11 @@ function readCachedPayload(cacheKey) {
   const store = loadApiCacheStore();
   const record = store[cacheKey];
   if (!record?.payload) return null;
+  if (!record.savedAt || Date.now() - Number(record.savedAt) > API_CACHE_MAX_AGE_MS) {
+    delete store[cacheKey];
+    saveApiCacheStore(store);
+    return null;
+  }
   state.apiCache.set(cacheKey, record.payload);
   return record.payload;
 }
@@ -539,6 +884,63 @@ function writeCachedPayload(cacheKey, payload) {
 function drawKey(draw) {
   if (!draw) return "";
   return `${draw.name || state.game}|${draw.period || ""}|${draw.date || ""}|${(draw.numbers || []).join(".")}`;
+}
+
+function taiwanDayKey(value = new Date()) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (typeof value === "string" && !value.trim()) return "";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(value);
+    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    return values.year && values.month && values.day ? `${values.year}-${values.month}-${values.day}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function readDailyComparison() {
+  try {
+    const value = JSON.parse(localStorage.getItem(DAILY_COMPARISON_STORAGE_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function ensureDailyComparisonReset() {
+  const today = taiwanDayKey();
+  const current = readDailyComparison();
+  if (current.day === today && current.games && typeof current.games === "object") return false;
+  try {
+    localStorage.setItem(DAILY_COMPARISON_STORAGE_KEY, JSON.stringify({ day: today, games: {} }));
+  } catch {
+    // Ignore blocked storage; the page can still compare while it remains open.
+  }
+  return true;
+}
+
+function markDailyComparison(latest) {
+  ensureDailyComparisonReset();
+  if (!latest || taiwanDayKey(latest.date) !== taiwanDayKey()) return;
+  const current = readDailyComparison();
+  const games = current.games && typeof current.games === "object" ? current.games : {};
+  games[state.game] = drawKey(latest);
+  try {
+    localStorage.setItem(DAILY_COMPARISON_STORAGE_KEY, JSON.stringify({ day: taiwanDayKey(), games }));
+  } catch {
+    // Ignore blocked storage; the current render still has the latest draw.
+  }
+}
+
+function dailyComparisonReady(latest) {
+  if (!latest || taiwanDayKey(latest.date) !== taiwanDayKey()) return false;
+  const current = readDailyComparison();
+  return current.day === taiwanDayKey() && current.games?.[state.game] === drawKey(latest);
 }
 
 function readLastSeenDraw() {
@@ -573,7 +975,22 @@ async function fetchJsonWithTimeout(url, options = {}) {
         ...(options.headers || {}),
       },
     });
-    return await response.json();
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (!response.ok) {
+      const error = new Error(
+        payload?.error || (response.status === 429 ? "請求太頻繁，請稍後再試。" : `伺服器回應 ${response.status}`),
+      );
+      error.status = response.status;
+      error.retryAfter = response.headers.get("Retry-After");
+      throw error;
+    }
+    if (!payload || typeof payload !== "object") throw new Error("伺服器回傳格式不正確。");
+    return payload;
   } finally {
     window.clearTimeout(timer);
   }
@@ -614,19 +1031,23 @@ function normalizedWeights() {
   };
 }
 
+function coreWeightSummary(analysis = state.analysis) {
+  const components = Array.isArray(analysis?.flagshipComponents) ? analysis.flagshipComponents : [];
+  const text = components
+    .map((item) => {
+      const weight = Number(item.weight ?? item.baseWeight);
+      return item?.label && Number.isFinite(weight) ? `${item.label} ${weight}%` : null;
+    })
+    .filter(Boolean)
+    .join("・");
+  return text || "近期熱度 55%・長期熱度 20%・遺漏平衡 5%・區間分布 20%";
+}
+
 function renderModelControls() {
-  els.focusButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.focus === state.analysisFocus);
-  });
-  els.modelInputs.forEach((input) => {
-    const key = input.dataset.weight;
-    input.value = state.modelWeights[key];
-    const valueEl = document.querySelector(`#${key}Weight`);
-    if (valueEl) valueEl.textContent = state.modelWeights[key];
-  });
-  const weights = normalizedWeights();
-  const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
-  els.modelSummary.textContent = `${focus.label}：${focus.description} 權重為熱度 ${Math.round(weights.heat * 100)}%、遺漏 ${Math.round(weights.overdue * 100)}%、分散 ${Math.round(weights.spread * 100)}%、回測 ${Math.round(weights.backtest * 100)}%。`;
+  const adaptive = state.analysis?.adaptiveRecentPattern;
+  els.modelSummary.textContent = adaptive
+    ? `近期版路會依逐期回測自動微調：${coreWeightSummary()}。新一期資料進來後才重新校準。`
+    : "核心分析會依近期逐期回測微調權重；回測只作驗證，不代表預測或保證中獎。";
 }
 
 function gameLabel(game) {
@@ -634,21 +1055,36 @@ function gameLabel(game) {
 }
 
 function parseSavedInputs() {
-  const numbers = els.savedInputs.map((input) => Number(input.value));
-  if (numbers.some((n) => !Number.isInteger(n) || n < 1 || n > 39)) {
-    throw new Error("請輸入 1 到 39 的五個號碼。");
-  }
-  const unique = new Set(numbers);
-  if (unique.size !== 5) {
-    throw new Error("五個號碼不能重複。");
-  }
-  return [...unique].sort((a, b) => a - b);
+  const numbers = [...new Set(state.savedSelection.map(Number))]
+    .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39)
+    .sort((left, right) => left - right);
+  if (!numbers.length) throw new Error("請先點選至少 1 顆號碼球。");
+  return numbers;
 }
 
 function fillSavedInputs(numbers) {
-  els.savedInputs.forEach((input, index) => {
-    input.value = numbers[index] ?? "";
-  });
+  state.savedSelection = [...new Set((numbers || []).map(Number))]
+    .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39)
+    .sort((left, right) => left - right)
+    .slice(0, 39);
+  renderSavedNumberPicker();
+}
+
+function renderSavedNumberPicker() {
+  if (!els.savedPicker) return;
+  const selected = new Set(state.savedSelection);
+  els.savedPicker.innerHTML = Array.from({ length: 39 }, (_, index) => index + 1)
+    .map((number) => {
+      const active = selected.has(number);
+      return `<button class="saved-number-ball${active ? " is-selected" : ""}" type="button" data-saved-number="${number}" aria-pressed="${active}" aria-label="${pad(number)}號">${pad(number)}</button>`;
+    })
+    .join("");
+  if (els.savedSelectionMeta) {
+    els.savedSelectionMeta.textContent = state.savedSelection.length
+      ? `已選 ${state.savedSelection.length} 顆：${state.savedSelection.map(pad).join("、")}`
+      : "已選 0 顆，請點選號碼球";
+  }
+  if (els.clearSavedNumbers) els.clearSavedNumbers.disabled = state.savedSelection.length === 0;
 }
 
 function matchCount(numbers, winners) {
@@ -954,6 +1390,7 @@ function randomChoice(items, rng = Math.random) {
 }
 
 function buildCandidate(pool, rng = Math.random) {
+  if (!Array.isArray(pool) || pool.length < 5) return [];
   const numbers = new Set();
   const frequencyRows = state.analysis?.frequency || [];
   const stats = new Map(frequencyRows.map((row) => [row.number, row]));
@@ -983,6 +1420,13 @@ function buildCandidate(pool, rng = Math.random) {
     .filter((number) => poolSet.has(number))
     .slice(0, 18);
   const focus = state.analysisFocus;
+  const addRandomUntil = (targetSize, choices) => {
+    const available = [...new Set(choices)].filter((number) => poolSet.has(number) && !numbers.has(number));
+    while (numbers.size < targetSize && available.length) {
+      const index = Math.floor(rng() * available.length);
+      numbers.add(available.splice(index, 1)[0]);
+    }
+  };
   const zones = [
     pool.filter((n) => n <= 10),
     pool.filter((n) => n >= 11 && n <= 20),
@@ -1006,13 +1450,13 @@ function buildCandidate(pool, rng = Math.random) {
     numbers.add(randomChoice(intervalNumbers, rng));
   }
   if ((focus === "pattern" || focus === "interval") && intervalNumbers.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(intervalNumbers, rng));
+    addRandomUntil(3, intervalNumbers);
   }
   if (repeatNumbers.length && numbers.size < 5 && rng() < 0.45) {
     numbers.add(randomChoice(repeatNumbers, rng));
   }
   if (state.game === "ca-fantasy5") {
-    while (numbers.size < 2 && shortAround.length) numbers.add(randomChoice(shortAround, rng));
+    addRandomUntil(2, shortAround);
     if (shortEdges.length && numbers.size < 5 && rng() < 0.72) {
       numbers.add(randomChoice(shortEdges, rng));
     }
@@ -1024,13 +1468,13 @@ function buildCandidate(pool, rng = Math.random) {
     }
   }
   if (focus === "classic" && classicList.length) {
-    while (numbers.size < 4) numbers.add(randomChoice(classicList, rng));
+    addRandomUntil(4, classicList);
   }
   if (focus === "hot" && hotList.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(hotList, rng));
+    addRandomUntil(3, hotList);
   }
   if (focus === "overdue" && overdueList.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(overdueList, rng));
+    addRandomUntil(3, overdueList);
   }
   if (focus === "backtest") {
     const top = [...pool]
@@ -1041,12 +1485,10 @@ function buildCandidate(pool, rng = Math.random) {
       .sort((a, b) => b.score - a.score)
       .slice(0, 20)
       .map((item) => item.n);
-    while (numbers.size < 4 && top.length) numbers.add(randomChoice(top, rng));
+    addRandomUntil(4, top);
   }
-  while (numbers.size < 5) {
-    numbers.add(randomChoice(pool, rng));
-  }
-  return [...numbers].sort((a, b) => a - b);
+  addRandomUntil(5, pool);
+  return [...numbers].sort((a, b) => a - b).slice(0, 5);
 }
 
 function generateCandidates() {
@@ -1059,9 +1501,10 @@ function generateCandidates() {
     const rng = createRng(seed);
     const seen = new Set();
     const candidates = [];
-    const attempts = state.analysisFocus === "backtest" ? 260 : 200;
+    const attempts = state.analysisFocus === "backtest" ? CANDIDATE_ATTEMPTS + 24 : CANDIDATE_ATTEMPTS;
     for (let i = 0; i < attempts; i += 1) {
       const numbers = buildCandidate(pool, rng);
+      if (numbers.length !== 5) continue;
       const key = numbers.join(",");
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1165,12 +1608,10 @@ function validationRowsForLatest() {
 }
 
 function referenceCandidate() {
-  const candidates = generateCandidates();
-  if (candidates.length) return candidates[0];
-  const numbers = state.analysis?.recommendation || [];
+  const numbers = normalizedPick(state.analysis?.recommendation);
   if (numbers.length !== 5) return null;
   const backtest = backtestPick(numbers);
-  return { numbers, backtest, score: scorePick(numbers, backtest) };
+  return { numbers, backtest, score: { total: "核心", pattern: 0 } };
 }
 
 function currentReferenceNumbers() {
@@ -1184,27 +1625,12 @@ function renderReferencePick() {
     els.pickMeta.innerHTML = "";
     return;
   }
-  const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
-  const tailProfile = hotTailProfile();
-  const shortCycle = shortCycleProfile();
-  const shortTermLeaders = state.analysis?.shortTermConsensus?.leaders || [];
-  const shortTermText = shortTermLeaders.length
-    ? shortTermLeaders
-        .slice(0, 5)
-        .map((item) => `${pad(item.number)}（${item.agreement}/${state.analysis.shortTermConsensus.windows.length}窗）`)
-        .join("、")
-    : "資料不足";
   els.pickBalls.innerHTML = balls(candidate.numbers);
   els.pickMeta.innerHTML = `
-    <span>${focus.label}</span>
-    <span>${focus.description}</span>
-    <span>熱尾 ${tailProfile.label}</span>
-    <span>短期共識 ${shortTermText}</span>
-    ${state.game === "ca-fantasy5" ? `<span>${shortCycle.label}</span>` : ""}
-    <span>分數 ${candidate.score.total}</span>
-    <span>版路 +${candidate.score.pattern || 0}</span>
+    <span>核心分析</span>
+    <span>${coreWeightSummary()}</span>
     <span>最高 ${candidate.backtest.bestHit} 中</span>
-    <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
+    <span>${state.analysis?.adaptiveRecentPattern?.reason || "新一期資料進來後自動校準版路權重"}</span>
   `;
 }
 
@@ -1215,29 +1641,77 @@ function renderFlagshipPick() {
     els.flagshipMeta.innerHTML = "<span>量化旗艦版會員專屬</span>";
     return;
   }
-  const numbers = state.analysis?.flagshipRecommendation || [];
-  if (numbers.length !== 6) {
+  const numbers = normalizedPick(state.analysis?.flagshipRecommendation);
+  if (numbers.length !== 5) {
     els.flagshipBalls.innerHTML = "";
-    els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 6 碼候選池。</span>";
+    els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 5 碼候選池。</span>";
+  } else {
+    const flagshipMethod = state.analysis?.flagshipMethod || `核心分析：${coreWeightSummary()}`;
+    const adaptiveReason = state.analysis?.adaptiveRecentPattern?.reason || "新一期資料進來後自動校準版路權重";
+    els.flagshipBalls.innerHTML = `
+      <div class="flagship-star-shape" role="img" aria-label="五芒星摘星五碼">
+        ${balls(numbers)}
+      </div>
+    `;
+    els.flagshipMeta.innerHTML = `
+      <span class="flagship-window-note">${flagshipMethod}</span>
+      <span>${adaptiveReason}</span>
+      <span>僅供統計參考，不代表保證中獎</span>
+    `;
+  }
+}
+
+function renderCoreCandidatePool() {
+  if (!els.coreCandidateBalls || !els.coreCandidateMeta || !els.coreCandidateSave) return;
+  if (!isProPlan()) {
+    els.coreCandidateBalls.innerHTML = "";
+    els.coreCandidateMeta.textContent = "Pro 訂閱版專屬";
+    els.coreCandidateSave.disabled = true;
     return;
   }
-  const evidence = state.analysis?.researchEvidence?.features || [];
-  const evidenceText = evidence.length
-    ? evidence
-        .slice(0, 3)
-        .map((item) => `${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`)
-        .join("、")
-    : "多窗口交叉驗證";
-  els.flagshipBalls.innerHTML = balls(numbers);
-  els.flagshipMeta.innerHTML = `
-    <span>模型評分最高 6 碼候選池</span>
-    <span>研究支持：${evidenceText}</span>
-    <span>僅供統計參考，不代表保證中獎</span>
-  `;
+  const pool = Array.isArray(state.analysis?.coreCandidatePool) ? state.analysis.coreCandidatePool : [];
+  if (pool.length < 15) {
+    els.coreCandidateBalls.innerHTML = "";
+    els.coreCandidateMeta.textContent = "資料累積中，暫時無法產生候選 15 碼。";
+    els.coreCandidateSave.disabled = true;
+    return;
+  }
+  const allowed = new Set(pool.map((item) => Number(item.number)));
+  state.coreCandidateSelection = state.coreCandidateSelection.filter((number) => allowed.has(number)).slice(0, 5);
+  els.coreCandidateBalls.innerHTML = pool
+    .map((item) => {
+      const number = Number(item.number);
+      const selected = state.coreCandidateSelection.includes(number);
+      const core = item.isCorePick ? " is-core-pick" : "";
+      return `<button class="core-candidate-ball${selected ? " is-selected" : ""}${core}" type="button" data-core-number="${number}" aria-pressed="${selected}" title="${item.isCorePick ? "核心推薦號碼" : "模型候選號碼"}">${pad(number)}</button>`;
+    })
+    .join("");
+  els.coreCandidateMeta.textContent = `已選 ${state.coreCandidateSelection.length}／5；金色外框為核心推薦五碼`;
+  els.coreCandidateSave.disabled = state.coreCandidateSelection.length !== 5;
+  els.coreCandidateBalls.querySelectorAll("[data-core-number]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const number = Number(button.dataset.coreNumber);
+      if (state.coreCandidateSelection.includes(number)) {
+        state.coreCandidateSelection = state.coreCandidateSelection.filter((item) => item !== number);
+      } else if (state.coreCandidateSelection.length < 5) {
+        state.coreCandidateSelection = [...state.coreCandidateSelection, number].sort((a, b) => a - b);
+      } else {
+        setStatus("最多選 5 顆號碼。", true);
+        return;
+      }
+      renderCoreCandidatePool();
+    });
+  });
 }
 
 function savePick(numbers) {
-  const normalized = [...numbers].sort((a, b) => a - b);
+  const normalized = [...new Set((numbers || []).map(Number))]
+    .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39)
+    .sort((a, b) => a - b);
+  if (!normalized.length || normalized.length > 39) {
+    setStatus("自選號碼請選 1 到 39 顆。", true);
+    return false;
+  }
   const picks = loadSavedPicks();
   const duplicate = picks.some((pick) => pick.game === state.game && pick.numbers.join(",") === normalized.join(","));
   if (duplicate) {
@@ -1258,8 +1732,9 @@ function savePick(numbers) {
 }
 
 function renderCandidates() {
+  if (!els.candidates) return;
   if (!isProPlan()) {
-    els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；目前會保留上方一組統計參考選號。</div>`;
+    els.candidates.innerHTML = `<div class="empty-state">邏輯推理屬於 Pro 訂閱版；目前會保留上方一組統計參考選號。</div>`;
     return;
   }
   if (!state.analysis || !state.history.length) {
@@ -1275,8 +1750,8 @@ function renderCandidates() {
     .map(
       (candidate, index) => `
         <div class="candidate-item">
-          <div class="candidate-rank">#${index + 1}</div>
           <div>
+            <div class="candidate-reasoning-title">${CANDIDATE_REASONING_NAMES[index] || "綜合推理"}</div>
             <div class="saved-balls">${miniBalls(candidate.numbers)}</div>
             <div class="candidate-meta">
               <span>${candidate.score.total} · ${candidate.score.label}</span>
@@ -1358,11 +1833,18 @@ function renderModeSnapshots() {
   });
 }
 
-function renderModelOutput() {
+function renderModelOutput({ heavy = state.activeTab === "model" } = {}) {
   renderSavedPicks();
   renderReferencePick();
-  renderCandidates();
-  renderModeSnapshots();
+  renderCoreCandidatePool();
+  if (els.candidates) {
+    if (heavy) {
+      renderCandidates();
+    } else {
+      els.candidates.innerHTML = `<div class="empty-state">切換到「邏輯推理」分頁後載入推理號碼分析。</div>`;
+    }
+  }
+  if (els.modeSnapshots) els.modeSnapshots.innerHTML = "";
 }
 
 function scheduleModelRender(message = "模型設定已更新。") {
@@ -1476,7 +1958,6 @@ function renderModelBacktest(backtest, profiles = []) {
   if (validationHtml || ranking || warning) {
     els.backtestRecent.insertAdjacentHTML("afterbegin", `${validationHtml}${warning}<div class="model-rank-list">${ranking}</div>`);
   }
-  rememberModelSnapshots();
 }
 
 function renderPatterns(patterns, profiles = [], researchEvidence = null) {
@@ -1487,19 +1968,15 @@ function renderPatterns(patterns, profiles = [], researchEvidence = null) {
     els.patternLines.innerHTML = "";
     return;
   }
-  els.patternModel.textContent = patterns.selectedLabel || "版路模型";
+  els.patternModel.textContent = "核心版路摘要";
   els.patternRepeat.textContent = `重複均值 ${patterns.repeatAverage}`;
   const zone = patterns.zonePatterns?.[0];
   const odd = patterns.oddPatterns?.[0];
   const low = patterns.lowPatterns?.[0];
-  const tails = patterns.tails || [];
-  const intervals = patterns.intervals || [];
   const sumRange = patterns.sumRange || {};
-  const chip = (text, tone = "") => `<span class="pattern-chip ${tone}">${text}</span>`;
-  const empty = `<span class="pattern-note">資料不足</span>`;
   els.patternGrid.innerHTML = `
     <div>
-      <span>常見區間</span>
+      <span>常見分布</span>
       <strong>${zone ? zone.pattern : "-"}</strong>
       <em>${zone ? `${zone.count} 次` : ""}</em>
     </div>
@@ -1519,126 +1996,110 @@ function renderPatterns(patterns, profiles = [], researchEvidence = null) {
       <em>中心 ${sumRange.center || "-"}</em>
     </div>
   `;
-  const tailText = tails.length
-    ? tails.slice(0, 5).map((item, index) => chip(`${item.tail}尾 ${item.count}次`, index < 2 ? "gold" : "")).join("")
-    : empty;
-  const intervalText = intervals.length
-    ? intervals.slice(0, 4).map((item, index) => chip(`${item.label} ${item.rate}%`, index < 2 ? "gold" : "")).join("")
-    : empty;
-  const neighborText = patterns.neighborNumbers?.length
-    ? patterns.neighborNumbers.slice(0, 12).map((number) => chip(pad(number))).join("")
-    : empty;
-  const shortCycle = shortCycleProfile();
-  const shortCycleText =
-    state.game === "ca-fantasy5"
-      ? [
-          ...shortCycle.aroundNumbers.slice(0, 8).map((number) => chip(pad(number), "gold")),
-          ...shortCycle.edgeNumbers.slice(0, 3).map((number) => chip(pad(number))),
-          ...shortCycle.edgeNumbers.slice(-3).map((number) => chip(pad(number))),
-        ].join("")
-      : "";
-  const pairText = patterns.pairCombos?.length
-    ? patterns.pairCombos
-        .slice(0, 5)
-        .map((item, index) => chip(`${pad(item.numbers[0])}-${pad(item.numbers[1])} ${item.count}次`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const dragText = patterns.dragCards?.length
-    ? patterns.dragCards
-        .slice(0, 5)
-        .map((item, index) => chip(`${pad(item.base)}拖${pad(item.follow)} ${item.rate}%`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const repeatText = patterns.repeatCandidates?.length
-    ? patterns.repeatCandidates
-        .slice(0, 5)
-        .map((item, index) => chip(`${pad(item.number)} ${item.rate}%`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const multiWindowText = patterns.multiWindowNumbers?.length
-    ? patterns.multiWindowNumbers
-        .slice(0, 6)
-        .map((item, index) => chip(`${pad(item.number)} ${item.score}`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const signalText = patterns.signalLeaders?.length
-    ? patterns.signalLeaders
-        .slice(0, 6)
-        .map((item, index) => chip(`${pad(item.number)} ${item.support}項`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
-  const profileText = profiles
-    .slice(0, 3)
-    .map((item, index) => chip(`${item.label} 均${item.averageHit} / 高${item.bestHit}`, index === 0 ? "gold" : ""))
-    .join("");
-  const evidenceRows = researchEvidence?.features || [];
-  const evidenceText = evidenceRows.length
-    ? evidenceRows
-        .slice(0, 4)
-        .map((item, index) => chip(`${item.label} ${item.multiplier >= 1 ? "+" : ""}${Math.round((item.multiplier - 1) * 100)}%`, index < 2 ? "gold" : ""))
-        .join("")
-    : empty;
+  const tails = (patterns.tails || []).slice(0, 4).map((item) => `${item.tail}尾`).join("、") || "資料不足";
+  const intervals = (patterns.intervals || []).slice(0, 3).map((item) => `${item.label} ${item.rate}%`).join("、") || "資料不足";
+  const neighbors = (patterns.neighborNumbers || []).slice(0, 6).map(pad).join("、") || "資料不足";
+  const adaptive = patterns.adaptiveRecent || {};
+  const adaptiveWeights = Array.isArray(adaptive.components) && adaptive.components.length
+    ? adaptive.components.map((item) => `${item.label} ${item.weight}%`).join("・")
+    : coreWeightSummary();
+  const adaptiveTitle = adaptive.selectedLabel ? `動態版路：${adaptive.selectedLabel}` : "動態版路：綜合平衡";
+  const adaptiveReason = adaptive.reason || "依近期逐期回測平滑校準，避免追逐單一期的波動。";
   els.patternLines.innerHTML = `
     <div class="pattern-soft">
-      <span>近期熱門尾數</span>
-      <strong class="pattern-line-main">${tailText}</strong>
-      <em class="pattern-note">優先保留近期有熱度的尾數，過冷尾數降低權重。</em>
+      <span>近期尾數</span>
+      <strong class="pattern-line-main">${tails}</strong>
+      <em class="pattern-note">尾數作輔助觀察，不單獨決定推薦。</em>
     </div>
     <div class="pattern-soft">
       <span>集中區間</span>
-      <strong class="pattern-line-main">${intervalText}</strong>
-      <em class="pattern-note">看近期開獎是否集中在你設定的區間帶。</em>
+      <strong class="pattern-line-main">${intervals}</strong>
+      <em class="pattern-note">區間會作為核心版路的動態參考，避免組合過度集中。</em>
     </div>
     <div>
-      <span>哥倆好</span>
-      <strong class="pattern-line-main">${pairText}</strong>
+      <span>上期鄰近觀察</span>
+      <strong class="pattern-line-main">${neighbors}</strong>
+      <em class="pattern-note">僅作版路提示，不單獨把號碼推上推薦。</em>
     </div>
-    <div>
-      <span>拖牌</span>
-      <strong class="pattern-line-main">${dragText}</strong>
-    </div>
-    <div>
-      <span>可能連莊</span>
-      <strong class="pattern-line-main">${repeatText}</strong>
-    </div>
-    <div class="pattern-soft">
-      <span>多窗口交集</span>
-      <strong class="pattern-line-main">${multiWindowText}</strong>
-      <em class="pattern-note">近 6、12、24、36、60、90 期重疊支持，避免只追單一熱點。</em>
-    </div>
-    <div class="pattern-soft">
-      <span>交叉支持</span>
-      <strong class="pattern-line-main">${signalText}</strong>
-      <em class="pattern-note">同時得到尾數、拖牌、連莊、區間等訊號的號碼優先。</em>
-    </div>
-    <div>
-      <span>上期鄰近</span>
-      <strong class="pattern-line-main">${neighborText}</strong>
-    </div>
-    <div class="pattern-soft">
-      <span>統計驗證</span>
-      <strong class="pattern-line-main">${evidenceText}</strong>
-      <em class="pattern-note">用走期回測比較隨機基準；樣本不穩定的訊號會自動降權。</em>
-    </div>
-    ${
-      state.game === "ca-fantasy5"
-        ? `<div class="pattern-soft">
-            <span>天天樂近10期</span>
-            <strong class="pattern-line-main">${shortCycleText || empty}</strong>
-            <em class="pattern-note">近10期附近環繞優先，再補 01-05 / 35-39 邊線。</em>
-          </div>`
-        : ""
-    }
-    <div class="pattern-wide">
-      <span>模型比較</span>
-      <strong class="pattern-line-main">${profileText || empty}</strong>
+    <div class="pattern-wide pattern-soft">
+      <span>近期自動版路</span>
+      <strong class="pattern-line-main">${adaptiveTitle}</strong>
+      <strong class="pattern-line-main">${adaptiveWeights}</strong>
+      <em class="pattern-note">${adaptiveReason} 新一期資料進來後才重新校準，同一期不反覆改寫。</em>
     </div>
   `;
 }
 
+function renderTailAnalysis(tailAnalysis) {
+  if (!els.tailAnalysisSummary || !els.tailHotList || !els.tailAvoidList) return;
+  if (!tailAnalysis) {
+    els.tailAnalysisSummary.innerHTML = `<div class="empty-state">資料累積後會顯示尾數分析。</div>`;
+    els.tailHotList.innerHTML = "";
+    els.tailAvoidList.innerHTML = "";
+    if (els.tailRecommendationBalls) els.tailRecommendationBalls.innerHTML = "";
+    if (els.tailAnalysisMeta) els.tailAnalysisMeta.innerHTML = "";
+    if (els.tailAnalysisNote) els.tailAnalysisNote.textContent = "";
+    return;
+  }
+
+  const rows = Array.isArray(tailAnalysis.rows) ? tailAnalysis.rows : [];
+  const rowByTail = new Map(rows.map((row) => [Number(row.tail), row]));
+  const recommendedTails = Array.isArray(tailAnalysis.recommendedTails) ? tailAnalysis.recommendedTails : [];
+  const avoidTails = Array.isArray(tailAnalysis.avoidTails) ? tailAnalysis.avoidTails : [];
+  const windows = Array.isArray(tailAnalysis.windows) ? tailAnalysis.windows : [10, 20, 36];
+  const chip = (tail, tone = "") => {
+    const row = rowByTail.get(Number(tail));
+    const score = row ? ` ${row.score}` : "";
+    return `<span class="tail-pill ${tone}"><strong>${tail}尾</strong><small>${score} 分</small></span>`;
+  };
+  const strongest = rows[0];
+  const freshest = [...rows].sort((left, right) => (right.momentum || 0) - (left.momentum || 0) || left.tail - right.tail)[0];
+  const activeCount = rows.filter((row) => row.status !== "避開").length;
+  els.tailAnalysisBadge.textContent = `${tailAnalysis.version || "獨立"} · 近 ${windows.join("／")} 期`;
+  els.tailAnalysisSummary.innerHTML = `
+    <div>
+      <span>近期最強</span>
+      <strong>${strongest ? `${strongest.tail}尾` : "-"}</strong>
+      <em>${strongest ? `${strongest.score} 分` : "資料不足"}</em>
+    </div>
+    <div>
+      <span>動能上升</span>
+      <strong>${freshest ? `${freshest.tail}尾` : "-"}</strong>
+      <em>${freshest ? `${freshest.momentum >= 0 ? "+" : ""}${freshest.momentum}%` : "資料不足"}</em>
+    </div>
+    <div>
+      <span>可用尾數</span>
+      <strong>${activeCount} / 10</strong>
+      <em>依 4 期未出規則篩選</em>
+    </div>
+  `;
+  els.tailHotList.innerHTML = recommendedTails.length
+    ? recommendedTails.map((tail, index) => chip(tail, index < 2 ? "hot" : "")).join("")
+    : `<span class="tail-analysis-empty">資料不足</span>`;
+  els.tailAvoidList.innerHTML = avoidTails.length
+    ? avoidTails.map((tail) => chip(tail, "avoid")).join("")
+    : `<span class="tail-analysis-empty">目前沒有連續 4 期未出的尾數</span>`;
+  if (els.tailRecommendationBalls) {
+    const recommendation = normalizedPick(tailAnalysis.recommendation);
+    els.tailRecommendationBalls.innerHTML = recommendation.length === 5 ? balls(recommendation) : `<span class="tail-analysis-empty">資料累積中</span>`;
+  }
+  if (els.tailAnalysisMeta) {
+    els.tailAnalysisMeta.innerHTML = `
+      <span>優先尾數：${recommendedTails.map((tail) => `${tail}尾`).join("、") || "資料不足"}</span>
+      <span>避開：${avoidTails.map((tail) => `${tail}尾`).join("、") || "無"}</span>
+      <span>固定短期分析</span>
+    `;
+  }
+  if (els.tailAnalysisNote) {
+    els.tailAnalysisNote.textContent = `${tailAnalysis.method || "獨立尾數統計分析。"} ${tailAnalysis.note || ""}`.trim();
+  }
+}
+
 function renderSavedPicks() {
   const picks = loadSavedPicks().filter((pick) => pick.game === state.game);
-  const latestNumbers = state.latest?.numbers || [];
+  ensureDailyComparisonReset();
+  const comparisonReady = dailyComparisonReady(state.latest);
+  const latestNumbers = comparisonReady ? state.latest?.numbers || [] : [];
   if (!picks.length) {
     els.savedList.innerHTML = `<div class="empty-state">還沒有儲存號碼。</div>`;
     return;
@@ -1654,7 +2115,7 @@ function renderSavedPicks() {
         <div class="saved-item">
           <div>
             <div class="saved-balls">${miniBalls(pick.numbers, latestNumbers)}</div>
-            <p class="saved-meta">${gameLabel(pick.game)} · ${savedAt} · 回測 ${backtest.testedCount} 期</p>
+            <p class="saved-meta">${gameLabel(pick.game)} · ${savedAt} · ${pick.numbers.length} 顆${comparisonReady ? "" : " · 等待今日開獎"}</p>
             <div class="score-card">
               <div class="score-main">
                 <strong>${score.total}</strong>
@@ -1670,8 +2131,8 @@ function renderSavedPicks() {
             <div class="backtest-bars">${backtestBars(backtest.distribution, backtest.testedCount)}</div>
           </div>
           <div class="saved-result">
-            <strong>${hits}</strong>
-            <span>中</span>
+            <strong>${comparisonReady ? hits : "-"}</strong>
+            <span>${comparisonReady ? "中" : "待開獎"}</span>
             <button class="delete-button" data-delete-pick="${pick.id}" aria-label="刪除">×</button>
           </div>
         </div>
@@ -1690,42 +2151,84 @@ function renderSavedPicks() {
   });
 }
 
+function otherGame(game = state.game) {
+  return game === "tw539" ? "ca-fantasy5" : "tw539";
+}
+
+function renderLatestOverview() {
+  const current = state.latestByGame[state.game] || state.latest;
+  const secondaryGame = otherGame(state.game);
+  const secondary = state.latestByGame[secondaryGame];
+  const primaryCard = els.gameName?.closest(".latest-draw-card");
+  const secondaryCard = els.secondaryGameName?.closest(".latest-draw-card");
+
+  if (primaryCard) primaryCard.dataset.game = state.game;
+  if (secondaryCard) secondaryCard.dataset.game = secondaryGame;
+
+  if (current) {
+    els.gameName.textContent = current.name || gameLabel(state.game);
+    els.period.textContent = `期別 ${current.period || "-"}`;
+    els.date.textContent = `日期 ${current.date || "-"}`;
+    els.latestBalls.innerHTML = balls(current.numbers || []);
+  } else {
+    els.gameName.textContent = gameLabel(state.game);
+    els.period.textContent = "期別 -";
+    els.date.textContent = "日期 -";
+    els.latestBalls.innerHTML = '<span class="latest-placeholder">同步中...</span>';
+  }
+
+  if (!els.secondaryGameName) return;
+  els.secondaryGameName.textContent = gameLabel(secondaryGame);
+  if (secondary) {
+    els.secondaryPeriod.textContent = `期別 ${secondary.period || "-"}`;
+    els.secondaryDate.textContent = `日期 ${secondary.date || "-"}`;
+    els.secondaryLatestBalls.innerHTML = balls(secondary.numbers || []);
+    els.secondaryLatestStatus.textContent = "已同步最新資料";
+  } else {
+    els.secondaryPeriod.textContent = "期別 -";
+    els.secondaryDate.textContent = "日期 -";
+    els.secondaryLatestBalls.innerHTML = '<span class="latest-placeholder">同步中...</span>';
+    els.secondaryLatestStatus.textContent = "正在同步另一彩種";
+  }
+}
+
 function render(payload) {
   const { latest, history, analysis, updatedAt } = payload;
   state.latest = latest;
+  state.latestByGame[state.game] = latest;
+  markDailyComparison(latest);
   state.analysis = analysis;
   state.history = history;
   state.displayHistory = history;
-  els.historyScope.textContent = `目前使用近 ${analysis.drawCount} 期分析；短期可切換近 10、20、36 期。`;
+  const scopeText = `目前使用近 ${analysis.drawCount} 期分析；短期可切換近 10、20、36 期。`;
+  els.historyScope.textContent = scopeText;
+  if (els.recentScope) els.recentScope.textContent = scopeText;
   els.dashboard.hidden = false;
-  els.gameName.textContent = latest.name;
-  els.period.textContent = `期別 ${latest.period || "-"}`;
-  els.date.textContent = `日期 ${latest.date || "-"}`;
-  els.latestBalls.innerHTML = balls(latest.numbers);
+  renderLatestOverview();
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles, analysis.researchEvidence);
+  renderTailAnalysis(analysis.tailAnalysis);
   els.hot.innerHTML = rankRows(analysis.hot, "count");
   els.cold.innerHTML = rankRows(analysis.cold, "count");
   els.overdue.innerHTML = rankRows(analysis.overdue, "gap");
   renderHistory();
   els.drawCount.textContent = `${analysis.drawCount} 期`;
-  renderSavedPicks();
-  renderReferencePick();
   renderFlagshipPick();
-  renderCandidates();
-  renderModeSnapshots();
+  renderFlagshipHistory();
+  if (state.activeTab === "model" && isFlagshipPlan()) loadFlagshipHistory({ silent: true });
+  renderModelOutput({ heavy: state.activeTab === "model" });
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
+  refreshOtherLatest({ silent: true });
 }
 
 function renderLatestCard(latest) {
   if (!latest) return;
   state.latest = latest;
+  state.latestByGame[state.game] = latest;
   els.dashboard.hidden = false;
-  els.gameName.textContent = latest.name || gameLabel(state.game);
-  els.period.textContent = `期別 ${latest.period || "-"}`;
-  els.date.textContent = `日期 ${latest.date || "-"}`;
-  els.latestBalls.innerHTML = balls(latest.numbers || []);
+  renderLatestOverview();
+  refreshOtherLatest({ silent: true });
 }
 
 function renderPlans(subscription) {
@@ -1766,7 +2269,7 @@ function renderPlans(subscription) {
       savePlanPreview();
       renderPlans(subscription);
       applyPlanAccess();
-      setStatus(state.plan === "flagship" ? "已切到量化旗艦版預覽：每期 6 碼高分候選池已解鎖。" : "已切到 Pro 預覽：進階回測、版路、跨年查詢、通知與高分組合已解鎖。");
+      setStatus(state.plan === "flagship" ? "已切到量化旗艦版預覽：旗艦摘星五碼與自適應集成五碼已解鎖。" : "已切到 Pro 預覽：進階回測、版路、跨年查詢、通知與高分組合已解鎖。");
     });
   });
   applyPlanAccess();
@@ -1810,7 +2313,8 @@ function updateNotificationUi() {
   if (permission === "denied") {
     els.notifyText.textContent = "瀏覽器目前封鎖通知。請到瀏覽器網站設定允許通知後，再回來開啟開獎提醒。";
   } else if (isSubscribed && serverReady) {
-    els.notifyText.textContent = `已登錄開獎通知。新一期更新時，系統可發送提醒；目前約 ${state.notifications.subscriberCount || 1} 個裝置訂閱。`;
+    const interval = state.notifications.autoNotifyIntervalSeconds || 30;
+    els.notifyText.textContent = `已登錄開獎通知。系統約每 ${interval} 秒檢查新一期並發送提醒；目前約 ${state.notifications.subscriberCount || 1} 個裝置訂閱。`;
   } else if (permission === "granted" && !serverReady) {
     els.notifyText.textContent = "已開啟本機提醒；網站開著時偵測到新一期會跳通知。離線群發需設定 Render 推播金鑰與排程。";
   } else if (isSubscribed) {
@@ -1825,7 +2329,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (state.serviceWorkerRegistration) return state.serviceWorkerRegistration;
-  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js");
+  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=92");
   return state.serviceWorkerRegistration;
 }
 
@@ -1841,12 +2345,12 @@ async function syncPushSubscription() {
 }
 
 async function postSubscription(action, subscription) {
-  const response = await fetch("/api/push-subscription", {
+  const payload = await fetchJsonWithTimeout("/api/push-subscription", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, subscription, game: state.game, savedPicks: notificationSavedPicks() }),
+    timeoutMs: 15000,
   });
-  const payload = await response.json();
   if (!payload.ok) throw new Error(payload.error || "通知訂閱失敗");
   state.notifications.subscriberCount = payload.subscriberCount || state.notifications.subscriberCount || 0;
   return payload;
@@ -1985,6 +2489,7 @@ async function initNotifications(config) {
     serverReady: Boolean(config?.serverReady),
     publicKey: config?.publicKey || "",
     subscriberCount: config?.subscriberCount || 0,
+    autoNotifyIntervalSeconds: Number(config?.autoNotifyIntervalSeconds) || 30,
   };
   updateNotificationUi();
   if (notificationSupported()) {
@@ -2007,24 +2512,39 @@ async function loadConfig() {
 
 async function load(options = {}) {
   const silent = Boolean(options.silent);
+  const dailyReset = ensureDailyComparisonReset();
+  if (dailyReset && state.latest) renderSavedPicks();
   if (!isProPlan() && state.limit > 90) {
     state.limit = 90;
     els.limit.value = "90";
+    saveAnalysisLimit();
   }
-  const cacheKey = `${state.game}-${state.limit}-backtest-${state.backtestLimit}`;
+  saveAnalysisLimit();
+  syncAnalysisLimitControl();
+  const cacheKey = `${state.game}-${state.limit}-backtest-${state.backtestLimit}-flagship-${state.flagshipLimit}`;
   const cachedPayload = options.skipCache ? null : readCachedPayload(cacheKey);
   const requestId = ++state.requestId;
   if (cachedPayload) {
     render(cachedPayload);
     if (!silent) setStatus("已先顯示暫存資料，正在背景確認最新開獎...");
   } else {
-    if (!silent) setStatus("正在讀取資料...");
+    if (!silent) setStatus("數據分析中...");
+    if (!state.latest) {
+      fetchJsonWithTimeout(`/api/latest?game=${state.game}&t=${Date.now()}`, { timeoutMs: LATEST_FETCH_TIMEOUT_MS })
+        .then((latestPayload) => {
+          if (latestPayload.ok && requestId === state.requestId && !state.latest) {
+            renderLatestCard(latestPayload.latest);
+            setStatus("最新開獎已顯示，正在載入完整分析...");
+          }
+        })
+        .catch(() => {});
+    }
   }
   if (!silent) els.refresh.disabled = true;
   try {
     const previousSeen = readLastSeenDraw()[state.game] || "";
     const payload = await fetchJsonWithTimeout(
-      `/api/lottery?game=${state.game}&limit=${state.limit}&backtestLimit=${state.backtestLimit}&t=${Date.now()}`,
+      `/api/lottery?game=${state.game}&limit=${state.limit}&backtestLimit=${state.backtestLimit}&flagshipLimit=${state.flagshipLimit}&t=${Date.now()}`,
     );
     if (!payload.ok) throw new Error(payload.error || "資料讀取失敗");
     if (requestId !== state.requestId) return;
@@ -2047,6 +2567,10 @@ async function load(options = {}) {
 }
 
 async function refreshLatest(options = {}) {
+  if (state.latestRefreshInFlight) return;
+  state.latestRefreshInFlight = true;
+  const dailyReset = ensureDailyComparisonReset();
+  if (dailyReset && state.latest) renderSavedPicks();
   const requestId = ++state.latestRequestId;
   try {
     const payload = await fetchJsonWithTimeout(
@@ -2057,7 +2581,10 @@ async function refreshLatest(options = {}) {
     const nextLatest = payload.latest;
     const previousKey = readLastSeenDraw()[state.game] || "";
     const changed = drawKey(nextLatest) !== drawKey(state.latest);
-    if (!changed) return;
+    if (!changed) {
+      refreshOtherLatest({ silent: true });
+      return;
+    }
 
     renderLatestCard(nextLatest);
     await notifyIfLatestChanged(nextLatest, previousKey).catch(() => {});
@@ -2068,11 +2595,31 @@ async function refreshLatest(options = {}) {
     if (!options.silent) {
       setStatus(error.name === "AbortError" ? "最新開獎讀取逾時，請稍後再試。" : "最新開獎暫時無法讀取。", true);
     }
+  } finally {
+    state.latestRefreshInFlight = false;
+  }
+}
+
+async function refreshOtherLatest(options = {}) {
+  const requestedGame = otherGame(state.game);
+  try {
+    const payload = await fetchJsonWithTimeout(
+      `/api/latest?game=${requestedGame}&t=${Date.now()}`,
+      { timeoutMs: LATEST_FETCH_TIMEOUT_MS },
+    );
+    if (!payload.ok || !payload.latest) return;
+    state.latestByGame[requestedGame] = payload.latest;
+    renderLatestOverview();
+  } catch (error) {
+    if (!options.silent) {
+      setStatus(error.name === "AbortError" ? "另一彩種最新資料讀取逾時。" : "另一彩種最新資料暫時無法讀取。", true);
+    }
   }
 }
 
 function startAutoRefresh() {
-  window.setInterval(() => {
+  if (state.autoRefreshTimer) window.clearInterval(state.autoRefreshTimer);
+  state.autoRefreshTimer = window.setInterval(() => {
     if (document.visibilityState === "visible") {
       refreshLatest({ silent: true });
     }
@@ -2082,6 +2629,7 @@ function startAutoRefresh() {
       refreshLatest({ silent: true });
     }
   });
+  window.addEventListener("online", () => refreshLatest({ silent: true }));
 }
 
 async function runCrossYearSearch() {
@@ -2117,7 +2665,10 @@ async function runCrossYearSearch() {
     els.historyNumber.value = "";
     renderHistory();
     const years = payload.searchedYears?.length ? `${payload.searchedYears[0]}-${payload.searchedYears[payload.searchedYears.length - 1]}` : `${fromYear}-${toYear}`;
-    els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。`;
+    const scopeText = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。`;
+    els.historyScope.textContent = scopeText;
+    if (els.recentScope) els.recentScope.textContent = scopeText;
+    activateTab("recent");
     setStatus(`已完成跨年查詢：${payload.total} 筆。`);
   } catch (error) {
     setStatus(error.name === "AbortError" ? "查詢逾時，請縮小年份範圍或稍後再試。" : error.message, true);
@@ -2141,10 +2692,14 @@ document.querySelectorAll(".segment").forEach((button) => {
     document.querySelectorAll(".segment").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
     state.game = button.dataset.game;
+    state.latest = state.latestByGame[state.game] || null;
+    renderLatestOverview();
     renderCountdown();
     load();
   });
 });
+
+organizeAnalysisPanels();
 
 els.tabButtons.forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tab));
@@ -2154,10 +2709,12 @@ els.limit.addEventListener("change", () => {
   if (!isProPlan() && Number(els.limit.value) > 90) {
     els.limit.value = "90";
     state.limit = 90;
+    saveAnalysisLimit();
     setStatus("目前最多分析 90 期；Pro 可使用 120、180、365 期。", true);
     return;
   }
-  state.limit = Number(els.limit.value);
+  state.limit = normalizeAnalysisLimit(els.limit.value);
+  saveAnalysisLimit();
   state.candidateCache.clear();
   state.backtestCache.clear();
   load();
@@ -2191,8 +2748,38 @@ els.backtestApply.addEventListener("click", () => {
   load();
 });
 
+if (els.flagshipLimitApply) {
+  els.flagshipLimitApply.addEventListener("click", () => {
+    if (!requireFlagship("旗艦專屬期數分析")) return;
+    state.flagshipLimit = normalizeFlagshipLimit(els.flagshipLimitSelect.value);
+    saveFlagshipLimit();
+    syncFlagshipControls();
+    load();
+  });
+}
+
 els.refresh.addEventListener("click", load);
 els.crossYearSearch.addEventListener("click", runCrossYearSearch);
+
+if (els.flagshipHistoryRefresh) {
+  els.flagshipHistoryRefresh.addEventListener("click", () => {
+    if (!requireFlagship("旗艦分析紀錄")) return;
+    loadFlagshipHistory({ force: true });
+  });
+}
+
+if (els.coreCandidateSave) {
+  els.coreCandidateSave.addEventListener("click", () => {
+    if (!requirePro("核心候選 15 碼")) return;
+    if (state.coreCandidateSelection.length !== 5) {
+      setStatus("請先從候選 15 碼選滿 5 顆。", true);
+      return;
+    }
+    if (savePick(state.coreCandidateSelection)) {
+      setStatus(`已儲存核心候選組合：${state.coreCandidateSelection.map(pad).join(" · ")}`);
+    }
+  });
+}
 
 els.savedForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2203,6 +2790,22 @@ els.savedForm.addEventListener("submit", (event) => {
     setStatus(error.message, true);
   }
 });
+
+if (els.savedPicker) {
+  els.savedPicker.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-saved-number]");
+    if (!button) return;
+    const number = Number(button.dataset.savedNumber);
+    state.savedSelection = state.savedSelection.includes(number)
+      ? state.savedSelection.filter((item) => item !== number)
+      : [...state.savedSelection, number].sort((left, right) => left - right);
+    renderSavedNumberPicker();
+  });
+}
+
+if (els.clearSavedNumbers) {
+  els.clearSavedNumbers.addEventListener("click", () => fillSavedInputs([]));
+}
 
 els.usePick.addEventListener("click", () => {
   const numbers = currentReferenceNumbers();
@@ -2274,7 +2877,9 @@ els.clearHistorySearch.addEventListener("click", () => {
   els.historyKeyword.value = "";
   els.historyNumber.value = "";
   state.displayHistory = state.history;
-  els.historyScope.textContent = "目前顯示本次載入的分析期數。";
+  const scopeText = "目前顯示本次載入的分析期數。";
+  els.historyScope.textContent = scopeText;
+  if (els.recentScope) els.recentScope.textContent = scopeText;
   renderHistory();
   setStatus("已清除歷史查詢條件。");
 });
@@ -2297,12 +2902,17 @@ window.addEventListener("load", () => {
 });
 
 state.plan = loadPlanPreview();
+state.limit = loadAnalysisLimit();
 state.backtestLimit = loadBacktestLimit();
+state.flagshipLimit = loadFlagshipLimit();
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 initHistoryYears();
 syncBacktestControls();
+syncFlagshipControls();
+syncAnalysisLimitControl();
 renderModelControls();
+renderSavedNumberPicker();
 applyPlanAccess();
 updateNotificationUi();
 startCountdown();
