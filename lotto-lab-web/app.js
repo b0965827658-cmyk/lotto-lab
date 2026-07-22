@@ -55,7 +55,7 @@ const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
-const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v5-refresh";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v6-refresh";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const DAILY_COMPARISON_STORAGE_KEY = "lotto-lab-daily-comparison-v1";
 const ANALYSIS_LIMIT_STORAGE_KEY = "lotto-lab-analysis-limit-v1";
@@ -2329,7 +2329,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (state.serviceWorkerRegistration) return state.serviceWorkerRegistration;
-  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=92");
+  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=93");
   return state.serviceWorkerRegistration;
 }
 
