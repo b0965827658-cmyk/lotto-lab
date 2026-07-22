@@ -55,9 +55,10 @@ const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
-const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v3";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v4-dedup";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const DAILY_COMPARISON_STORAGE_KEY = "lotto-lab-daily-comparison-v1";
+const ANALYSIS_LIMIT_STORAGE_KEY = "lotto-lab-analysis-limit-v1";
 const BACKTEST_LIMIT_STORAGE_KEY = "lotto-lab-backtest-limit";
 const FLAGSHIP_LIMIT_STORAGE_KEY = "lotto-lab-flagship-limit";
 const POLL_INTERVAL_MS = 30 * 1000;
@@ -703,6 +704,25 @@ function normalizeBacktestLimit(value) {
   return Math.max(7, Math.min(365, number));
 }
 
+const ANALYSIS_LIMIT_PRESETS = [10, 20, 36, 60, 90, 120, 180, 365];
+
+function normalizeAnalysisLimit(value) {
+  const number = Number(value);
+  return ANALYSIS_LIMIT_PRESETS.includes(number) ? number : 90;
+}
+
+function loadAnalysisLimit() {
+  return normalizeAnalysisLimit(localStorage.getItem(ANALYSIS_LIMIT_STORAGE_KEY) || 90);
+}
+
+function saveAnalysisLimit() {
+  localStorage.setItem(ANALYSIS_LIMIT_STORAGE_KEY, String(state.limit));
+}
+
+function syncAnalysisLimitControl() {
+  if (els.limit) els.limit.value = String(state.limit);
+}
+
 function loadBacktestLimit() {
   return normalizeBacktestLimit(localStorage.getItem(BACKTEST_LIMIT_STORAGE_KEY) || 24);
 }
@@ -758,7 +778,8 @@ function applyPlanAccess() {
   });
   if (!pro && state.limit > 90) {
     state.limit = 90;
-    els.limit.value = "90";
+    saveAnalysisLimit();
+    syncAnalysisLimitControl();
   }
   els.focusButtons.forEach((button) => {
     button.disabled = !pro;
@@ -2670,10 +2691,12 @@ els.limit.addEventListener("change", () => {
   if (!isProPlan() && Number(els.limit.value) > 90) {
     els.limit.value = "90";
     state.limit = 90;
+    saveAnalysisLimit();
     setStatus("目前最多分析 90 期；Pro 可使用 120、180、365 期。", true);
     return;
   }
-  state.limit = Number(els.limit.value);
+  state.limit = normalizeAnalysisLimit(els.limit.value);
+  saveAnalysisLimit();
   state.candidateCache.clear();
   state.backtestCache.clear();
   load();
@@ -2861,6 +2884,7 @@ window.addEventListener("load", () => {
 });
 
 state.plan = loadPlanPreview();
+state.limit = loadAnalysisLimit();
 state.backtestLimit = loadBacktestLimit();
 state.flagshipLimit = loadFlagshipLimit();
 state.analysisFocus = loadAnalysisFocus();
@@ -2868,6 +2892,7 @@ state.modelWeights = loadModelWeights();
 initHistoryYears();
 syncBacktestControls();
 syncFlagshipControls();
+syncAnalysisLimitControl();
 renderModelControls();
 renderSavedNumberPicker();
 applyPlanAccess();
