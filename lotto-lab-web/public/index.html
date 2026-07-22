@@ -13,7 +13,7 @@
     <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
     <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
-    <link rel="stylesheet" href="/styles.css?v=71" />
+    <link rel="stylesheet" href="/styles.css?v=72" />
   </head>
   <body>
     <main class="shell">
@@ -40,7 +40,7 @@
           <button class="page-tab active" type="button" data-tab="latest">最新開獎</button>
           <button class="page-tab" type="button" data-tab="recent">近期號碼</button>
           <button class="page-tab" type="button" data-tab="history">紀錄查詢</button>
-          <button class="page-tab" type="button" data-tab="model">模型</button>
+          <button class="page-tab" type="button" data-tab="model">邏輯推理</button>
           <button class="page-tab" type="button" data-tab="subscription">升級訂閱</button>
         </nav>
 
@@ -244,7 +244,7 @@
         <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 核心分析" data-lock-text="訂閱後可查看核心分析說明與回測結果。">
           <div class="panel-head compact">
             <div>
-              <p class="label">模型設定</p>
+              <p class="label">邏輯推理</p>
               <h2>調整偏好</h2>
             </div>
             <button id="resetModelBtn" class="text-button" hidden>重設</button>
@@ -365,15 +365,15 @@
           <div class="mode-snapshot-list" id="modeSnapshotList"></div>
         </article>
 
-        <article class="panel candidate-panel" data-tier="pro" data-lock-title="Pro 高分組合" data-lock-text="訂閱後可重新產生多組候選排序。">
+        <article class="panel candidate-panel" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看五種推理方式產生的候選組合。">
           <div class="panel-head compact">
             <div>
-              <p class="label">高分組合</p>
-              <h2>候選排序</h2>
+              <p class="label">邏輯推理</p>
+              <h2>推理號碼分析</h2>
             </div>
             <button id="generateBtn" class="text-button">重新產生</button>
           </div>
-          <p class="fineprint">依追蹤分數排序，保留隨機性；這是分析候選，不是中獎保證。</p>
+          <p class="fineprint">熱號追擊、區間追擊、版路追擊、冷號回補與綜合推理各自呈現；這是分析候選，不是中獎保證。</p>
           <div class="candidate-list" id="candidateList"></div>
         </article>
         </div>
@@ -456,6 +456,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=86"></script>
+    <script src="/app.js?v=88"></script>
   </body>
 </html>

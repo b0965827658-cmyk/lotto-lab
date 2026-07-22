@@ -69,6 +69,14 @@ const MODEL_RENDER_DEBOUNCE_MS = 120;
 const CANDIDATE_ATTEMPTS = 72;
 const BACKTEST_PRESETS = [7, 14, 21, 24, 28, 35, 60, 90, 180, 365];
 
+const CANDIDATE_REASONING_NAMES = [
+  "熱號追擊",
+  "區間追擊",
+  "版路追擊",
+  "冷號回補",
+  "綜合推理",
+];
+
 const FOCUS_PRESETS = {
   balanced: {
     label: "綜合",
@@ -668,8 +676,9 @@ function organizeAnalysisPanels() {
     destination.insertBefore(fragment, destination.firstElementChild);
   };
 
+  // Keep the countdown with the latest draw. The other analysis modules
+  // belong together on the logic tab in a stable order.
   movePanels(modelPanel, [
-    latestPanel.querySelector(".countdown-panel"),
     latestPanel.querySelector(".pick-panel"),
     latestPanel.querySelector(".flagship-panel"),
     latestPanel.querySelector(".backtest-panel"),
@@ -1719,7 +1728,7 @@ function savePick(numbers) {
 function renderCandidates() {
   if (!els.candidates) return;
   if (!isProPlan()) {
-    els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；目前會保留上方一組統計參考選號。</div>`;
+    els.candidates.innerHTML = `<div class="empty-state">邏輯推理屬於 Pro 訂閱版；目前會保留上方一組統計參考選號。</div>`;
     return;
   }
   if (!state.analysis || !state.history.length) {
@@ -1735,8 +1744,8 @@ function renderCandidates() {
     .map(
       (candidate, index) => `
         <div class="candidate-item">
-          <div class="candidate-rank">#${index + 1}</div>
           <div>
+            <div class="candidate-reasoning-title">${CANDIDATE_REASONING_NAMES[index] || "綜合推理"}</div>
             <div class="saved-balls">${miniBalls(candidate.numbers)}</div>
             <div class="candidate-meta">
               <span>${candidate.score.total} · ${candidate.score.label}</span>
@@ -1826,7 +1835,7 @@ function renderModelOutput({ heavy = state.activeTab === "model" } = {}) {
     if (heavy) {
       renderCandidates();
     } else {
-      els.candidates.innerHTML = `<div class="empty-state">切換到「模型」分頁後載入高分組合。</div>`;
+      els.candidates.innerHTML = `<div class="empty-state">切換到「邏輯推理」分頁後載入推理號碼分析。</div>`;
     }
   }
   if (els.modeSnapshots) els.modeSnapshots.innerHTML = "";
@@ -2314,7 +2323,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (state.serviceWorkerRegistration) return state.serviceWorkerRegistration;
-  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js");
+  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=89");
   return state.serviceWorkerRegistration;
 }
 
