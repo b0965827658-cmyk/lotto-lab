@@ -1000,7 +1000,8 @@ def _freeze_flagship_recommendation(
     history_fingerprint = draw_fingerprint(history)
     snapshot_key = (
         f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:"
-        f"window-{selected_limit}:{snapshot_tag}:data-{history_fingerprint}"
+        f"window-{selected_limit}:{snapshot_tag}:pattern-{ADAPTIVE_PATTERN_VERSION}:"
+        f"data-{history_fingerprint}"
     )
     if snapshot_key in flagship_snapshot_memory:
         numbers = list(flagship_snapshot_memory[snapshot_key])
@@ -2100,7 +2101,7 @@ CORE_BASE_WEIGHTS = {
     "gap": 0.05,
     "interval": 0.20,
 }
-ADAPTIVE_PATTERN_VERSION = "dynamic-v3-refresh"
+ADAPTIVE_PATTERN_VERSION = "dynamic-v4-refresh"
 CORE_ANALYSIS_METHOD = "核心基準：近期熱度 55%・長期熱度 20%・遺漏平衡 5%・區間分布 20%"
 
 
@@ -2433,8 +2434,14 @@ def simple_core_recommendation(
     max_number: int = 39,
     pick_count: int = 5,
     core_weights: dict[str, float] | None = None,
+    avoid_set: set[int] | None = None,
 ) -> list[int]:
-    """Return one deterministic recommendation from the four core signals."""
+    """Return one deterministic recommendation from the four core signals.
+
+    ``avoid_set`` is used only when two published modules would otherwise show
+    the exact same set. It selects the best-scoring alternative from the same
+    model pool, so the split remains explainable and deterministic.
+    """
     components = simple_core_score_components(draws, max_number)
     weights = normalize_core_weights(core_weights)
     scores = {
@@ -2448,6 +2455,8 @@ def simple_core_recommendation(
     best_score = float("-inf")
     for combo in itertools.combinations(pool, pick_count):
         sorted_combo = tuple(sorted(combo))
+        if avoid_set and set(sorted_combo) == set(avoid_set):
+            continue
         number_score = sum(scores[number] for number in sorted_combo) / pick_count
         shape_score = combo_spread_score(list(sorted_combo), max_number)
         combo_score = number_score * 0.85 + shape_score * 0.15
@@ -2531,6 +2540,7 @@ def flagship_recommendation(
     evidence: dict[str, float] | None = None,
     backtest: dict[str, Any] | None = None,
     core_weights: dict[str, float] | None = None,
+    avoid_set: set[int] | None = None,
 ) -> list[int]:
     """Return the deterministic flagship pick from its separate bounded profile."""
     return simple_core_recommendation(
@@ -2538,6 +2548,7 @@ def flagship_recommendation(
         max_number=max_number,
         pick_count=pick_count,
         core_weights=core_weights,
+        avoid_set=avoid_set,
     )
 
     # Kept below for old snapshots only; new requests never run this legacy
@@ -3159,8 +3170,8 @@ def analyze(
     )
     if set(flagship_numbers) == set(recommendation):
         # If both profiles land on the identical set, use the fixed flagship
-        # tie-break profile so the paid module does not silently duplicate the
-        # public reference card.
+        # tie-break profile and choose its best distinct combination so the
+        # paid module does not silently duplicate the public reference card.
         flagship_weights = normalize_core_weights(
             {"recent": 0.50, "heat": 0.25, "gap": 0.10, "interval": 0.15}
         )
@@ -3169,6 +3180,7 @@ def analyze(
             max_number=max_number,
             pick_count=5,
             core_weights=flagship_weights,
+            avoid_set=set(recommendation),
         )
     adaptive_numbers = list(flagship_numbers)
     core_candidate_pool = simple_core_candidate_pool(
@@ -3299,6 +3311,7 @@ def analyze_with_stable_backtest(
             max_number=max_number,
             pick_count=5,
             core_weights=flagship_weights,
+            avoid_set=set(analysis["recommendation"]),
         )
     analysis["flagshipWeights"] = flagship_weights
     analysis["coreCandidatePool"] = simple_core_candidate_pool(
