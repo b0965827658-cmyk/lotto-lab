@@ -2103,13 +2103,25 @@ CORE_BASE_WEIGHTS = {
 }
 SNIPER_ANALYSIS_WINDOW = 14
 SNIPER_VALIDATION_LIMIT = 14
+SNIPER_FEATURE_ORDER = (
+    "recent",
+    "heat",
+    "gap",
+    "interval",
+    "repeat",
+    "tail",
+    "neighbor",
+)
 SNIPER_BASE_WEIGHTS = {
-    "recent": 0.55,
-    "heat": 0.25,
-    "gap": 0.05,
-    "interval": 0.15,
+    "recent": 0.34,
+    "heat": 0.18,
+    "gap": 0.04,
+    "interval": 0.12,
+    "repeat": 0.16,
+    "tail": 0.08,
+    "neighbor": 0.08,
 }
-ADAPTIVE_PATTERN_VERSION = "dynamic-v6-sniper-14"
+ADAPTIVE_PATTERN_VERSION = "dynamic-v7-sniper-pattern"
 CORE_ANALYSIS_METHOD = "核心基準：近期熱度 55%・長期熱度 20%・遺漏平衡 5%・區間分布 20%"
 
 
@@ -2122,6 +2134,17 @@ def normalize_core_weights(weights: dict[str, float] | None = None) -> dict[str,
     }
     total = sum(values.values()) or 1.0
     return {key: values[key] / total for key in CORE_FEATURE_ORDER}
+
+
+def normalize_sniper_weights(weights: dict[str, float] | None = None) -> dict[str, float]:
+    """Normalize the independent short-window sniper signals."""
+    source = weights or SNIPER_BASE_WEIGHTS
+    values = {
+        key: max(0.0, float(source.get(key, SNIPER_BASE_WEIGHTS[key])))
+        for key in SNIPER_FEATURE_ORDER
+    }
+    total = sum(values.values()) or 1.0
+    return {key: values[key] / total for key in SNIPER_FEATURE_ORDER}
 
 
 def flagship_core_weights(core_weights: dict[str, float] | None = None) -> dict[str, float]:
@@ -2442,6 +2465,7 @@ def sniper_core_score_components(
     """
     ordered = canonical_analysis_draws(draws)
     window_rows = ordered[:SNIPER_ANALYSIS_WINDOW]
+    latest_rows = window_rows[:3]
     recent_rows = window_rows[: SNIPER_ANALYSIS_WINDOW // 2]
     older_rows = window_rows[SNIPER_ANALYSIS_WINDOW // 2 :]
 
@@ -2454,13 +2478,16 @@ def sniper_core_score_components(
         return values
 
     full_counts = counts(window_rows)
+    latest_counts = counts(latest_rows)
     recent_counts = counts(recent_rows)
     older_counts = counts(older_rows)
     full_denominator = max(1, len(window_rows) * 5)
+    latest_denominator = max(1, len(latest_rows) * 5)
     half_denominator = max(1, len(recent_rows) * 5)
 
     recent_raw: dict[int, float] = {}
     heat_raw: dict[int, float] = {}
+    repeat_raw: dict[int, float] = {}
     for number in range(1, max_number + 1):
         recent_rate = recent_counts[number] / half_denominator
         full_rate = full_counts[number] / full_denominator
@@ -2469,6 +2496,13 @@ def sniper_core_score_components(
         # keeps a single burst from dominating the whole recommendation.
         recent_raw[number] = recent_rate * 0.72 + full_rate * 0.28
         heat_raw[number] = full_rate * 0.78 + older_rate * 0.22
+        # Repeat is intentionally separate from recent heat: it rewards a
+        # number that has appeared again in the newest three draws without
+        # making the whole 14-draw count do the same work twice.
+        repeat_raw[number] = (
+            latest_counts[number] / latest_denominator * 0.72
+            + recent_counts[number] / half_denominator * 0.28
+        )
 
     def normalize(values: dict[int, float]) -> dict[int, float]:
         highest = max(values.values(), default=0.0)
@@ -2493,14 +2527,66 @@ def sniper_core_score_components(
         number: zone_counts[min(3, (number - 1) // 10)] / max_zone
         for number in range(1, max_number + 1)
     }
+
+    # Tail momentum is calculated from the same short window, then projected
+    # back onto each number. It is a light tie-break signal, not a promise that
+    # a tail must repeat.
+    recent_tail_counts = {tail: 0 for tail in range(10)}
+    full_tail_counts = {tail: 0 for tail in range(10)}
+    for draw in recent_rows:
+        for number in draw["numbers"]:
+            recent_tail_counts[number % 10] += 1
+    for draw in window_rows:
+        for number in draw["numbers"]:
+            full_tail_counts[number % 10] += 1
+    max_recent_tail = max(recent_tail_counts.values(), default=0) or 1
+    max_full_tail = max(full_tail_counts.values(), default=0) or 1
+    tail = {
+        number: (
+            recent_tail_counts[number % 10] / max_recent_tail * 0.70
+            + full_tail_counts[number % 10] / max_full_tail * 0.30
+        )
+        for number in range(1, max_number + 1)
+    }
+
+    # Neighbour/drag momentum looks around the latest draw and then gives a
+    # smaller vote to numbers that were present in the two draws before it.
+    # This makes the sniper model responsive to a new local pattern while the
+    # gap signal remains deliberately conservative.
+    latest_numbers = set(window_rows[0]["numbers"]) if window_rows else set()
+    drag_numbers = {
+        number
+        for draw in window_rows[1:3]
+        for number in draw["numbers"]
+        if number not in latest_numbers
+    }
+    neighbor_raw: dict[int, float] = {}
+    for number in range(1, max_number + 1):
+        proximity = 0.0
+        for latest_number in latest_numbers:
+            distance = abs(number - latest_number)
+            if distance == 1:
+                proximity = max(proximity, 1.0)
+            elif distance == 2:
+                proximity = max(proximity, 0.55)
+            elif distance == 3:
+                proximity = max(proximity, 0.25)
+        drag = 0.35 if number in drag_numbers else 0.0
+        neighbor_raw[number] = proximity * 0.75 + drag * 0.25
+
     recent = normalize(recent_raw)
     heat = normalize(heat_raw)
+    repeat = normalize(repeat_raw)
+    neighbor = normalize(neighbor_raw)
     return {
         number: {
             "recent": round(recent[number], 6),
             "heat": round(heat[number], 6),
             "gap": round(gap_balance[number], 6),
             "interval": round(interval[number], 6),
+            "repeat": round(repeat[number], 6),
+            "tail": round(tail[number], 6),
+            "neighbor": round(neighbor[number], 6),
         }
         for number in range(1, max_number + 1)
     }
@@ -2562,13 +2648,53 @@ def _core_pick_from_components(
     return list(best_combo or tuple(pool[:pick_count]))
 
 
+def sniper_pick_from_components(
+    components: dict[int, dict[str, float]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    sniper_weights: dict[str, float] | None = None,
+    avoid_set: set[int] | None = None,
+) -> list[int]:
+    """Pick with the independent seven-signal short-window sniper model."""
+    weights = normalize_sniper_weights(sniper_weights)
+    scores = {
+        number: sum(values.get(key, 0.0) * weights[key] for key in SNIPER_FEATURE_ORDER)
+        for number, values in components.items()
+    }
+    # Keep a wider candidate pool than the general model so a short-term
+    # pattern can move a number into the final five without changing the
+    # public/core recommendation.
+    pool = sorted(scores, key=lambda number: (-scores[number], number))[: min(20, max_number)]
+    if len(pool) <= pick_count:
+        return sorted(pool)
+
+    best_combo: tuple[int, ...] | None = None
+    best_score = float("-inf")
+    for combo in itertools.combinations(pool, pick_count):
+        sorted_combo = tuple(sorted(combo))
+        if avoid_set and set(sorted_combo) == set(avoid_set):
+            continue
+        number_score = sum(scores[number] for number in sorted_combo) / pick_count
+        spread_score = combo_spread_score(list(sorted_combo), max_number)
+        distinct_tail_score = len({number % 10 for number in sorted_combo}) / max(1, pick_count)
+        # Number evidence stays dominant; shape only breaks near-ties.
+        pattern_score = spread_score * 0.65 + distinct_tail_score * 0.35
+        combo_score = number_score * 0.94 + pattern_score * 0.06
+        if combo_score > best_score or (
+            combo_score == best_score and (best_combo is None or sorted_combo < best_combo)
+        ):
+            best_score = combo_score
+            best_combo = sorted_combo
+    return list(best_combo or tuple(pool[:pick_count]))
+
+
 SNIPER_PROFILE_CANDIDATES = (
     ("dynamic", "動態核心", None),
-    ("baseline", "核心平衡", SNIPER_BASE_WEIGHTS),
-    ("recent", "近期動能", {"recent": 0.64, "heat": 0.18, "gap": 0.05, "interval": 0.13}),
-    ("gap", "短窗平衡", {"recent": 0.58, "heat": 0.24, "gap": 0.08, "interval": 0.10}),
-    ("zone", "區間平衡", {"recent": 0.54, "heat": 0.23, "gap": 0.05, "interval": 0.18}),
-    ("sniper", "狙擊平衡", {"recent": 0.60, "heat": 0.25, "gap": 0.07, "interval": 0.08}),
+    ("baseline", "短窗平衡", SNIPER_BASE_WEIGHTS),
+    ("momentum", "近期動能", {"recent": 0.40, "heat": 0.12, "gap": 0.02, "interval": 0.10, "repeat": 0.22, "tail": 0.08, "neighbor": 0.06}),
+    ("repeat", "重複動能", {"recent": 0.28, "heat": 0.15, "gap": 0.03, "interval": 0.10, "repeat": 0.26, "tail": 0.10, "neighbor": 0.08}),
+    ("pattern", "版路平衡", {"recent": 0.30, "heat": 0.16, "gap": 0.02, "interval": 0.18, "repeat": 0.14, "tail": 0.10, "neighbor": 0.10}),
+    ("sniper", "狙擊平衡", {"recent": 0.33, "heat": 0.18, "gap": 0.03, "interval": 0.10, "repeat": 0.18, "tail": 0.10, "neighbor": 0.08}),
 )
 
 
@@ -2604,11 +2730,11 @@ def _sniper_profile_metrics(
                 )
             )
     for actual, components, row_weight in walk_forward_rows:
-        pick = _core_pick_from_components(
+        pick = sniper_pick_from_components(
             components,
             max_number=max_number,
             pick_count=pick_count,
-            core_weights=weights,
+            sniper_weights=weights,
         )
         rows.append({"hits": len(set(pick) & actual), "weight": row_weight})
 
@@ -2654,14 +2780,13 @@ def calibrate_sniper_core_weights(
     pick_count: int = 5,
     evaluation_limit: int = SNIPER_VALIDATION_LIMIT,
 ) -> dict[str, Any]:
-    """Select the flagship profile from identical walk-forward evidence.
+    """Select the flagship profile from independent 14-draw evidence.
 
-    The flagship used to apply a fixed cold-number boost after the main model
-    was calibrated. That made the paid pick less reliable and often forced a
-    lower-scoring replacement just to look different. This selector keeps the
-    strongest validated profile, even when it agrees with the reference pick.
+    The flagship is intentionally separate from the public four-signal model.
+    It compares recent repeat, tail and neighbour/drag signals on the same
+    walk-forward targets, then keeps the best validated profile.
     """
-    dynamic_weights = normalize_core_weights(base_weights or SNIPER_BASE_WEIGHTS)
+    dynamic_weights = normalize_sniper_weights(base_weights or SNIPER_BASE_WEIGHTS)
     ordered = canonical_analysis_draws(draws)
     target_limit = min(
         SNIPER_VALIDATION_LIMIT,
@@ -2685,7 +2810,7 @@ def calibrate_sniper_core_weights(
         )
     profile_rows: list[dict[str, Any]] = []
     for priority, (profile_id, label, candidate_weights) in enumerate(SNIPER_PROFILE_CANDIDATES):
-        weights = dynamic_weights if candidate_weights is None else normalize_core_weights(candidate_weights)
+        weights = dynamic_weights if candidate_weights is None else normalize_sniper_weights(candidate_weights)
         metrics = _sniper_profile_metrics(
             draws,
             weights,
@@ -2739,6 +2864,7 @@ def calibrate_sniper_core_weights(
     selected = best_row if applied else (dynamic_row or best_row)
     method = (
         f"狙擊手模式：專用近 {SNIPER_ANALYSIS_WINDOW} 期視窗，"
+        f"綜合近期熱度、重複動能、尾數動能、鄰近拖牌、區間與遺漏，"
         f"以近 {selected['testedCount']} 次逐期驗證選用「{selected['label']}」；"
         f"平均命中 {selected['averageHit']:.2f}、1 中以上 {selected['onePlusRate'] * 100:.1f}%、"
         f"2 中以上 {selected['twoPlusRate'] * 100:.1f}%，同一期固定，新一期才更新。"
@@ -2769,7 +2895,7 @@ def calibrate_sniper_core_weights(
             "zeroRate": round(selected["zeroRate"] * 100, 1),
             "stability": round(selected["stability"] * 100, 1),
         },
-        "note": f"狙擊手只讀最近 {SNIPER_ANALYSIS_WINDOW} 期的熱度、短期動能、遺漏狀態與區間分布；每次回測也只使用目標期以前的 {SNIPER_ANALYSIS_WINDOW} 期，避免把開獎結果倒灌進推薦。這是統計排序，不是中獎保證。",
+        "note": f"狙擊手只讀最近 {SNIPER_ANALYSIS_WINDOW} 期；重複動能、尾數動能與鄰近拖牌是獨立訊號，每次回測也只使用目標期以前的 {SNIPER_ANALYSIS_WINDOW} 期，避免把開獎結果倒灌進推薦。這是統計排序，不是中獎保證。",
     }
 
 
@@ -2849,11 +2975,11 @@ def flagship_recommendation(
 ) -> list[int]:
     """Return the deterministic flagship pick from its separate bounded profile."""
     components = sniper_core_score_components(draws, max_number)
-    return _core_pick_from_components(
+    return sniper_pick_from_components(
         components,
         max_number=max_number,
         pick_count=pick_count,
-        core_weights=core_weights,
+        sniper_weights=core_weights,
         avoid_set=avoid_set,
     )
 
