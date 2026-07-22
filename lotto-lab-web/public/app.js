@@ -2502,7 +2502,10 @@ async function load(options = {}) {
   if (!isProPlan() && state.limit > 90) {
     state.limit = 90;
     els.limit.value = "90";
+    saveAnalysisLimit();
   }
+  saveAnalysisLimit();
+  syncAnalysisLimitControl();
   const cacheKey = `${state.game}-${state.limit}-backtest-${state.backtestLimit}-flagship-${state.flagshipLimit}`;
   const cachedPayload = options.skipCache ? null : readCachedPayload(cacheKey);
   const requestId = ++state.requestId;
