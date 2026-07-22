@@ -55,7 +55,7 @@ const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
-const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v7-sniper-calibration";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v8-sniper-14";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const DAILY_COMPARISON_STORAGE_KEY = "lotto-lab-daily-comparison-v1";
 const ANALYSIS_LIMIT_STORAGE_KEY = "lotto-lab-analysis-limit-v1";
@@ -1647,7 +1647,7 @@ function renderFlagshipPick() {
     els.flagshipMeta.innerHTML = "<span>資料累積中，暫時無法產生 5 碼候選池。</span>";
   } else {
     const flagshipMethod = state.analysis?.flagshipMethod || `核心分析：${coreWeightSummary()}`;
-    const adaptiveReason = state.analysis?.adaptiveRecentPattern?.reason || "新一期資料進來後自動校準版路權重";
+    const sniperNote = state.analysis?.flagshipCalibration?.note || "狙擊手專用分析視窗：近 14 期。";
     els.flagshipBalls.innerHTML = `
       <div class="flagship-star-shape" role="img" aria-label="五芒星摘星五碼">
         ${balls(numbers)}
@@ -1655,7 +1655,7 @@ function renderFlagshipPick() {
     `;
     els.flagshipMeta.innerHTML = `
       <span class="flagship-window-note">${flagshipMethod}</span>
-      <span>${adaptiveReason}</span>
+      <span>${sniperNote}</span>
       <span>僅供統計參考，不代表保證中獎</span>
     `;
   }
