@@ -2101,7 +2101,15 @@ CORE_BASE_WEIGHTS = {
     "gap": 0.05,
     "interval": 0.20,
 }
-ADAPTIVE_PATTERN_VERSION = "dynamic-v5-sniper-calibrated"
+SNIPER_ANALYSIS_WINDOW = 14
+SNIPER_VALIDATION_LIMIT = 14
+SNIPER_BASE_WEIGHTS = {
+    "recent": 0.55,
+    "heat": 0.25,
+    "gap": 0.05,
+    "interval": 0.15,
+}
+ADAPTIVE_PATTERN_VERSION = "dynamic-v6-sniper-14"
 CORE_ANALYSIS_METHOD = "核心基準：近期熱度 55%・長期熱度 20%・遺漏平衡 5%・區間分布 20%"
 
 
@@ -2421,6 +2429,83 @@ def simple_core_score_components(
     }
 
 
+def sniper_core_score_components(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+) -> dict[int, dict[str, float]]:
+    """Build the flagship signals from one dedicated recent 14-draw window.
+
+    The public/core model intentionally keeps its multi-window 10/20/36 logic.
+    The sniper tier is separate: the current pick only reads the newest 14
+    draws, while historical validation below rebuilds this same 14-draw view
+    for each older target draw.
+    """
+    ordered = canonical_analysis_draws(draws)
+    window_rows = ordered[:SNIPER_ANALYSIS_WINDOW]
+    recent_rows = window_rows[: SNIPER_ANALYSIS_WINDOW // 2]
+    older_rows = window_rows[SNIPER_ANALYSIS_WINDOW // 2 :]
+
+    def counts(rows: list[dict[str, Any]]) -> dict[int, int]:
+        values = {number: 0 for number in range(1, max_number + 1)}
+        for draw in rows:
+            for number in draw["numbers"]:
+                if number in values:
+                    values[number] += 1
+        return values
+
+    full_counts = counts(window_rows)
+    recent_counts = counts(recent_rows)
+    older_counts = counts(older_rows)
+    full_denominator = max(1, len(window_rows) * 5)
+    half_denominator = max(1, len(recent_rows) * 5)
+
+    recent_raw: dict[int, float] = {}
+    heat_raw: dict[int, float] = {}
+    for number in range(1, max_number + 1):
+        recent_rate = recent_counts[number] / half_denominator
+        full_rate = full_counts[number] / full_denominator
+        older_rate = older_counts[number] / half_denominator
+        # Recent momentum gets the newest seven draws first; the full window
+        # keeps a single burst from dominating the whole recommendation.
+        recent_raw[number] = recent_rate * 0.72 + full_rate * 0.28
+        heat_raw[number] = full_rate * 0.78 + older_rate * 0.22
+
+    def normalize(values: dict[int, float]) -> dict[int, float]:
+        highest = max(values.values(), default=0.0)
+        return {number: value / highest if highest else 0.0 for number, value in values.items()}
+
+    # In this short window, omission is only a light stability signal. It does
+    # not force a cold number into the pick and does not use long-gap cutoffs.
+    gap_balance: dict[int, float] = {}
+    for number in range(1, max_number + 1):
+        gap = next(
+            (index for index, draw in enumerate(window_rows) if number in draw["numbers"]),
+            SNIPER_ANALYSIS_WINDOW,
+        )
+        gap_balance[number] = 1.0 - (min(gap, SNIPER_ANALYSIS_WINDOW) / SNIPER_ANALYSIS_WINDOW) * 0.12
+
+    zone_counts = [0, 0, 0, 0]
+    for draw in window_rows:
+        for number in draw["numbers"]:
+            zone_counts[min(3, (number - 1) // 10)] += 1
+    max_zone = max(zone_counts, default=0) or 1
+    interval = {
+        number: zone_counts[min(3, (number - 1) // 10)] / max_zone
+        for number in range(1, max_number + 1)
+    }
+    recent = normalize(recent_raw)
+    heat = normalize(heat_raw)
+    return {
+        number: {
+            "recent": round(recent[number], 6),
+            "heat": round(heat[number], 6),
+            "gap": round(gap_balance[number], 6),
+            "interval": round(interval[number], 6),
+        }
+        for number in range(1, max_number + 1)
+    }
+
+
 def simple_core_recommendation(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -2479,11 +2564,11 @@ def _core_pick_from_components(
 
 SNIPER_PROFILE_CANDIDATES = (
     ("dynamic", "動態核心", None),
-    ("baseline", "核心平衡", CORE_BASE_WEIGHTS),
-    ("recent", "近期動能", {"recent": 0.65, "heat": 0.15, "gap": 0.05, "interval": 0.15}),
-    ("gap", "遺漏平衡", {"recent": 0.60, "heat": 0.20, "gap": 0.10, "interval": 0.10}),
-    ("zone", "區間平衡", {"recent": 0.60, "heat": 0.15, "gap": 0.10, "interval": 0.15}),
-    ("sniper", "狙擊平衡", {"recent": 0.58, "heat": 0.22, "gap": 0.12, "interval": 0.08}),
+    ("baseline", "核心平衡", SNIPER_BASE_WEIGHTS),
+    ("recent", "近期動能", {"recent": 0.64, "heat": 0.18, "gap": 0.05, "interval": 0.13}),
+    ("gap", "短窗平衡", {"recent": 0.58, "heat": 0.24, "gap": 0.08, "interval": 0.10}),
+    ("zone", "區間平衡", {"recent": 0.54, "heat": 0.23, "gap": 0.05, "interval": 0.18}),
+    ("sniper", "狙擊平衡", {"recent": 0.60, "heat": 0.25, "gap": 0.07, "interval": 0.08}),
 )
 
 
@@ -2492,25 +2577,29 @@ def _sniper_profile_metrics(
     weights: dict[str, float],
     max_number: int = 39,
     pick_count: int = 5,
-    evaluation_limit: int = 36,
-    training_limit: int = 90,
+    evaluation_limit: int = SNIPER_VALIDATION_LIMIT,
+    training_limit: int = SNIPER_ANALYSIS_WINDOW,
     walk_forward_rows: list[tuple[set[int], dict[int, dict[str, float]], float]] | None = None,
 ) -> dict[str, Any]:
     """Measure one explainable profile with strict walk-forward validation."""
     rows: list[dict[str, Any]] = []
     if walk_forward_rows is None:
         ordered = canonical_analysis_draws(draws)
-        target_limit = min(max(0, int(evaluation_limit)), max(0, len(ordered) - 20))
+        target_limit = min(
+            SNIPER_VALIDATION_LIMIT,
+            max(0, int(evaluation_limit)),
+            max(0, len(ordered) - SNIPER_ANALYSIS_WINDOW),
+        )
         walk_forward_rows = []
         for target_index in range(target_limit):
             target = ordered[target_index]
             training = ordered[target_index + 1 : target_index + 1 + training_limit]
-            if len(training) < 20:
+            if len(training) < SNIPER_ANALYSIS_WINDOW:
                 continue
             walk_forward_rows.append(
                 (
                     set(target["numbers"]),
-                    simple_core_score_components(training, max_number),
+                    sniper_core_score_components(training, max_number),
                     0.50 if target_index < 10 else 0.30 if target_index < 20 else 0.20,
                 )
             )
@@ -2563,7 +2652,7 @@ def calibrate_sniper_core_weights(
     base_weights: dict[str, float] | None = None,
     max_number: int = 39,
     pick_count: int = 5,
-    evaluation_limit: int = 36,
+    evaluation_limit: int = SNIPER_VALIDATION_LIMIT,
 ) -> dict[str, Any]:
     """Select the flagship profile from identical walk-forward evidence.
 
@@ -2572,19 +2661,25 @@ def calibrate_sniper_core_weights(
     lower-scoring replacement just to look different. This selector keeps the
     strongest validated profile, even when it agrees with the reference pick.
     """
-    dynamic_weights = normalize_core_weights(base_weights)
+    dynamic_weights = normalize_core_weights(base_weights or SNIPER_BASE_WEIGHTS)
     ordered = canonical_analysis_draws(draws)
-    target_limit = min(max(0, int(evaluation_limit)), max(0, len(ordered) - 20))
+    target_limit = min(
+        SNIPER_VALIDATION_LIMIT,
+        max(0, int(evaluation_limit)),
+        max(0, len(ordered) - SNIPER_ANALYSIS_WINDOW),
+    )
     walk_forward_rows: list[tuple[set[int], dict[int, dict[str, float]], float]] = []
     for target_index in range(target_limit):
         target = ordered[target_index]
-        training = ordered[target_index + 1 : target_index + 1 + 90]
-        if len(training) < 20:
+        training = ordered[
+            target_index + 1 : target_index + 1 + SNIPER_ANALYSIS_WINDOW
+        ]
+        if len(training) < SNIPER_ANALYSIS_WINDOW:
             continue
         walk_forward_rows.append(
             (
                 set(target["numbers"]),
-                simple_core_score_components(training, max_number),
+                sniper_core_score_components(training, max_number),
                 0.50 if target_index < 10 else 0.30 if target_index < 20 else 0.20,
             )
         )
@@ -2643,7 +2738,8 @@ def calibrate_sniper_core_weights(
     )
     selected = best_row if applied else (dynamic_row or best_row)
     method = (
-        f"狙擊手模式：近 {selected['testedCount']} 次逐期回測選用「{selected['label']}」；"
+        f"狙擊手模式：專用近 {SNIPER_ANALYSIS_WINDOW} 期視窗，"
+        f"以近 {selected['testedCount']} 次逐期驗證選用「{selected['label']}」；"
         f"平均命中 {selected['averageHit']:.2f}、1 中以上 {selected['onePlusRate'] * 100:.1f}%、"
         f"2 中以上 {selected['twoPlusRate'] * 100:.1f}%，同一期固定，新一期才更新。"
     )
@@ -2654,6 +2750,8 @@ def calibrate_sniper_core_weights(
         "weights": selected["weights"],
         "applied": applied,
         "testedCount": selected["testedCount"],
+        "analysisWindow": SNIPER_ANALYSIS_WINDOW,
+        "validationLimit": SNIPER_VALIDATION_LIMIT,
         "method": method,
         "profiles": [
             {
@@ -2671,7 +2769,7 @@ def calibrate_sniper_core_weights(
             "zeroRate": round(selected["zeroRate"] * 100, 1),
             "stability": round(selected["stability"] * 100, 1),
         },
-        "note": "狙擊手模式是歷史資料的排序模型，不是中獎機率保證；回測只用當時以前的資料，避免把開獎結果倒灌進推薦。",
+        "note": f"狙擊手只讀最近 {SNIPER_ANALYSIS_WINDOW} 期的熱度、短期動能、遺漏狀態與區間分布；每次回測也只使用目標期以前的 {SNIPER_ANALYSIS_WINDOW} 期，避免把開獎結果倒灌進推薦。這是統計排序，不是中獎保證。",
     }
 
 
@@ -2750,8 +2848,9 @@ def flagship_recommendation(
     avoid_set: set[int] | None = None,
 ) -> list[int]:
     """Return the deterministic flagship pick from its separate bounded profile."""
-    return simple_core_recommendation(
-        draws,
+    components = sniper_core_score_components(draws, max_number)
+    return _core_pick_from_components(
+        components,
         max_number=max_number,
         pick_count=pick_count,
         core_weights=core_weights,
@@ -3371,10 +3470,10 @@ def analyze(
     # result; forcing a different set would knowingly lower its quality.
     sniper_pattern = calibrate_sniper_core_weights(
         reference_draws,
-        base_weights=core_weights,
+        base_weights=SNIPER_BASE_WEIGHTS,
         max_number=max_number,
         pick_count=pick_count,
-        evaluation_limit=min(36, max(0, len(reference_draws) - 20)),
+        evaluation_limit=SNIPER_VALIDATION_LIMIT,
     )
     flagship_weights = sniper_pattern["weights"]
     flagship_numbers = flagship_recommendation(
@@ -3499,10 +3598,10 @@ def analyze_with_stable_backtest(
     )
     sniper_pattern = calibrate_sniper_core_weights(
         fallback_draws,
-        base_weights=core_weights,
+        base_weights=SNIPER_BASE_WEIGHTS,
         max_number=max_number,
         pick_count=pick_count,
-        evaluation_limit=min(36, max(0, len(fallback_draws) - 20)),
+        evaluation_limit=SNIPER_VALIDATION_LIMIT,
     )
     flagship_weights = sniper_pattern["weights"]
     analysis["flagshipRecommendation"] = flagship_recommendation(
@@ -3630,7 +3729,10 @@ def build_payload(
     flagship_limit: int | None = None,
 ) -> dict[str, Any]:
     requested_backtest_limit = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
-    requested_flagship_limit = max(10, min(BACKTEST_MAX_LIMIT, int(flagship_limit if flagship_limit is not None else limit)))
+    requested_flagship_limit = max(
+        SNIPER_ANALYSIS_WINDOW,
+        min(BACKTEST_MAX_LIMIT, int(flagship_limit if flagship_limit is not None else limit)),
+    )
     fetch_limit = min(5000, max(limit, requested_flagship_limit, requested_backtest_limit + 90, BACKTEST_FALLBACK_LIMIT))
     if game == "tw539":
         latest = taiwan_latest()
@@ -3849,7 +3951,7 @@ class Handler(SimpleHTTPRequestHandler):
                 flagship_limit = clamp_int(
                     params.get("flagshipLimit", [str(limit)])[0],
                     limit,
-                    10,
+                    SNIPER_ANALYSIS_WINDOW,
                     BACKTEST_MAX_LIMIT,
                 )
                 payload = build_payload(
