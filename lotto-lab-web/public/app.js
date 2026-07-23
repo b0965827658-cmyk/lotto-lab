@@ -1946,6 +1946,13 @@ function renderModelBacktest(backtest, profiles = []) {
   const distribution = backtest.distribution || {};
   const twoPlusText = `${backtest.twoPlusRate ?? 0}%`;
   const threePlusText = `${backtest.threePlusRate ?? 0}%`;
+  const candidateBenchmark = backtest.candidateBenchmark;
+  const benchmarkPick = candidateBenchmark?.bestPick?.length
+    ? candidateBenchmark.bestPick.map(pad).join("、")
+    : "-";
+  const benchmarkDraw = candidateBenchmark?.bestDraw
+    ? `${candidateBenchmark.bestDraw.date || "-"} · 期別 ${candidateBenchmark.bestDraw.period || "-"}`
+    : "-";
   const warning =
     (backtest.threePlusRate ?? 0) === 0
       ? `<div class="backtest-warning">最近 ${backtest.testedCount} 期沒有 3 中以上，這時候先看摸邊率和 2 中以上，比只盯 3 中更準。</div>`
@@ -1987,6 +1994,7 @@ function renderModelBacktest(backtest, profiles = []) {
     ${backtest.method}
     <span class="backtest-method-line">回測設定：近 ${requestedCount} 期（可填 7～365）；實際可測資料不足時會以現有資料計算。</span>
     <span class="backtest-method-line">命中分布：0中 ${distribution[0] || 0}、1中 ${distribution[1] || 0}、2中 ${distribution[2] || 0}、3中以上 ${backtest.threePlusCount || 0}。2中以上 ${twoPlusText}，3中以上 ${threePlusText}。</span>
+    ${candidateBenchmark ? `<span class="backtest-method-line"><strong>候選歷史對照：最高 ${candidateBenchmark.bestHit || 0} 中</strong>（${benchmarkPick}；對照 ${benchmarkDraw}）。這是已發生資料的事後比較，不是逐期預測，也不會改寫推薦。</span>` : ""}
   `;
   els.backtestRecent.innerHTML = backtest.recentRows
     .map(
