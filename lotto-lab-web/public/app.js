@@ -2987,3 +2987,122 @@ startCountdown();
 loadConfig();
 load();
 startAutoRefresh();
+
+// Keep the current interface, but restore the original 7/6 candidate logic.
+(() => {
+  const LEGACY_WEIGHTS = { heat: 0.58, overdue: 0.42, spread: 0, backtest: 0 };
+
+  function legacyRows() {
+    return Array.isArray(state.analysis?.frequency) ? state.analysis.frequency : [];
+  }
+
+  function legacyScoredRows() {
+    const rows = legacyRows();
+    const maxCount = Math.max(...rows.map((row) => Number(row.count) || 0), 1);
+    const maxGap = Math.max(...rows.map((row) => Number(row.gap) || 0), 1);
+    return rows
+      .map((row) => ({
+        ...row,
+        legacyScore:
+          ((Number(row.count) || 0) / maxCount) * LEGACY_WEIGHTS.heat +
+          ((Number(row.gap) || 0) / maxGap) * LEGACY_WEIGHTS.overdue,
+      }))
+      .sort((left, right) => right.legacyScore - left.legacyScore || right.number - left.number);
+  }
+
+  function legacyCandidatePool() {
+    const scored = legacyScoredRows();
+    return scored.length
+      ? scored.slice(0, 16).map((row) => Number(row.number))
+      : Array.from({ length: 39 }, (_, index) => index + 1);
+  }
+
+  function legacyBuildCandidate(pool, rng = Math.random) {
+    if (!Array.isArray(pool) || pool.length < 5) return [];
+    const numbers = new Set();
+    const zones = [
+      pool.filter((number) => number <= 10),
+      pool.filter((number) => number >= 11 && number <= 20),
+      pool.filter((number) => number >= 21 && number <= 30),
+      pool.filter((number) => number >= 31),
+    ].filter((zone) => zone.length);
+    zones.forEach((zone) => {
+      if (numbers.size < 5 && rng() < 0.72) numbers.add(randomChoice(zone, rng));
+    });
+    while (numbers.size < 5) numbers.add(randomChoice(pool, rng));
+    return [...numbers].sort((left, right) => left - right);
+  }
+
+  function legacyScorePick(numbers, backtest) {
+    const rows = new Map(legacyRows().map((row) => [Number(row.number), row]));
+    const maxCount = Math.max(...legacyRows().map((row) => Number(row.count) || 0), 1);
+    const maxGap = Math.max(...legacyRows().map((row) => Number(row.gap) || 0), 1);
+    const averageCount = numbers.reduce((sum, number) => sum + (Number(rows.get(number)?.count) || 0), 0) / numbers.length;
+    const averageGap = numbers.reduce((sum, number) => sum + (Number(rows.get(number)?.gap) || 0), 0) / numbers.length;
+    const heat = Math.max(0, Math.min(100, Math.round((averageCount / maxCount) * 100)));
+    const overdue = Math.max(0, Math.min(100, Math.round((averageGap / maxGap) * 100)));
+    const total = Math.round(heat * LEGACY_WEIGHTS.heat + overdue * LEGACY_WEIGHTS.overdue);
+    return {
+      total,
+      heat,
+      overdue,
+      spread: 0,
+      backtest: 0,
+      pattern: 0,
+      interval: 0,
+      shortCycle: 0,
+      crossSignal: 0,
+      label: total >= 75 ? "高追蹤" : total >= 55 ? "可觀察" : "保守",
+      legacyMethod: "7/6 原始模式：頻率 58%・遺漏 42%",
+      testedCount: backtest?.testedCount || 0,
+    };
+  }
+
+  function legacyGenerateCandidates() {
+    const pool = legacyCandidatePool();
+    const cacheKey = `legacy-2026-07-06-${state.game}-${state.latest?.date || ""}-${state.latest?.period || ""}-${pool.join(",")}`;
+    const cached = state.candidateCache.get(cacheKey);
+    if (cached) return cached;
+    const rng = createRng(cacheKey);
+    const seen = new Set();
+    const candidates = [];
+    for (let index = 0; index < 260; index += 1) {
+      const numbers = legacyBuildCandidate(pool, rng);
+      const key = numbers.join(",");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const backtest = backtestPick(numbers);
+      candidates.push({ numbers, backtest, score: legacyScorePick(numbers, backtest) });
+    }
+    const result = candidates
+      .sort((left, right) => right.score.total - left.score.total || right.backtest.bestHit - left.backtest.bestHit || left.numbers.join(",").localeCompare(right.numbers.join(",")))
+      .slice(0, 5);
+    state.candidateCache.set(cacheKey, result);
+    return result;
+  }
+
+  normalizedWeights = () => ({ ...LEGACY_WEIGHTS });
+  candidatePool = legacyCandidatePool;
+  buildCandidate = legacyBuildCandidate;
+  scorePick = legacyScorePick;
+  generateCandidates = legacyGenerateCandidates;
+  modeSnapshotCandidates = () => {
+    const candidate = legacyGenerateCandidates()[0];
+    if (!candidate) return [];
+    return MODE_SNAPSHOT_KEYS.map((key) => ({ key, preset: FOCUS_PRESETS[key], candidate }));
+  };
+  renderModelControls = () => {
+    if (els.modelSummary) els.modelSummary.textContent = "目前模型：7/6 原始模式｜全期頻率 58%・遺漏值 42%。不使用後續新增的自適應、區間、尾數與拖牌權重。";
+  };
+
+  state.analysisFocus = "balanced";
+  state.modelWeights = { heat: 58, overdue: 42, spread: 0, backtest: 0 };
+  state.candidateCache.clear();
+  try {
+    localStorage.setItem(FOCUS_STORAGE_KEY, "balanced");
+    localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(state.modelWeights));
+  } catch {
+    // Local storage is optional; the fixed model still applies in memory.
+  }
+  renderModelControls();
+})();
