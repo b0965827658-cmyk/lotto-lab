@@ -4202,6 +4202,575 @@ def analyze_with_stable_backtest(
     return analysis
 
 
+# ---------------------------------------------------------------------------
+# 7/6 original analysis mode
+# ---------------------------------------------------------------------------
+# Keep the current API and page layout, but restore the simple model that was
+# used before the later interval, tail, adaptive, and sniper layers were added.
+LEGACY_76_MODEL_VERSION = "legacy-2026-07-06"
+LEGACY_76_WEIGHTS = {"frequency": 0.58, "gap": 0.42}
+RESET_CORE_VERSION = LEGACY_76_MODEL_VERSION
+ADAPTIVE_PATTERN_VERSION = LEGACY_76_MODEL_VERSION
+
+
+def legacy_76_score_table(
+    draws: list[dict[str, Any]], max_number: int = 39
+) -> tuple[list[dict[str, Any]], dict[int, int], dict[int, int]]:
+    ordered = canonical_analysis_draws(draws)
+    frequency = {number: 0 for number in range(1, max_number + 1)}
+    last_seen: dict[int, int | None] = {number: None for number in frequency}
+    for index, draw in enumerate(ordered):
+        for number in draw["numbers"]:
+            if number not in frequency:
+                continue
+            frequency[number] += 1
+            if last_seen[number] is None:
+                last_seen[number] = index
+
+    gaps = {
+        number: (last_seen[number] if last_seen[number] is not None else len(ordered))
+        for number in frequency
+    }
+    max_frequency = max(frequency.values()) or 1
+    max_gap = max(gaps.values()) or 1
+    scored = [
+        {
+            "number": number,
+            "score": (frequency[number] / max_frequency) * LEGACY_76_WEIGHTS["frequency"]
+            + (gaps[number] / max_gap) * LEGACY_76_WEIGHTS["gap"],
+            "count": frequency[number],
+            "gap": gaps[number],
+        }
+        for number in frequency
+    ]
+    scored.sort(key=lambda item: (-item["score"], -item["number"]))
+    return scored, frequency, gaps
+
+
+def legacy_76_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    seed_date: str | None = None,
+) -> list[int]:
+    scored, _, _ = legacy_76_score_table(draws, max_number)
+    pool = [item["number"] for item in scored[: min(16, max_number)]]
+    if len(pool) <= pick_count:
+        return sorted(pool)
+    # The 7/6 version used a date-stable draw from the top-16 pool.  Keep the
+    # same behavior without changing Python's process-wide random state.
+    seed_value = seed_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    rng = random.Random(seed_value + ",".join(map(str, pool)))
+    return sorted(rng.sample(pool, pick_count))
+
+
+def legacy_76_backtest(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    ordered = canonical_analysis_draws(draws)
+    requested = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
+    rows: list[dict[str, Any]] = []
+    number_support = {str(number): 0 for number in range(1, max_number + 1)}
+    # Walk forward in time: the target draw is never included in its training
+    # set, while the old model itself still sees the complete older history.
+    for target_index, target in enumerate(ordered[:requested]):
+        training = ordered[target_index + 1 :]
+        if len(training) < pick_count:
+            continue
+        pick = legacy_76_recommendation(
+            training,
+            max_number=max_number,
+            pick_count=pick_count,
+            seed_date=str(target.get("date", ""))[:10] or None,
+        )
+        actual = normalize_numbers(target.get("numbers", []))
+        hits = len(set(pick) & set(actual))
+        for number in pick:
+            number_support[str(number)] += 1
+        rows.append(
+            {
+                "date": target.get("date", ""),
+                "period": target.get("period", ""),
+                "pick": pick,
+                "actual": actual,
+                "hits": hits,
+            }
+        )
+
+    distribution = {hit: 0 for hit in range(0, pick_count + 1)}
+    for row in rows:
+        distribution[row["hits"]] = distribution.get(row["hits"], 0) + 1
+    tested = len(rows)
+    hits = [row["hits"] for row in rows]
+    recent_hits = hits[: min(10, tested)]
+    best_hit = max(hits, default=0)
+    three_plus_count = sum(1 for hit in hits if hit >= 3)
+    two_plus_count = sum(1 for hit in hits if hit >= 2)
+    one_plus_count = sum(1 for hit in hits if hit >= 1)
+    return {
+        "requestedCount": requested,
+        "testedCount": tested,
+        "averageHit": round(sum(hits) / tested, 2) if tested else 0,
+        "recentAverageHit": round(sum(recent_hits) / len(recent_hits), 2) if recent_hits else 0,
+        "onePlusRate": round((one_plus_count / tested) * 100, 1) if tested else 0,
+        "twoPlusRate": round((two_plus_count / tested) * 100, 1) if tested else 0,
+        "threePlusRate": round((three_plus_count / tested) * 100, 1) if tested else 0,
+        "threePlusCount": three_plus_count,
+        "profitableCount": three_plus_count,
+        "bestHit": best_hit,
+        "stability": round((one_plus_count / tested) * 100, 1) if tested else 0,
+        "distribution": distribution,
+        "recentRows": rows[:10],
+        "numberSupport": number_support,
+        "analysisWindow": len(ordered),
+        "modelVersion": LEGACY_76_MODEL_VERSION,
+        "method": "7/6 原始模式：全期出現頻率 58%＋遺漏值 42%；每個目標期只使用更早的歷史資料。",
+    }
+
+
+def legacy_76_pattern_summary(
+    draws: list[dict[str, Any]], max_number: int, selected_profile: str
+) -> dict[str, Any]:
+    ordered = canonical_analysis_draws(draws)
+    scored, frequency, gaps = legacy_76_score_table(ordered, max_number)
+    recent = ordered[:30]
+
+    def count_patterns(key_function):
+        counts: dict[Any, int] = {}
+        for draw in recent:
+            key = key_function(draw["numbers"])
+            counts[key] = counts.get(key, 0) + 1
+        return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+
+    zone_rows = count_patterns(zone_signature)
+    odd_rows = count_patterns(lambda numbers: sum(number % 2 for number in numbers))
+    low_rows = count_patterns(lambda numbers: sum(number <= 19 for number in numbers))
+    tail_counts = {tail: 0 for tail in range(10)}
+    pair_counts: dict[tuple[int, int], int] = {}
+    for draw in recent:
+        for number in draw["numbers"]:
+            tail_counts[number % 10] += 1
+        for pair in itertools.combinations(sorted(draw["numbers"]), 2):
+            pair_counts[pair] = pair_counts.get(pair, 0) + 1
+
+    latest_numbers = ordered[0]["numbers"] if ordered else []
+    neighbors = sorted(
+        {
+            nearby
+            for number in latest_numbers
+            for nearby in (number - 1, number + 1)
+            if 1 <= nearby <= max_number
+        }
+    )
+    intervals = []
+    for start, end in interval_windows(max_number):
+        focus = sum(
+            1
+            for draw in recent
+            if sum(start <= number <= end for number in draw["numbers"]) >= 3
+        )
+        hits = sum(
+            sum(start <= number <= end for number in draw["numbers"])
+            for draw in recent
+        )
+        intervals.append(
+            {
+                "start": start,
+                "end": end,
+                "label": f"{start:02d}-{end:02d}",
+                "hits": hits,
+                "focusCount": focus,
+                "rate": round((focus / len(recent)) * 100, 1) if recent else 0,
+            }
+        )
+    intervals.sort(key=lambda item: (-item["focusCount"], -item["hits"], item["start"]))
+
+    signal_leaders = [
+        {
+            "number": item["number"],
+            "score": round(item["score"] * 100),
+            "support": 1 if item["count"] or item["gap"] else 0,
+        }
+        for item in scored[:8]
+    ]
+    sums = [sum(draw["numbers"]) for draw in recent]
+    spans = [max(draw["numbers"]) - min(draw["numbers"]) for draw in recent]
+    transitions = [
+        len(set(newer["numbers"]) & set(older["numbers"]))
+        for newer, older in zip(ordered, ordered[1:])
+    ]
+    components = [
+        {"id": "frequency", "label": "全期頻率", "weight": 58},
+        {"id": "gap", "label": "遺漏值", "weight": 42},
+    ]
+    return {
+        "selectedProfile": selected_profile,
+        "selectedLabel": "7/6 原始統計",
+        "zonePatterns": [{"pattern": "-".join(map(str, pattern)), "count": count} for pattern, count in zone_rows],
+        "oddPatterns": [{"odd": odd, "even": 5 - odd, "count": count} for odd, count in odd_rows],
+        "lowPatterns": [{"low": low, "high": 5 - low, "count": count} for low, count in low_rows],
+        "tails": [
+            {"tail": tail, "count": count}
+            for tail, count in sorted(tail_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+        ],
+        "intervals": intervals[:5],
+        "pairCombos": [
+            {"numbers": list(pair), "count": count}
+            for pair, count in sorted(pair_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+        ],
+        "dragCards": [],
+        "repeatCandidates": [
+            {"number": number, "count": frequency[number] if number in latest_numbers else 0, "rate": 0}
+            for number in latest_numbers
+        ],
+        "repeatAverage": round(sum(transitions[:30]) / min(30, len(transitions)), 2) if transitions else 0,
+        "neighborNumbers": neighbors[:12],
+        "sumRange": {"min": min(sums) if sums else 0, "max": max(sums) if sums else 0, "center": round(sum(sums) / len(sums), 1) if sums else 0},
+        "spanAverage": round(sum(spans) / len(spans), 1) if spans else 0,
+        "multiWindowNumbers": [
+            {"number": item["number"], "score": round(item["score"] * 100)}
+            for item in scored[:8]
+        ],
+        "tailMomentum": [],
+        "signalLeaders": signal_leaders,
+        "adaptiveRecent": {
+            "version": LEGACY_76_MODEL_VERSION,
+            "selected": "legacy-76",
+            "selectedLabel": "7/6 原始統計",
+            "components": components,
+            "weights": dict(LEGACY_76_WEIGHTS),
+            "reason": "回到 7/6 原始模型；只看全期頻率與遺漏值，不使用後續新增的多層版路權重。",
+        },
+    }
+
+
+def legacy_76_tail_analysis(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
+    ordered = canonical_analysis_draws(draws)
+    scored, _, gaps = legacy_76_score_table(ordered, max_number)
+    tail_frequency = {tail: 0 for tail in range(10)}
+    tail_last_seen: dict[int, int | None] = {tail: None for tail in range(10)}
+    for index, draw in enumerate(ordered):
+        for number in draw["numbers"]:
+            tail = number % 10
+            tail_frequency[tail] += 1
+            if tail_last_seen[tail] is None:
+                tail_last_seen[tail] = index
+    max_frequency = max(tail_frequency.values()) or 1
+    max_gap = max((value if value is not None else len(ordered)) for value in tail_last_seen.values()) or 1
+    rows = []
+    for tail in range(10):
+        gap = tail_last_seen[tail] if tail_last_seen[tail] is not None else len(ordered)
+        score = (tail_frequency[tail] / max_frequency) * 0.58 + (gap / max_gap) * 0.42
+        rows.append(
+            {
+                "tail": tail,
+                "label": f"{tail}尾",
+                "recent10": 0,
+                "recent20": 0,
+                "recent36": 0,
+                "coverage10": 0,
+                "coverage20": 0,
+                "coverage36": 0,
+                "gap": gap,
+                "momentum": 0,
+                "score": round(score * 100, 1),
+                "status": "優先" if score >= 0.6 else "觀察",
+                "numbers": [item["number"] for item in scored if item["number"] % 10 == tail][:4],
+            }
+        )
+    rows.sort(key=lambda item: (-item["score"], item["tail"]))
+    recommended_tails = [item["tail"] for item in rows[:5]]
+    recommendation = legacy_76_recommendation(ordered, max_number=max_number, pick_count=5)
+    return {
+        "version": LEGACY_76_MODEL_VERSION,
+        "windows": [10, 20, 36],
+        "rows": rows,
+        "recommendedTails": recommended_tails,
+        "avoidTails": [],
+        "recommendation": recommendation,
+        "method": "7/6 原始統計的尾數摘要；尾數只作查看，不回寫主推薦。",
+        "note": "主模型不使用尾數、區間或拖牌加權。",
+    }
+
+
+def legacy_76_short_term_consensus(
+    draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5
+) -> dict[str, Any]:
+    ordered = canonical_analysis_draws(draws)
+    views = []
+    for window in (10, 20, 36):
+        rows = ordered[:window]
+        if len(rows) < pick_count:
+            continue
+        views.append(
+            {
+                "window": window,
+                "drawCount": len(rows),
+                "leaders": [
+                    {"number": item["number"], "score": round(item["score"] * 100)}
+                    for item in legacy_76_score_table(rows, max_number)[0][:8]
+                ],
+                "recommendation": legacy_76_recommendation(rows, max_number, pick_count),
+            }
+        )
+    leaders = [
+        {"number": item["number"], "score": round(item["score"] * 100)}
+        for item in legacy_76_score_table(ordered, max_number)[0][:8]
+    ]
+    return {
+        "windows": views,
+        "leaders": leaders,
+        "method": "7/6 原始模式的短窗檢視；不改寫主推薦。",
+        "reason": "僅提供近 10／20／36 期觀察，主推薦仍使用全期頻率與遺漏值。",
+    }
+
+
+def legacy_76_analysis(
+    draws: list[dict[str, Any]],
+    backtest_draws: list[dict[str, Any]] | None = None,
+    max_number: int = 39,
+    pick_count: int = 5,
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+    recommendation_draws: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    selected = canonical_analysis_draws(recommendation_draws or draws)
+    reference = canonical_analysis_draws(backtest_draws or draws)
+    scored, frequency, gaps = legacy_76_score_table(selected, max_number)
+    hot = sorted(frequency, key=lambda number: (-frequency[number], number))[:10]
+    cold = sorted(frequency, key=lambda number: (frequency[number], number))[:10]
+    overdue = sorted(gaps, key=lambda number: (-gaps[number], number))[:10]
+    recommendation = legacy_76_recommendation(selected, max_number, pick_count)
+    backtest = legacy_76_backtest(reference, max_number, pick_count, backtest_limit)
+    patterns = legacy_76_pattern_summary(selected, max_number, "legacy-76")
+    components = [
+        {"id": "frequency", "label": "全期頻率", "weight": 58},
+        {"id": "gap", "label": "遺漏值", "weight": 42},
+    ]
+    model_row = model_result_row("legacy-76", "7/6 原始統計", backtest)
+    # Keep the display pool aligned with the deterministic recommendation even
+    # when the seeded pick includes the 16th ranked number.
+    recommended_items = [item for item in scored if item["number"] in recommendation]
+    remaining_items = [item for item in scored if item["number"] not in recommendation]
+    pool_items = (recommended_items + remaining_items)[:15]
+    pool = [
+        {
+            "rank": index + 1,
+            "number": item["number"],
+            "score": round(item["score"] * 100, 1),
+            "isCorePick": item["number"] in recommendation,
+        }
+        for index, item in enumerate(pool_items)
+    ]
+    if len(pool) < 15:
+        present = {item["number"] for item in pool}
+        for item in scored:
+            if item["number"] in present:
+                continue
+            pool.append(
+                {
+                    "rank": len(pool) + 1,
+                    "number": item["number"],
+                    "score": round(item["score"] * 100, 1),
+                    "isCorePick": item["number"] in recommendation,
+                }
+            )
+            if len(pool) == 15:
+                break
+    calibration = {
+        "version": LEGACY_76_MODEL_VERSION,
+        "selected": "legacy-76",
+        "selectedLabel": "7/6 原始統計",
+        "weights": dict(LEGACY_76_WEIGHTS),
+        "applied": True,
+        "testedCount": backtest["testedCount"],
+        "analysisWindow": len(selected),
+        "validationLimit": backtest["requestedCount"],
+        "method": "7/6 原始模式：全期出現頻率 58%＋遺漏值 42%；不使用自適應、尾數、區間、拖牌或多模型改寫推薦。",
+        "selectedMetrics": {
+            "averageHit": backtest["averageHit"],
+            "onePlusRate": backtest["onePlusRate"],
+            "twoPlusRate": backtest["twoPlusRate"],
+            "zeroRate": round((backtest["distribution"].get(0, 0) / max(1, backtest["testedCount"])) * 100, 1),
+            "stability": backtest["stability"],
+        },
+        "profiles": [model_row],
+        "note": "這是 7/6 當時的統計排序模式，不代表可以預測或保證中獎。",
+    }
+    return {
+        "drawCount": len(selected),
+        "analysisWindow": len(selected),
+        "modelVersion": LEGACY_76_MODEL_VERSION,
+        "coreWeights": dict(LEGACY_76_WEIGHTS),
+        "hot": [{"number": number, "count": frequency[number]} for number in hot],
+        "cold": [{"number": number, "count": frequency[number]} for number in cold],
+        "overdue": [{"number": number, "gap": gaps[number]} for number in overdue],
+        "frequency": [{"number": number, "count": frequency[number], "gap": gaps[number]} for number in frequency],
+        "recommendation": recommendation,
+        "coreCandidatePool": pool,
+        "coreCandidateMethod": "7/6 原始模型排名；15 碼只作候選池，不代表同時推薦。",
+        "flagshipRecommendation": list(recommendation),
+        "flagshipWeights": dict(LEGACY_76_WEIGHTS),
+        "flagshipCalibration": calibration,
+        "adaptiveRecommendation": list(recommendation),
+        "adaptiveMethod": calibration["method"],
+        "adaptiveRecentPattern": calibration,
+        "flagshipMethod": calibration["method"],
+        "flagshipComponents": components,
+        "backtest": backtest,
+        "modelProfiles": [model_row],
+        "patterns": patterns,
+        "tailAnalysis": legacy_76_tail_analysis(selected, max_number),
+        "researchEvidence": {
+            "version": LEGACY_76_MODEL_VERSION,
+            "features": [
+                {"id": "frequency", "label": "全期頻率", "multiplier": 1.0},
+                {"id": "gap", "label": "遺漏值", "multiplier": 1.0},
+            ],
+            "note": "7/6 原始模式只保留頻率與遺漏兩個訊號。",
+        },
+        "shortTermConsensus": legacy_76_short_term_consensus(selected, max_number, pick_count),
+        "note": "這是 7/6 原始分析模式：用全期出現頻率 58% 與遺漏值 42% 排序，再從前 16 碼取樣 5 碼。後續加入的自適應、區間、尾數、拖牌與旗艦獨立邏輯均不再改寫這組推薦；彩券每期仍是隨機事件。",
+    }
+
+
+def analyze(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    reference_draws: list[dict[str, Any]] | None = None,
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    return legacy_76_analysis(
+        draws,
+        backtest_draws=reference_draws or draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        backtest_limit=backtest_limit,
+    )
+
+
+def analyze_with_stable_backtest(
+    draws: list[dict[str, Any]],
+    backtest_draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+    recommendation_draws: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return legacy_76_analysis(
+        draws,
+        backtest_draws=backtest_draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        backtest_limit=backtest_limit,
+        recommendation_draws=recommendation_draws,
+    )
+
+
+def rolling_backtest(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    profile_name: str = "legacy-76",
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+    core_weights: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    return legacy_76_backtest(draws, max_number, pick_count, backtest_limit)
+
+
+def simple_core_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    core_weights: dict[str, float] | None = None,
+) -> list[int]:
+    return legacy_76_recommendation(draws, max_number, pick_count)
+
+
+def model_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    seed_label: str = "",
+    profile_name: str = "legacy-76",
+    candidate_budget: int | None = None,
+    evidence: dict[str, float] | None = None,
+    core_weights: dict[str, float] | None = None,
+) -> list[int]:
+    return legacy_76_recommendation(draws, max_number, pick_count)
+
+
+def flagship_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    profile_name: str = "legacy-76",
+    evidence: dict[str, float] | None = None,
+    backtest: dict[str, Any] | None = None,
+    core_weights: dict[str, float] | None = None,
+    avoid_set: set[int] | None = None,
+) -> list[int]:
+    return legacy_76_recommendation(draws, max_number, pick_count)
+
+
+def simple_core_candidate_pool(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    candidate_count: int = 15,
+    core_weights: dict[str, float] | None = None,
+) -> list[dict[str, Any]]:
+    scored, _, _ = legacy_76_score_table(draws, max_number)
+    pick = set(legacy_76_recommendation(draws, max_number, pick_count))
+    return [
+        {
+            "rank": index + 1,
+            "number": item["number"],
+            "score": round(item["score"] * 100, 1),
+            "isCorePick": item["number"] in pick,
+        }
+        for index, item in enumerate(scored[: max(1, min(candidate_count, max_number))])
+    ]
+
+
+def adaptive_core_weights(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    evaluation_limit: int = BACKTEST_DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    backtest = legacy_76_backtest(draws, max_number, pick_count, evaluation_limit)
+    return {
+        "version": LEGACY_76_MODEL_VERSION,
+        "selected": "legacy-76",
+        "selectedLabel": "7/6 原始統計",
+        "weights": dict(LEGACY_76_WEIGHTS),
+        "components": [
+            {"id": "frequency", "label": "全期頻率", "weight": 58},
+            {"id": "gap", "label": "遺漏值", "weight": 42},
+        ],
+        "testedCount": backtest["testedCount"],
+        "analysisWindow": len(canonical_analysis_draws(draws)),
+        "method": "7/6 原始模式：全期出現頻率 58%＋遺漏值 42%。",
+        "reason": "不再進行自適應校準；新一期資料進來後依同一套頻率與遺漏排序更新。",
+    }
+
+
+def calibrate_sniper_core_weights(
+    draws: list[dict[str, Any]],
+    base_weights: dict[str, float] | None = None,
+    max_number: int = 39,
+    pick_count: int = 5,
+    evaluation_limit: int = BACKTEST_DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    result = adaptive_core_weights(draws, max_number, pick_count, evaluation_limit)
+    result["method"] = "旗艦沿用 7/6 原始模式：全期出現頻率 58%＋遺漏值 42%。"
+    return result
+
+
 def attach_flagship_analysis(
     game: str,
     latest: dict[str, Any],
