@@ -23,6 +23,7 @@ const state = {
   latestRequestId: 0,
   latestRefreshInFlight: false,
   autoRefreshTimer: null,
+  analysisRetryTimer: null,
   activeTab: "latest",
   apiCache: new Map(),
   candidateCache: new Map(),
@@ -55,7 +56,7 @@ const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
-const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v9-sniper-pattern";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v10-response-retry";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const DAILY_COMPARISON_STORAGE_KEY = "lotto-lab-daily-comparison-v1";
 const ANALYSIS_LIMIT_STORAGE_KEY = "lotto-lab-analysis-limit-v1";
@@ -64,6 +65,9 @@ const FLAGSHIP_LIMIT_STORAGE_KEY = "lotto-lab-flagship-limit";
 const POLL_INTERVAL_MS = 30 * 1000;
 const LATEST_FETCH_TIMEOUT_MS = 15000;
 const FETCH_TIMEOUT_MS = 60000;
+const LOTTERY_FETCH_TIMEOUT_MS = 90000;
+const API_RETRY_DELAY_MS = 900;
+const ANALYSIS_RETRY_DELAY_MS = 8000;
 const API_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
@@ -962,38 +966,88 @@ function writeLastSeenDraw(game, latest) {
 }
 
 async function fetchJsonWithTimeout(url, options = {}) {
-  const { timeoutMs = FETCH_TIMEOUT_MS, ...fetchOptions } = options;
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      cache: "no-store",
-      ...fetchOptions,
-      signal: controller.signal,
-      headers: {
-        "Cache-Control": "no-cache",
-        ...(options.headers || {}),
-      },
-    });
-    let payload = null;
+  const {
+    timeoutMs = FETCH_TIMEOUT_MS,
+    retries = 0,
+    retryDelayMs = API_RETRY_DELAY_MS,
+    ...fetchOptions
+  } = options;
+  let lastError;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      payload = await response.json();
-    } catch {
-      payload = null;
+      const response = await fetch(url, {
+        cache: "no-store",
+        ...fetchOptions,
+        signal: controller.signal,
+        headers: {
+          "Cache-Control": "no-cache",
+          ...(options.headers || {}),
+        },
+      });
+      const raw = await response.text();
+      let payload = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        payload = null;
+      }
+      if (!response.ok) {
+        const error = new Error(
+          payload?.error || (response.status === 429 ? "請求太頻繁，請稍後再試。" : `伺服器回應 ${response.status}`),
+        );
+        error.status = response.status;
+        error.retryAfter = response.headers.get("Retry-After");
+        error.retryable = response.status === 429 || response.status >= 500;
+        throw error;
+      }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        const error = new Error(raw ? "伺服器回傳資料格式不完整，正在重試。" : "伺服器暫時沒有回傳資料，正在重試。");
+        error.status = response.status;
+        error.retryable = true;
+        throw error;
+      }
+      return payload;
+    } catch (error) {
+      lastError = error;
+      const retryable = error?.name === "AbortError" || error?.retryable || !error?.status;
+      if (!retryable || attempt >= retries) throw error;
+      await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs * (attempt + 1)));
+    } finally {
+      window.clearTimeout(timer);
     }
-    if (!response.ok) {
-      const error = new Error(
-        payload?.error || (response.status === 429 ? "請求太頻繁，請稍後再試。" : `伺服器回應 ${response.status}`),
-      );
-      error.status = response.status;
-      error.retryAfter = response.headers.get("Retry-After");
-      throw error;
-    }
-    if (!payload || typeof payload !== "object") throw new Error("伺服器回傳格式不正確。");
-    return payload;
-  } finally {
-    window.clearTimeout(timer);
   }
+
+  throw lastError || new Error("伺服器資料讀取失敗。");
+}
+
+function validLatestPayload(payload) {
+  return Boolean(
+    payload?.ok &&
+      payload.latest &&
+      Array.isArray(payload.latest.numbers) &&
+      payload.latest.numbers.length >= 5,
+  );
+}
+
+function validLotteryPayload(payload) {
+  return Boolean(
+    payload?.ok &&
+      validLatestPayload(payload) &&
+      Array.isArray(payload.history) &&
+      payload.analysis &&
+      typeof payload.analysis === "object",
+  );
+}
+
+function scheduleAnalysisRetry() {
+  if (state.analysisRetryTimer || document.visibilityState === "hidden") return;
+  state.analysisRetryTimer = window.setTimeout(() => {
+    state.analysisRetryTimer = null;
+    load({ silent: true, skipCache: true });
+  }, ANALYSIS_RETRY_DELAY_MS);
 }
 
 function loadModelWeights() {
@@ -2329,7 +2383,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (state.serviceWorkerRegistration) return state.serviceWorkerRegistration;
-  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=93");
+  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=94");
   return state.serviceWorkerRegistration;
 }
 
@@ -2532,7 +2586,7 @@ async function load(options = {}) {
     if (!state.latest) {
       fetchJsonWithTimeout(`/api/latest?game=${state.game}&t=${Date.now()}`, { timeoutMs: LATEST_FETCH_TIMEOUT_MS })
         .then((latestPayload) => {
-          if (latestPayload.ok && requestId === state.requestId && !state.latest) {
+          if (validLatestPayload(latestPayload) && requestId === state.requestId && !state.latest) {
             renderLatestCard(latestPayload.latest);
             setStatus("最新開獎已顯示，正在載入完整分析...");
           }
@@ -2545,9 +2599,14 @@ async function load(options = {}) {
     const previousSeen = readLastSeenDraw()[state.game] || "";
     const payload = await fetchJsonWithTimeout(
       `/api/lottery?game=${state.game}&limit=${state.limit}&backtestLimit=${state.backtestLimit}&flagshipLimit=${state.flagshipLimit}&t=${Date.now()}`,
+      { timeoutMs: LOTTERY_FETCH_TIMEOUT_MS, retries: 1 },
     );
-    if (!payload.ok) throw new Error(payload.error || "資料讀取失敗");
+    if (!validLotteryPayload(payload)) throw new Error("分析資料欄位不完整，系統會自動重試。");
     if (requestId !== state.requestId) return;
+    if (state.analysisRetryTimer) {
+      window.clearTimeout(state.analysisRetryTimer);
+      state.analysisRetryTimer = null;
+    }
     writeCachedPayload(cacheKey, payload);
     render(payload);
     await notifyIfLatestChanged(payload.latest, previousSeen).catch(() => {});
@@ -2555,10 +2614,18 @@ async function load(options = {}) {
   } catch (error) {
     if (cachedPayload) {
       if (!silent) setStatus("目前使用暫存資料；背景更新暫時失敗。", true);
+      scheduleAnalysisRetry();
       return;
     }
-    if (!state.latest) els.dashboard.hidden = true;
-    if (!silent) setStatus(error.name === "AbortError" ? "讀取逾時，請稍後再試。" : error.message, true);
+    scheduleAnalysisRetry();
+    if (!silent) {
+      setStatus(
+        error.name === "AbortError"
+          ? "分析資料讀取較慢，最新開獎已先顯示，系統會自動重試。"
+          : "分析資料暫時同步中，最新開獎已先顯示，系統會自動重試。",
+        true,
+      );
+    }
   } finally {
     if (requestId === state.requestId) {
       els.refresh.disabled = false;
@@ -2575,14 +2642,15 @@ async function refreshLatest(options = {}) {
   try {
     const payload = await fetchJsonWithTimeout(
       `/api/latest?game=${state.game}&t=${Date.now()}`,
-      { timeoutMs: LATEST_FETCH_TIMEOUT_MS },
+      { timeoutMs: LATEST_FETCH_TIMEOUT_MS, retries: 1 },
     );
-    if (!payload.ok || requestId !== state.latestRequestId) return;
+    if (!validLatestPayload(payload) || requestId !== state.latestRequestId) return;
     const nextLatest = payload.latest;
     const previousKey = readLastSeenDraw()[state.game] || "";
     const changed = drawKey(nextLatest) !== drawKey(state.latest);
     if (!changed) {
       refreshOtherLatest({ silent: true });
+      if (!state.analysis) load({ silent: true, skipCache: true });
       return;
     }
 
@@ -2607,7 +2675,7 @@ async function refreshOtherLatest(options = {}) {
       `/api/latest?game=${requestedGame}&t=${Date.now()}`,
       { timeoutMs: LATEST_FETCH_TIMEOUT_MS },
     );
-    if (!payload.ok || !payload.latest) return;
+    if (!validLatestPayload(payload)) return;
     state.latestByGame[requestedGame] = payload.latest;
     renderLatestOverview();
   } catch (error) {
