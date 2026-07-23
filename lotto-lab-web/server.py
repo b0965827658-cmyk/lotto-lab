@@ -3419,6 +3419,432 @@ def choose_model_profile(
     return selected, backtest, results
 
 
+# ---------------------------------------------------------------------------
+# Core model reset
+# ---------------------------------------------------------------------------
+# The earlier implementation had several independent selectors competing for
+# the published pick.  Keep the public response shape, but make every pick and
+# every backtest use this one deterministic generator.
+RESET_CORE_VERSION = "core-v8-rebuild"
+RESET_CORE_WINDOW = 14
+RESET_CORE_WEIGHTS = {
+    "recent": 0.50,
+    "heat": 0.20,
+    "gap": 0.18,
+    "interval": 0.12,
+}
+ADAPTIVE_PATTERN_VERSION = RESET_CORE_VERSION
+CORE_ANALYSIS_METHOD = "核心基準：近期熱度 50%・穩定熱度 20%・遺漏平衡 18%・區間分布 12%"
+
+
+def _reset_normalize(values: dict[int, float]) -> dict[int, float]:
+    """Normalize a feature without letting one outlier dominate it."""
+    if not values:
+        return {}
+    low = min(values.values())
+    high = max(values.values())
+    if high <= low:
+        return {number: 0.5 for number in values}
+    return {
+        number: round((value - low) / (high - low), 6)
+        for number, value in values.items()
+    }
+
+
+def _reset_gap_score(gap: int) -> float:
+    """Use omission as a soft balance signal, never as a hard prediction."""
+    if gap <= 0:
+        return 0.58
+    if gap == 1:
+        return 0.78
+    if gap == 2:
+        return 0.94
+    if gap <= 5:
+        return 1.00
+    if gap <= 8:
+        return 0.91
+    if gap <= 12:
+        return 0.80
+    if gap <= 17:
+        return 0.69
+    return 0.58
+
+
+def simple_core_score_components(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+) -> dict[int, dict[str, float]]:
+    """Build the single short-window model used by every published pick.
+
+    The active view is always the newest 14 complete draws.  A 36-draw
+    stabilizer is used only for the long-term heat feature.  No future draw,
+    random seed, or learned profile is involved, so equal data gives equal
+    output for every visitor.
+    """
+    ordered = canonical_analysis_draws(draws)
+    active = ordered[:RESET_CORE_WINDOW]
+    stabilizer = ordered[: min(36, len(ordered))]
+    numbers = range(1, max_number + 1)
+    active_counts = {number: 0 for number in numbers}
+    weighted_recent = {number: 0.0 for number in numbers}
+    stable_counts = {number: 0 for number in numbers}
+    last_seen = {number: len(active) for number in numbers}
+
+    denominator = sum(1.0 + (len(active) - index) / max(1, len(active)) for index in range(len(active)))
+    for index, draw in enumerate(active):
+        recency_weight = 1.0 + (len(active) - index) / max(1, len(active))
+        for number in draw["numbers"]:
+            if number not in active_counts:
+                continue
+            active_counts[number] += 1
+            weighted_recent[number] += recency_weight
+            if last_seen[number] == len(active):
+                last_seen[number] = index
+    for draw in stabilizer:
+        for number in draw["numbers"]:
+            if number in stable_counts:
+                stable_counts[number] += 1
+
+    recent_raw = {
+        number: (weighted_recent[number] / denominator if denominator else 0.0) * 0.70
+        + safe_divide(active_counts[number], max(1, len(active))) * 0.30
+        for number in numbers
+    }
+    heat_raw = {
+        number: safe_divide(active_counts[number], max(1, len(active))) * 0.70
+        + safe_divide(stable_counts[number], max(1, len(stabilizer))) * 0.30
+        for number in numbers
+    }
+    recent = _reset_normalize(recent_raw)
+    heat = _reset_normalize(heat_raw)
+    gap = {
+        number: _reset_gap_score(last_seen[number])
+        for number in numbers
+    }
+
+    zone_counts = [0, 0, 0, 0]
+    for draw in active:
+        for number in draw["numbers"]:
+            zone_counts[min(3, (number - 1) // 10)] += 1
+    max_zone = max(zone_counts, default=0) or 1
+    interval = {
+        number: 0.55 + 0.45 * zone_counts[min(3, (number - 1) // 10)] / max_zone
+        for number in numbers
+    }
+    return {
+        number: {
+            "recent": recent.get(number, 0.5),
+            "heat": heat.get(number, 0.5),
+            "gap": round(gap[number], 6),
+            "interval": round(interval[number], 6),
+        }
+        for number in numbers
+    }
+
+
+def _reset_pick_from_components(
+    components: dict[int, dict[str, float]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    weights: dict[str, float] | None = None,
+    avoid_set: set[int] | None = None,
+) -> list[int]:
+    weights = normalize_core_weights(weights or RESET_CORE_WEIGHTS)
+    scores = {
+        number: sum(values.get(key, 0.0) * weight for key, weight in weights.items())
+        for number, values in components.items()
+    }
+    pool = sorted(scores, key=lambda number: (-scores[number], number))[: min(18, max_number)]
+    if len(pool) <= pick_count:
+        return sorted(pool)
+    best_combo: tuple[int, ...] | None = None
+    best_score = float("-inf")
+    for combo in itertools.combinations(pool, pick_count):
+        candidate = tuple(sorted(combo))
+        if avoid_set and set(candidate) == set(avoid_set):
+            continue
+        number_score = sum(scores[number] for number in candidate) / pick_count
+        # Shape is only a small tie-breaker.  It cannot overpower the four
+        # number signals as the previous flagship branch sometimes did.
+        combo_score = number_score * 0.92 + combo_spread_score(list(candidate), max_number) * 0.08
+        if combo_score > best_score or (
+            combo_score == best_score and (best_combo is None or candidate < best_combo)
+        ):
+            best_score = combo_score
+            best_combo = candidate
+    return list(best_combo or tuple(sorted(pool[:pick_count])))
+
+
+def simple_core_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    core_weights: dict[str, float] | None = None,
+    avoid_set: set[int] | None = None,
+) -> list[int]:
+    return _reset_pick_from_components(
+        simple_core_score_components(draws, max_number),
+        max_number=max_number,
+        pick_count=pick_count,
+        weights=core_weights or RESET_CORE_WEIGHTS,
+        avoid_set=avoid_set,
+    )
+
+
+def sniper_core_score_components(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+) -> dict[int, dict[str, float]]:
+    """Compatibility view: flagship now reads the same core components."""
+    core = simple_core_score_components(draws, max_number)
+    return {
+        number: {
+            **values,
+            "repeat": values["recent"],
+            "tail": values["interval"],
+            "neighbor": values["gap"],
+        }
+        for number, values in core.items()
+    }
+
+
+def model_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    seed_label: str = "",
+    profile_name: str = "balanced",
+    candidate_budget: int | None = None,
+    evidence: dict[str, float] | None = None,
+    core_weights: dict[str, float] | None = None,
+) -> list[int]:
+    return simple_core_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        core_weights=core_weights or RESET_CORE_WEIGHTS,
+    )
+
+
+def flagship_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    profile_name: str = "balanced",
+    evidence: dict[str, float] | None = None,
+    backtest: dict[str, Any] | None = None,
+    core_weights: dict[str, float] | None = None,
+    avoid_set: set[int] | None = None,
+) -> list[int]:
+    # Flagship and public core intentionally agree.  A paid tier can expose
+    # more explanation without publishing a second, conflicting algorithm.
+    return simple_core_recommendation(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        core_weights=RESET_CORE_WEIGHTS,
+        avoid_set=avoid_set,
+    )
+
+
+def adaptive_core_weights(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    evaluation_limit: int = 36,
+    training_limit: int = 90,
+) -> dict[str, Any]:
+    """Expose fixed, explainable weights instead of recalibrating every load."""
+    ordered = canonical_analysis_draws(draws)
+    tested_count = min(max(0, int(evaluation_limit)), max(0, len(ordered) - RESET_CORE_WINDOW))
+    components = []
+    labels = {
+        "recent": "近期熱度",
+        "heat": "穩定熱度",
+        "gap": "遺漏平衡",
+        "interval": "區間分布",
+    }
+    for feature in ("recent", "heat", "gap", "interval"):
+        weight = RESET_CORE_WEIGHTS[feature]
+        components.append(
+            {
+                "id": feature,
+                "label": labels[feature],
+                "baseWeight": round(weight * 100),
+                "multiplier": 1.0,
+                "weight": round(weight * 100),
+                "delta": 0,
+                "averageHit": 0,
+                "twoPlusRate": 0,
+                "testedCount": tested_count,
+                "stability": 100,
+            }
+        )
+    return {
+        "version": RESET_CORE_VERSION,
+        "selected": "fixed-core",
+        "selectedLabel": "固定核心",
+        "weights": dict(RESET_CORE_WEIGHTS),
+        "components": components,
+        "profileCalibration": {
+            "selected": "fixed-core",
+            "applied": True,
+            "testedCount": tested_count,
+            "averageHit": 0,
+            "twoPlusRate": 0,
+        },
+        "testedCount": tested_count,
+        "evaluationLimit": int(evaluation_limit),
+        "method": f"固定核心版路：近 {RESET_CORE_WINDOW} 期；{CORE_ANALYSIS_METHOD}。",
+        "reason": "不再根據每次載入的短期波動切換模型，避免同一批資料被不同權重反覆改寫。",
+        "note": "這是固定的統計排序，不是中獎保證；回測只用來檢查穩定度，不會反向改寫當期選號。",
+    }
+
+
+def calibrate_sniper_core_weights(
+    draws: list[dict[str, Any]],
+    base_weights: dict[str, float] | None = None,
+    max_number: int = 39,
+    pick_count: int = 5,
+    evaluation_limit: int = SNIPER_VALIDATION_LIMIT,
+) -> dict[str, Any]:
+    """Compatibility payload for the flagship tier, backed by the core model."""
+    ordered = canonical_analysis_draws(draws)
+    backtest = rolling_backtest(
+        ordered,
+        max_number=max_number,
+        pick_count=pick_count,
+        backtest_limit=min(SNIPER_VALIDATION_LIMIT, int(evaluation_limit)),
+    )
+    return {
+        "version": RESET_CORE_VERSION,
+        "selected": "fixed-core",
+        "selectedLabel": "固定核心",
+        "weights": dict(RESET_CORE_WEIGHTS),
+        "applied": True,
+        "testedCount": backtest.get("testedCount", 0),
+        "analysisWindow": RESET_CORE_WINDOW,
+        "validationLimit": min(SNIPER_VALIDATION_LIMIT, int(evaluation_limit)),
+        "method": f"旗艦核心：固定近 {RESET_CORE_WINDOW} 期視窗，{CORE_ANALYSIS_METHOD}；旗艦與一般版使用同一產生器。",
+        "profiles": [
+            {
+                "id": "fixed-core",
+                "label": "固定核心",
+                "quality": backtest.get("averageHit", 0),
+                "averageHit": backtest.get("averageHit", 0),
+                "onePlusRate": backtest.get("onePlusRate", 0) / 100,
+                "twoPlusRate": backtest.get("twoPlusRate", 0) / 100,
+                "zeroRate": 1 - backtest.get("onePlusRate", 0) / 100,
+                "stability": backtest.get("stability", 0) / 100,
+                "testedCount": backtest.get("testedCount", 0),
+                "weights": dict(RESET_CORE_WEIGHTS),
+            }
+        ],
+        "selectedMetrics": {
+            "averageHit": backtest.get("averageHit", 0),
+            "onePlusRate": backtest.get("onePlusRate", 0),
+            "twoPlusRate": backtest.get("twoPlusRate", 0),
+            "zeroRate": max(0, 100 - backtest.get("onePlusRate", 0)),
+            "stability": backtest.get("stability", 0),
+        },
+        "note": "旗艦版不再另開一套狙擊、拖牌或尾數權重；只有呈現層級不同，避免多套邏輯互相干擾。",
+    }
+
+
+def rolling_backtest(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    profile_name: str = "balanced",
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+    core_weights: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Walk forward with exactly the same 14-draw generator as live picks."""
+    ordered = canonical_analysis_draws(draws)
+    requested_limit = max(BACKTEST_MIN_LIMIT, min(BACKTEST_MAX_LIMIT, int(backtest_limit)))
+    sample_size = min(requested_limit, max(0, len(ordered) - RESET_CORE_WINDOW))
+    distribution = {str(number): 0 for number in range(pick_count + 1)}
+    rows: list[dict[str, Any]] = []
+    for index in range(sample_size):
+        target = ordered[index]
+        training = ordered[index + 1 : index + 1 + RESET_CORE_WINDOW]
+        if len(training) < RESET_CORE_WINDOW:
+            continue
+        pick = simple_core_recommendation(
+            training,
+            max_number=max_number,
+            pick_count=pick_count,
+            core_weights=RESET_CORE_WEIGHTS,
+        )
+        hits = len(set(pick) & set(target["numbers"]))
+        distribution[str(hits)] += 1
+        rows.append(
+            {
+                "period": target.get("period", ""),
+                "date": target.get("date", ""),
+                "pick": pick,
+                "actual": target["numbers"],
+                "hits": hits,
+            }
+        )
+    tested = len(rows)
+    hit_sum = sum(row["hits"] for row in rows)
+    one_plus = sum(1 for row in rows if row["hits"] >= 1)
+    two_plus = sum(1 for row in rows if row["hits"] >= 2)
+    three_plus = sum(1 for row in rows if row["hits"] >= 3)
+    best_hit = max((row["hits"] for row in rows), default=0)
+    number_support = {number: 0.0 for number in range(1, max_number + 1)}
+    for row in rows:
+        actual = set(row["actual"])
+        for rank, number in enumerate(row["pick"][:pick_count]):
+            rank_weight = 1.0 - rank / max(1, pick_count)
+            number_support[number] += rank_weight * (1.0 if number in actual else 0.25)
+    support_scale = max(number_support.values()) or 1.0
+    midpoint = max(1, tested // 2)
+    recent_rows = rows[:midpoint]
+    older_rows = rows[midpoint:]
+    recent_average = safe_divide(sum(row["hits"] for row in recent_rows), len(recent_rows))
+    older_average = safe_divide(sum(row["hits"] for row in older_rows), len(older_rows)) if older_rows else recent_average
+    stability = max(0.0, round(100 - abs(recent_average - older_average) * 35, 1)) if tested else 0.0
+    return {
+        "requestedCount": requested_limit,
+        "testedCount": tested,
+        "averageHit": round(hit_sum / tested, 2) if tested else 0,
+        "onePlusCount": one_plus,
+        "onePlusRate": round(one_plus / tested * 100, 1) if tested else 0,
+        "twoPlusCount": two_plus,
+        "twoPlusRate": round(two_plus / tested * 100, 1) if tested else 0,
+        "threePlusCount": three_plus,
+        "threePlusRate": round(three_plus / tested * 100, 1) if tested else 0,
+        "bestHit": best_hit,
+        "recentAverageHit": round(recent_average, 2),
+        "stability": stability,
+        "distribution": distribution,
+        "numberSupport": {str(number): round(value / support_scale, 5) for number, value in number_support.items()},
+        "recentRows": rows[:10],
+        "analysisWindow": RESET_CORE_WINDOW,
+        "modelVersion": RESET_CORE_VERSION,
+        "method": f"逐期回測固定近 {RESET_CORE_WINDOW} 期核心模型；每個目標期只使用更早資料，回測不會反向改寫即時推薦。",
+    }
+
+
+def choose_model_profile(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    backtest_limit: int = BACKTEST_DEFAULT_LIMIT,
+) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
+    selected = "fixed-core"
+    backtest = rolling_backtest(
+        draws,
+        max_number=max_number,
+        pick_count=pick_count,
+        profile_name=selected,
+        backtest_limit=backtest_limit,
+    )
+    return selected, backtest, [model_result_row(selected, "固定核心", backtest)]
+
+
 def pattern_summary(draws: list[dict[str, Any]], max_number: int, selected_profile: str) -> dict[str, Any]:
     profile = pattern_profile(draws, max_number)
     ordered = profile["ordered"]
@@ -3629,6 +4055,9 @@ def analyze(
 
     return {
         "drawCount": len(draws),
+        "analysisWindow": RESET_CORE_WINDOW,
+        "modelVersion": RESET_CORE_VERSION,
+        "coreWeights": dict(RESET_CORE_WEIGHTS),
         "hot": [{"number": n, "count": frequency[n]} for n in hot],
         "cold": [{"number": n, "count": frequency[n]} for n in cold],
         "overdue": [{"number": n, "gap": gaps[n]} for n in overdue],
@@ -3650,7 +4079,7 @@ def analyze(
         "tailAnalysis": tail_analysis,
         "researchEvidence": research_evidence,
         "shortTermConsensus": short_consensus,
-        "note": f"主模型保留四個容易理解的訊號：近期熱度、長期熱度、遺漏平衡與區間分布；會依近 {adaptive_pattern['testedCount']} 次逐期回測平滑校準權重，新一期資料進來後才重新計算，同一期不反覆改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。",
+        "note": f"主模型固定使用近 {RESET_CORE_WINDOW} 期四個容易理解的訊號：近期熱度、穩定熱度、遺漏平衡與區間分布；回測只檢查穩定度，不會反向改寫推薦。新一期資料進來後才更新，同一期不反覆改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。",
     }
 
 
@@ -3767,7 +4196,7 @@ def analyze_with_stable_backtest(
         f"{fallback_backtest.get('method', '')}"
     )
     analysis["note"] = (
-        f"主模型保留四個容易理解的訊號，會依近 {adaptive_pattern['testedCount']} 次逐期回測平滑校準權重；"
+        f"主模型固定使用近 {RESET_CORE_WINDOW} 期四個訊號；回測只檢查穩定度，不會反向改寫推薦。"
         "新一期資料進來後才重新計算，同一期不反覆改寫推薦。彩券每期仍是隨機事件，不代表可預測或保證中獎。"
     )
     return analysis
