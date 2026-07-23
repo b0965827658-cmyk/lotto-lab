@@ -11,8 +11,12 @@ const state = {
   requestId: 0,
   apiCache: new Map(),
   candidateCache: new Map(),
+  backtestCache: new Map(),
+  modelRenderTimer: null,
+  countdownTimer: null,
   notifications: {
     supported: false,
+    serverReady: false,
     publicKey: "",
     subscriberCount: 0,
   },
@@ -34,6 +38,13 @@ const STORAGE_KEY = "lotto-lab-saved-picks";
 const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
+const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v1";
+const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
+const POLL_INTERVAL_MS = 4 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 18000;
+const MAX_BACKTEST_CACHE_SIZE = 600;
+const MODEL_RENDER_DEBOUNCE_MS = 120;
 
 const FOCUS_PRESETS = {
   balanced: {
@@ -73,6 +84,19 @@ const FOCUS_PRESETS = {
   },
 };
 
+const MODE_SNAPSHOT_KEYS = ["balanced", "classic", "hot", "overdue", "interval", "pattern", "backtest"];
+const VALIDATION_RECORDS = [
+  {
+    game: "tw539",
+    mode: "區間舊版截圖",
+    source: "已補登",
+    date: "2026-07-08",
+    period: "115000165",
+    pick: [1, 6, 11, 30, 34],
+    actual: [1, 11, 23, 30, 34],
+  },
+];
+
 const $ = (selector) => document.querySelector(selector);
 
 const els = {
@@ -84,6 +108,11 @@ const els = {
   period: $("#period"),
   date: $("#date"),
   latestBalls: $("#latestBalls"),
+  countdownTime: $("#countdownTime"),
+  countdownBadge: $("#countdownBadge"),
+  countdownGame: $("#countdownGame"),
+  countdownDrawAt: $("#countdownDrawAt"),
+  countdownHint: $("#countdownHint"),
   pickBalls: $("#pickBalls"),
   pickMeta: $("#pickMeta"),
   note: $("#analysisNote"),
@@ -99,6 +128,7 @@ const els = {
   usePick: $("#usePickBtn"),
   generate: $("#generateBtn"),
   candidates: $("#candidateList"),
+  modeSnapshots: $("#modeSnapshotList"),
   modelInputs: Array.from(document.querySelectorAll("[data-weight]")),
   focusButtons: Array.from(document.querySelectorAll("[data-focus]")),
   modelSummary: $("#modelSummary"),
@@ -143,6 +173,111 @@ function miniBalls(numbers, winners = []) {
   return numbers
     .map((n) => `<span class="mini-ball ${winnerSet.has(n) ? "hit" : ""}">${pad(n)}</span>`)
     .join("");
+}
+
+function zonedParts(date, timeZone) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  return Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)])
+  );
+}
+
+function zonedDate(timeZone, year, month, day, hour, minute = 0, second = 0) {
+  const guess = Date.UTC(year, month - 1, day, hour, minute, second);
+  const parts = zonedParts(new Date(guess), timeZone);
+  const rendered = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return new Date(guess - (rendered - guess));
+}
+
+function zonedDayIndex(date, timeZone) {
+  const parts = zonedParts(date, timeZone);
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+}
+
+function addDaysInZone(timeZone, date, days) {
+  const parts = zonedParts(date, timeZone);
+  const base = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+  return zonedDate(timeZone, base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), 0, 0, 0);
+}
+
+function nextDrawForGame(game, now = new Date()) {
+  const schedule =
+    game === "ca-fantasy5"
+      ? {
+          gameName: "加州天天樂",
+          timeZone: "America/Los_Angeles",
+          hour: 18,
+          minute: 30,
+          drawDays: [0, 1, 2, 3, 4, 5, 6],
+          localLabel: "加州每日 18:30 後",
+          hint: "已換算成你目前裝置時間。",
+        }
+      : {
+          gameName: "今彩 539",
+          timeZone: "Asia/Taipei",
+          hour: 20,
+          minute: 30,
+          drawDays: [1, 2, 3, 4, 5, 6],
+          localLabel: "台灣週一至週六 20:30",
+          hint: "週日休市，倒數會自動跳到週一。",
+        };
+
+  for (let offset = 0; offset < 10; offset += 1) {
+    const dayStart = addDaysInZone(schedule.timeZone, now, offset);
+    const parts = zonedParts(dayStart, schedule.timeZone);
+    const candidate = zonedDate(schedule.timeZone, parts.year, parts.month, parts.day, schedule.hour, schedule.minute, 0);
+    if (schedule.drawDays.includes(zonedDayIndex(candidate, schedule.timeZone)) && candidate > now) {
+      return { ...schedule, at: candidate };
+    }
+  }
+  return { ...schedule, at: new Date(now.getTime() + 24 * 60 * 60 * 1000) };
+}
+
+function formatCountdown(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const time = [hours, minutes, seconds].map(pad).join(":");
+  return days > 0 ? `${days}天 ${time}` : time;
+}
+
+function renderCountdown() {
+  if (!els.countdownTime) return;
+  const next = nextDrawForGame(state.game);
+  const diff = next.at.getTime() - Date.now();
+  const localDrawAt = new Intl.DateTimeFormat("zh-Hant-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(next.at);
+  els.countdownTime.textContent = formatCountdown(diff);
+  els.countdownBadge.textContent = diff <= 0 ? "更新中" : "倒數";
+  els.countdownGame.textContent = next.gameName;
+  els.countdownDrawAt.textContent = `${localDrawAt} 開獎`;
+  els.countdownHint.textContent = `${next.localLabel}，${next.hint}`;
+}
+
+function startCountdown() {
+  renderCountdown();
+  if (state.countdownTimer) window.clearInterval(state.countdownTimer);
+  state.countdownTimer = window.setInterval(renderCountdown, 1000);
 }
 
 function rankRows(items, mode) {
@@ -260,7 +395,10 @@ function applyPlanAccess() {
   els.generate.disabled = !pro;
   els.crossYearSearch.classList.toggle("pro-required", !pro);
   updateNotificationUi();
-  if (state.analysis) renderCandidates();
+  if (state.analysis) {
+    renderCandidates();
+    renderModeSnapshots();
+  }
 }
 
 function loadSavedPicks() {
@@ -273,6 +411,99 @@ function loadSavedPicks() {
 
 function saveSavedPicks(picks) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(picks));
+}
+
+function loadModelSnapshots() {
+  try {
+    return JSON.parse(localStorage.getItem(MODEL_SNAPSHOT_STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveModelSnapshots(snapshots) {
+  localStorage.setItem(MODEL_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshots.slice(0, 160)));
+}
+
+function loadApiCacheStore() {
+  try {
+    return JSON.parse(localStorage.getItem(API_CACHE_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveApiCacheStore(store) {
+  try {
+    localStorage.setItem(API_CACHE_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // Storage can be full or blocked in private browsing. In-memory cache still works.
+  }
+}
+
+function readCachedPayload(cacheKey) {
+  const memory = state.apiCache.get(cacheKey);
+  if (memory) return memory;
+  const store = loadApiCacheStore();
+  const record = store[cacheKey];
+  if (!record?.payload) return null;
+  state.apiCache.set(cacheKey, record.payload);
+  return record.payload;
+}
+
+function writeCachedPayload(cacheKey, payload) {
+  state.apiCache.set(cacheKey, payload);
+  const store = loadApiCacheStore();
+  store[cacheKey] = { savedAt: Date.now(), payload };
+  Object.entries(store)
+    .sort((a, b) => (b[1].savedAt || 0) - (a[1].savedAt || 0))
+    .slice(12)
+    .forEach(([key]) => {
+      delete store[key];
+    });
+  saveApiCacheStore(store);
+}
+
+function drawKey(draw) {
+  if (!draw) return "";
+  return `${draw.name || state.game}|${draw.period || ""}|${draw.date || ""}|${(draw.numbers || []).join(".")}`;
+}
+
+function readLastSeenDraw() {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_SEEN_DRAW_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeLastSeenDraw(game, latest) {
+  const store = readLastSeenDraw();
+  store[game] = drawKey(latest);
+  try {
+    localStorage.setItem(LAST_SEEN_DRAW_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // Ignore blocked storage; notifications still work while the page is open.
+  }
+}
+
+async function fetchJsonWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "Cache-Control": "no-cache",
+        ...(options.headers || {}),
+      },
+    });
+    return await response.json();
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function loadModelWeights() {
@@ -352,7 +583,32 @@ function matchCount(numbers, winners) {
   return numbers.filter((n) => winnerSet.has(n)).length;
 }
 
+function historyCacheKey() {
+  const first = state.history[0];
+  const last = state.history[state.history.length - 1];
+  return [
+    state.game,
+    state.limit,
+    state.history.length,
+    first?.period || first?.date || "",
+    last?.period || last?.date || "",
+  ].join("|");
+}
+
+function rememberBacktestResult(key, result) {
+  state.backtestCache.set(key, result);
+  if (state.backtestCache.size <= MAX_BACKTEST_CACHE_SIZE) return;
+  const overflow = state.backtestCache.size - MAX_BACKTEST_CACHE_SIZE;
+  Array.from(state.backtestCache.keys())
+    .slice(0, overflow)
+    .forEach((oldKey) => state.backtestCache.delete(oldKey));
+}
+
 function backtestPick(numbers) {
+  const cacheKey = `${historyCacheKey()}|${numbers.join(",")}`;
+  const cached = state.backtestCache.get(cacheKey);
+  if (cached) return cached;
+
   const distribution = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   let bestHit = 0;
   let bestDraw = null;
@@ -370,7 +626,7 @@ function backtestPick(numbers) {
     }
   });
 
-  return {
+  const result = {
     distribution,
     bestHit,
     bestDraw,
@@ -378,6 +634,8 @@ function backtestPick(numbers) {
     testedCount: state.history.length,
     profitableCount: distribution[3] + distribution[4] + distribution[5],
   };
+  rememberBacktestResult(cacheKey, result);
+  return result;
 }
 
 function backtestBars(distribution, testedCount) {
@@ -595,11 +853,11 @@ function candidatePool() {
   return filterByTail ? tailFilteredUniverse : Array.from({ length: 39 }, (_, i) => i + 1);
 }
 
-function randomChoice(items) {
-  return items[Math.floor(Math.random() * items.length)];
+function randomChoice(items, rng = Math.random) {
+  return items[Math.floor(rng() * items.length)];
 }
 
-function buildCandidate(pool) {
+function buildCandidate(pool, rng = Math.random) {
   const numbers = new Set();
   const frequencyRows = state.analysis?.frequency || [];
   const stats = new Map(frequencyRows.map((row) => [row.number, row]));
@@ -613,7 +871,7 @@ function buildCandidate(pool) {
   const shortEdges = hints.shortCycle.edgeNumbers.filter((number) => poolSet.has(number));
   const shortAnchors = hints.shortCycle.anchorNumbers.filter((number) => poolSet.has(number));
   const classicList = [...frequencyRows]
-    .map((row) => ({ n: row.number, score: row.count * 0.45 + row.gap * 0.27 + Math.random() * 5 }))
+    .map((row) => ({ n: row.number, score: row.count * 0.45 + row.gap * 0.27 + rng() * 5 }))
     .filter((item) => poolSet.has(item.n))
     .sort((a, b) => b.score - a.score || a.n - b.n)
     .slice(0, 22)
@@ -638,59 +896,59 @@ function buildCandidate(pool) {
 
   zones.forEach((zone) => {
     const chance = focus === "pattern" || focus === "interval" ? 0.88 : 0.72;
-    if (numbers.size < 5 && zone.length && Math.random() < chance) {
-      numbers.add(randomChoice(zone));
+    if (numbers.size < 5 && zone.length && rng() < chance) {
+      numbers.add(randomChoice(zone, rng));
     }
   });
-  if ((focus === "pattern" || focus === "interval" || Math.random() < 0.55) && pairChoices.length && numbers.size <= 3) {
-    randomChoice(pairChoices).forEach((number) => numbers.add(number));
+  if ((focus === "pattern" || focus === "interval" || rng() < 0.55) && pairChoices.length && numbers.size <= 3) {
+    randomChoice(pairChoices, rng).forEach((number) => numbers.add(number));
   }
-  if (dragTargets.length && numbers.size < 5 && Math.random() < 0.72) {
-    numbers.add(randomChoice(dragTargets));
+  if (dragTargets.length && numbers.size < 5 && rng() < 0.72) {
+    numbers.add(randomChoice(dragTargets, rng));
   }
-  if (intervalNumbers.length && numbers.size < 5 && Math.random() < 0.78) {
-    numbers.add(randomChoice(intervalNumbers));
+  if (intervalNumbers.length && numbers.size < 5 && rng() < 0.78) {
+    numbers.add(randomChoice(intervalNumbers, rng));
   }
   if ((focus === "pattern" || focus === "interval") && intervalNumbers.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(intervalNumbers));
+    while (numbers.size < 3) numbers.add(randomChoice(intervalNumbers, rng));
   }
-  if (repeatNumbers.length && numbers.size < 5 && Math.random() < 0.45) {
-    numbers.add(randomChoice(repeatNumbers));
+  if (repeatNumbers.length && numbers.size < 5 && rng() < 0.45) {
+    numbers.add(randomChoice(repeatNumbers, rng));
   }
   if (state.game === "ca-fantasy5") {
-    while (numbers.size < 2 && shortAround.length) numbers.add(randomChoice(shortAround));
-    if (shortEdges.length && numbers.size < 5 && Math.random() < 0.72) {
-      numbers.add(randomChoice(shortEdges));
+    while (numbers.size < 2 && shortAround.length) numbers.add(randomChoice(shortAround, rng));
+    if (shortEdges.length && numbers.size < 5 && rng() < 0.72) {
+      numbers.add(randomChoice(shortEdges, rng));
     }
-    if (shortAnchors.length && numbers.size < 5 && Math.random() < 0.5) {
-      numbers.add(randomChoice(shortAnchors));
+    if (shortAnchors.length && numbers.size < 5 && rng() < 0.5) {
+      numbers.add(randomChoice(shortAnchors, rng));
     }
-    if (shortAround.length && numbers.size < 4 && Math.random() < 0.85) {
-      numbers.add(randomChoice(shortAround));
+    if (shortAround.length && numbers.size < 4 && rng() < 0.85) {
+      numbers.add(randomChoice(shortAround, rng));
     }
   }
   if (focus === "classic" && classicList.length) {
-    while (numbers.size < 4) numbers.add(randomChoice(classicList));
+    while (numbers.size < 4) numbers.add(randomChoice(classicList, rng));
   }
   if (focus === "hot" && hotList.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(hotList));
+    while (numbers.size < 3) numbers.add(randomChoice(hotList, rng));
   }
   if (focus === "overdue" && overdueList.length) {
-    while (numbers.size < 3) numbers.add(randomChoice(overdueList));
+    while (numbers.size < 3) numbers.add(randomChoice(overdueList, rng));
   }
   if (focus === "backtest") {
     const top = [...pool]
       .map((n) => {
         const row = stats.get(n) || { count: 0, gap: 0 };
-        return { n, score: row.count * 0.35 + row.gap * 0.25 + Math.random() * 8 };
+        return { n, score: row.count * 0.35 + row.gap * 0.25 + rng() * 8 };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, 20)
       .map((item) => item.n);
-    while (numbers.size < 4 && top.length) numbers.add(randomChoice(top));
+    while (numbers.size < 4 && top.length) numbers.add(randomChoice(top, rng));
   }
   while (numbers.size < 5) {
-    numbers.add(randomChoice(pool));
+    numbers.add(randomChoice(pool, rng));
   }
   return [...numbers].sort((a, b) => a - b);
 }
@@ -699,24 +957,115 @@ function generateCandidates() {
   const cacheKey = `${state.game}-${state.limit}-${state.latest?.date || ""}-${state.latest?.period || ""}-${state.analysisFocus}-${JSON.stringify(state.modelWeights)}`;
   const cached = state.candidateCache.get(cacheKey);
   if (cached) return cached;
-  const pool = candidatePool();
-  const seen = new Set();
-  const candidates = [];
-  const attempts = state.analysisFocus === "backtest" ? 260 : 200;
-  for (let i = 0; i < attempts; i += 1) {
-    const numbers = buildCandidate(pool);
-    const key = numbers.join(",");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const backtest = backtestPick(numbers);
-    const score = scorePick(numbers, backtest);
-    candidates.push({ numbers, backtest, score });
+  try {
+    const pool = candidatePool();
+    // 保留 7/7 區間版路的原始隨機候選；每次重新產生都重新抽樣。
+    const rng = Math.random;
+    const seen = new Set();
+    const candidates = [];
+    const attempts = state.analysisFocus === "backtest" ? 260 : 200;
+    for (let i = 0; i < attempts; i += 1) {
+      const numbers = buildCandidate(pool, rng);
+      const key = numbers.join(",");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const backtest = backtestPick(numbers);
+      const score = scorePick(numbers, backtest);
+      candidates.push({ numbers, backtest, score });
+    }
+    const result = candidates
+      .sort((a, b) => b.score.total - a.score.total || b.backtest.bestHit - a.backtest.bestHit)
+      .slice(0, 5);
+    state.candidateCache.set(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error("Candidate generation failed", error);
+    return [];
   }
-  const result = candidates
-    .sort((a, b) => b.score.total - a.score.total || b.backtest.bestHit - a.backtest.bestHit)
-    .slice(0, 5);
-  state.candidateCache.set(cacheKey, result);
-  return result;
+}
+
+function withTemporaryFocus(focusKey, callback) {
+  const previousFocus = state.analysisFocus;
+  const previousWeights = { ...state.modelWeights };
+  const preset = FOCUS_PRESETS[focusKey] || FOCUS_PRESETS.balanced;
+  state.analysisFocus = focusKey;
+  state.modelWeights = { ...preset.weights };
+  try {
+    return callback();
+  } finally {
+    state.analysisFocus = previousFocus;
+    state.modelWeights = previousWeights;
+  }
+}
+
+function modeSnapshotCandidates() {
+  if (!state.analysis || !state.history.length) return [];
+  return MODE_SNAPSHOT_KEYS.map((key) => {
+    const preset = FOCUS_PRESETS[key];
+    const candidate = withTemporaryFocus(key, () => generateCandidates()[0]);
+    return candidate ? { key, preset, candidate } : null;
+  }).filter(Boolean);
+}
+
+function rememberModelSnapshots() {
+  if (!state.latest || !state.history.length || !isProPlan()) return;
+  const currentKey = `${state.game}-${state.latest.period || state.latest.date || ""}`;
+  const existing = loadModelSnapshots().filter((item) => item.key !== currentKey);
+  const snapshots = modeSnapshotCandidates().map(({ key, preset, candidate }) => ({
+    key: currentKey,
+    game: state.game,
+    basePeriod: state.latest.period || "",
+    baseDate: state.latest.date || "",
+    modeKey: key,
+    mode: preset.label,
+    pick: candidate.numbers,
+    score: candidate.score.total,
+    createdAt: new Date().toISOString(),
+  }));
+  saveModelSnapshots([...snapshots, ...existing]);
+}
+
+function validationRowsForLatest() {
+  if (!state.latest) return [];
+  const latestActual = state.latest.numbers || [];
+  const manualRows = VALIDATION_RECORDS.filter((record) => {
+    const sameGame = record.game === state.game;
+    const sameDate = record.date && record.date === state.latest.date;
+    const samePeriod = record.period && record.period === state.latest.period;
+    const sameActual = record.actual?.join(",") === latestActual.join(",");
+    return sameGame && (sameDate || samePeriod || sameActual);
+  }).map((record) => ({
+    date: record.date,
+    period: record.period,
+    mode: record.mode,
+    source: record.source,
+    pick: record.pick,
+    actual: record.actual,
+    hits: matchCount(record.pick, record.actual),
+  }));
+
+  const trackedRows = loadModelSnapshots()
+    .filter((item) => item.game === state.game && item.basePeriod !== state.latest.period && item.baseDate !== state.latest.date)
+    .slice(0, 7)
+    .map((item) => ({
+      date: state.latest.date,
+      period: state.latest.period,
+      mode: item.mode,
+      source: `由 ${item.baseDate || item.basePeriod || "上一期"} 留存`,
+      pick: item.pick,
+      actual: latestActual,
+      hits: matchCount(item.pick, latestActual),
+    }))
+    .filter((row) => row.hits >= 2)
+    .sort((a, b) => b.hits - a.hits);
+
+  const unique = new Set();
+  return [...manualRows, ...trackedRows].filter((row) => {
+    const key = `${row.mode}-${row.pick.join(",")}-${row.actual.join(",")}`;
+    if (unique.has(key)) return false;
+    unique.add(key);
+    return true;
+  });
 }
 
 function referenceCandidate() {
@@ -785,6 +1134,10 @@ function renderCandidates() {
     return;
   }
   const candidates = generateCandidates();
+  if (!candidates.length) {
+    els.candidates.innerHTML = `<div class="empty-state">模型回測暫時忙碌，請稍後再按一次重新產生。</div>`;
+    return;
+  }
   els.candidates.innerHTML = candidates
     .map(
       (candidate, index) => `
@@ -811,6 +1164,84 @@ function renderCandidates() {
       savePick(numbers);
     });
   });
+}
+
+function renderModeSnapshots() {
+  if (!els.modeSnapshots) return;
+  if (!isProPlan()) {
+    els.modeSnapshots.innerHTML = `<div class="empty-state">各模式快照屬於 Pro 訂閱版；可先用「預覽 Pro」查看。</div>`;
+    return;
+  }
+  if (!state.analysis || !state.history.length) {
+    els.modeSnapshots.innerHTML = `<div class="empty-state">資料讀取後會顯示每個模式的候選組合。</div>`;
+    return;
+  }
+
+  const activeFocus = state.analysisFocus;
+  const snapshots = modeSnapshotCandidates();
+  if (!snapshots.length) {
+    els.modeSnapshots.innerHTML = `<div class="empty-state">模式回測暫時忙碌，請稍後再切換一次。</div>`;
+    return;
+  }
+  els.modeSnapshots.innerHTML = snapshots
+    .map(({ key, preset, candidate }) => {
+      const isActive = key === activeFocus;
+      const isInterval = key === "interval";
+      const recentGood = candidate.backtest.recentGoodDraw;
+      const latestHits = state.latest?.numbers ? matchCount(candidate.numbers, state.latest.numbers) : 0;
+      const recentText = recentGood ? `近中 ${recentGood.hits}：${recentGood.date || recentGood.period || "-"}` : "近中待觀察";
+      return `
+        <button class="mode-snapshot-card ${isActive ? "active" : ""} ${isInterval ? "featured" : ""}" type="button" data-mode-snapshot="${key}">
+          <span class="mode-snapshot-kicker">${isInterval ? "同類版路" : "模式"}</span>
+          <strong>${preset.label}</strong>
+          <span class="mode-snapshot-desc">${preset.description}</span>
+          <span class="saved-balls">${miniBalls(candidate.numbers)}</span>
+          <span class="candidate-meta">
+            <span>本期 ${latestHits} 中</span>
+            <span>分數 ${candidate.score.total}</span>
+            <span>版路 +${candidate.score.pattern || 0}</span>
+            <span>最高 ${candidate.backtest.bestHit} 中</span>
+            <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
+            <span>${recentText}</span>
+          </span>
+        </button>
+      `;
+    })
+    .join("");
+
+  els.modeSnapshots.querySelectorAll("[data-mode-snapshot]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!requirePro("模式版路切換")) return;
+      const focusKey = button.dataset.modeSnapshot;
+      const preset = FOCUS_PRESETS[focusKey];
+      if (!preset) return;
+      state.analysisFocus = focusKey;
+      state.modelWeights = { ...preset.weights };
+      saveAnalysisFocus();
+      saveModelWeights();
+      renderModelControls();
+      scheduleModelRender(`已切換到 ${preset.label} 模式。`);
+    });
+  });
+}
+
+function renderModelOutput() {
+  renderSavedPicks();
+  renderReferencePick();
+  renderCandidates();
+  renderModeSnapshots();
+}
+
+function scheduleModelRender(message = "模型設定已更新。") {
+  if (state.modelRenderTimer) {
+    window.clearTimeout(state.modelRenderTimer);
+  }
+  setStatus("模型正在重新計算...");
+  state.modelRenderTimer = window.setTimeout(() => {
+    state.modelRenderTimer = null;
+    renderModelOutput();
+    setStatus(message);
+  }, MODEL_RENDER_DEBOUNCE_MS);
 }
 
 function renderModelBacktest(backtest, profiles = []) {
@@ -848,6 +1279,39 @@ function renderModelBacktest(backtest, profiles = []) {
     (backtest.threePlusRate ?? 0) === 0
       ? `<div class="backtest-warning">最近 ${backtest.testedCount} 期沒有 3 中以上，這時候先看摸邊率和 2 中以上，比只盯 3 中更準。</div>`
       : "";
+  const validationRows = validationRowsForLatest();
+  const validationHtml = validationRows.length
+    ? `
+      <div class="hit-track-list">
+        <div class="hit-track-title">
+          <strong>命中追蹤</strong>
+          <span>含舊版截圖補登與之後自動留存的推薦快照</span>
+        </div>
+        ${validationRows
+          .map(
+            (row) => `
+              <div class="backtest-card hit-track-card ${row.hits >= 4 ? "strong" : ""}">
+                <div>
+                  <strong>${row.mode}</strong>
+                  <span>${row.source}</span>
+                  <span>${row.date || "-"} · 期別 ${row.period || "-"}</span>
+                </div>
+                <div>
+                  <span class="tiny-label">當時畫面</span>
+                  <div class="saved-balls">${miniBalls(row.pick, row.actual)}</div>
+                </div>
+                <div>
+                  <span class="tiny-label">實際開獎</span>
+                  <div class="saved-balls">${miniBalls(row.actual)}</div>
+                </div>
+                <div class="hit-chip">${row.hits} 中</div>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    `
+    : "";
   els.backtestMethod.innerHTML = `
     ${backtest.method}
     <span class="backtest-method-line">命中分布：0中 ${distribution[0] || 0}、1中 ${distribution[1] || 0}、2中 ${distribution[2] || 0}、3中以上 ${backtest.threePlusCount || 0}。2中以上 ${twoPlusText}，3中以上 ${threePlusText}。</span>
@@ -873,9 +1337,10 @@ function renderModelBacktest(backtest, profiles = []) {
       `,
     )
     .join("");
-  if (ranking || warning) {
-    els.backtestRecent.insertAdjacentHTML("afterbegin", `${warning}<div class="model-rank-list">${ranking}</div>`);
+  if (validationHtml || ranking || warning) {
+    els.backtestRecent.insertAdjacentHTML("afterbegin", `${validationHtml}${warning}<div class="model-rank-list">${ranking}</div>`);
   }
+  rememberModelSnapshots();
 }
 
 function renderPatterns(patterns, profiles = []) {
@@ -1077,6 +1542,7 @@ function render(payload) {
   renderSavedPicks();
   renderReferencePick();
   renderCandidates();
+  renderModeSnapshots();
   setStatus(`已更新：${updatedAt.replace("T", " ")}`);
 }
 
@@ -1147,18 +1613,24 @@ function updateNotificationUi() {
 
   const permission = Notification.permission;
   const hasPushKey = Boolean(state.notifications.publicKey);
+  const serverReady = Boolean(state.notifications.serverReady);
   const isSubscribed = Boolean(state.pushSubscription);
   els.notifyBadge.textContent = isSubscribed ? "已訂閱" : permission === "denied" ? "已封鎖" : "可開啟";
   els.notifyToggle.textContent = isSubscribed ? "取消通知" : hasPushKey ? "開啟通知" : "開啟本機提醒";
   els.notifyToggle.disabled = permission === "denied";
   els.notifyTest.disabled = permission === "denied";
+  els.notifyTest.hidden = permission === "denied" || !notificationSupported();
 
   if (permission === "denied") {
     els.notifyText.textContent = "瀏覽器目前封鎖通知。請到瀏覽器網站設定允許通知後，再回來開啟開獎提醒。";
-  } else if (isSubscribed) {
+  } else if (isSubscribed && serverReady) {
     els.notifyText.textContent = `已登錄開獎通知。新一期更新時，系統可發送提醒；目前約 ${state.notifications.subscriberCount || 1} 個裝置訂閱。`;
+  } else if (permission === "granted" && !serverReady) {
+    els.notifyText.textContent = "已開啟本機提醒；網站開著時偵測到新一期會跳通知。離線群發需設定 Render 推播金鑰與排程。";
+  } else if (isSubscribed) {
+    els.notifyText.textContent = "已訂閱通知；離線群發還需要 Render 推播金鑰與定時觸發流程。";
   } else if (!hasPushKey) {
-    els.notifyText.textContent = "通知介面已可用；正式群發需要在 Render 設定 VAPID 推播金鑰。現在可先測試本機通知。";
+    els.notifyText.textContent = "可先開啟本機提醒；正式離線群發需要在 Render 設定 VAPID 推播金鑰。";
   } else {
     els.notifyText.textContent = "開啟後，有新一期開獎時可收到通知。手機建議先加入主畫面。";
   }
@@ -1244,7 +1716,7 @@ async function toggleNotifications() {
   }
 }
 
-async function showLocalTestNotification(title = "Lotto Lab 開獎通知", body = "這是一則測試通知。") {
+async function showLocalTestNotification(title = "摘星王開獎通知", body = "這是一則測試通知。", options = {}) {
   if (!notificationSupported()) {
     setStatus("這個瀏覽器目前不支援通知。", true);
     return;
@@ -1265,12 +1737,22 @@ async function showLocalTestNotification(title = "Lotto Lab 開獎通知", body 
     data: { url: `/?game=${state.game}` },
   });
   updateNotificationUi();
-  setStatus("已送出測試通知。");
+  if (!options.silent) setStatus("已送出測試通知。");
+}
+
+async function notifyIfLatestChanged(latest, previousKey) {
+  const nextKey = drawKey(latest);
+  if (!latest || !nextKey || !previousKey || previousKey === nextKey) return;
+  if (Notification.permission !== "granted") return;
+  const title = `${latest.name || "摘星王"} 已更新`;
+  const body = `第 ${latest.period || "-"} 期：${(latest.numbers || []).map(pad).join("、")}`;
+  await showLocalTestNotification(title, body, { silent: true });
 }
 
 async function initNotifications(config) {
   state.notifications = {
     supported: Boolean(config?.supported),
+    serverReady: Boolean(config?.serverReady),
     publicKey: config?.publicKey || "",
     subscriberCount: config?.subscriberCount || 0,
   };
@@ -1282,8 +1764,7 @@ async function initNotifications(config) {
 
 async function loadConfig() {
   try {
-    const response = await fetch("/api/config");
-    const payload = await response.json();
+    const payload = await fetchJsonWithTimeout("/api/config");
     if (payload.ok) {
       state.plan = loadPlanPreview();
       renderPlans(payload.subscription);
@@ -1294,40 +1775,56 @@ async function loadConfig() {
   }
 }
 
-async function load() {
+async function load(options = {}) {
+  const silent = Boolean(options.silent);
   if (!isProPlan() && state.limit > 90) {
     state.limit = 90;
     els.limit.value = "90";
   }
   const cacheKey = `${state.game}-${state.limit}`;
-  const cachedPayload = state.apiCache.get(cacheKey);
+  const cachedPayload = readCachedPayload(cacheKey);
   const requestId = ++state.requestId;
   if (cachedPayload) {
     render(cachedPayload);
-    setStatus("已用暫存資料顯示，正在背景確認最新資料...");
+    if (!silent) setStatus("已先顯示暫存資料，正在背景確認最新開獎...");
   } else {
-    setStatus("正在讀取資料...");
+    if (!silent) setStatus("正在讀取資料...");
   }
-  els.refresh.disabled = true;
+  if (!silent) els.refresh.disabled = true;
   try {
-    const response = await fetch(`/api/lottery?game=${state.game}&limit=${state.limit}`);
-    const payload = await response.json();
+    const previousSeen = readLastSeenDraw()[state.game] || "";
+    const payload = await fetchJsonWithTimeout(`/api/lottery?game=${state.game}&limit=${state.limit}&t=${Date.now()}`);
     if (!payload.ok) throw new Error(payload.error || "資料讀取失敗");
     if (requestId !== state.requestId) return;
-    state.apiCache.set(cacheKey, payload);
+    writeCachedPayload(cacheKey, payload);
     render(payload);
+    await notifyIfLatestChanged(payload.latest, previousSeen).catch(() => {});
+    writeLastSeenDraw(state.game, payload.latest);
   } catch (error) {
     if (cachedPayload) {
-      setStatus("目前使用暫存資料；背景更新暫時失敗。", true);
+      if (!silent) setStatus("目前使用暫存資料；背景更新暫時失敗。", true);
       return;
     }
     els.dashboard.hidden = true;
-    setStatus(error.message, true);
+    if (!silent) setStatus(error.name === "AbortError" ? "讀取逾時，請稍後再試。" : error.message, true);
   } finally {
     if (requestId === state.requestId) {
       els.refresh.disabled = false;
     }
   }
+}
+
+function startAutoRefresh() {
+  window.setInterval(() => {
+    if (document.visibilityState === "visible") {
+      load({ silent: true });
+    }
+  }, POLL_INTERVAL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      load({ silent: true });
+    }
+  });
 }
 
 async function runCrossYearSearch() {
@@ -1354,8 +1851,7 @@ async function runCrossYearSearch() {
       number,
       limit: "5000",
     });
-    const response = await fetch(`/api/history-search?${params}`);
-    const payload = await response.json();
+    const payload = await fetchJsonWithTimeout(`/api/history-search?${params}`);
     if (!payload.ok) throw new Error(payload.error || "跨年查詢失敗");
     state.displayHistory = payload.history;
     state.historySearch.keyword = "";
@@ -1367,7 +1863,7 @@ async function runCrossYearSearch() {
     els.historyScope.textContent = `跨年查詢：${years}，共 ${payload.total} 筆${payload.limited ? "，目前顯示前 5000 筆" : ""}。`;
     setStatus(`已完成跨年查詢：${payload.total} 筆。`);
   } catch (error) {
-    setStatus(error.message, true);
+    setStatus(error.name === "AbortError" ? "查詢逾時，請縮小年份範圍或稍後再試。" : error.message, true);
   } finally {
     els.crossYearSearch.disabled = false;
   }
@@ -1388,6 +1884,7 @@ document.querySelectorAll(".segment").forEach((button) => {
     document.querySelectorAll(".segment").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
     state.game = button.dataset.game;
+    renderCountdown();
     load();
   });
 });
@@ -1405,6 +1902,7 @@ els.limit.addEventListener("change", () => {
   }
   state.limit = Number(els.limit.value);
   state.candidateCache.clear();
+  state.backtestCache.clear();
   load();
 });
 
@@ -1434,9 +1932,7 @@ els.usePick.addEventListener("click", () => {
 els.generate.addEventListener("click", () => {
   if (!requirePro("高分組合")) return;
   state.candidateCache.clear();
-  renderReferencePick();
-  renderCandidates();
-  setStatus("已重新產生高分候選組合。");
+  scheduleModelRender("已重新產生高分候選組合。");
 });
 
 els.focusButtons.forEach((button) => {
@@ -1449,10 +1945,7 @@ els.focusButtons.forEach((button) => {
     saveAnalysisFocus();
     saveModelWeights();
     renderModelControls();
-    renderSavedPicks();
-    renderReferencePick();
-    renderCandidates();
-    setStatus(`分析重點已切換：${preset.label}。`);
+    scheduleModelRender(`分析重點已切換：${preset.label}。`);
   });
 });
 
@@ -1462,10 +1955,7 @@ els.modelInputs.forEach((input) => {
     state.modelWeights[input.dataset.weight] = Number(input.value);
     saveModelWeights();
     renderModelControls();
-    renderSavedPicks();
-    renderReferencePick();
-    renderCandidates();
-    setStatus("模型設定已更新。");
+    scheduleModelRender("模型設定已更新。");
   });
 });
 
@@ -1476,10 +1966,7 @@ els.resetModel.addEventListener("click", () => {
   saveAnalysisFocus();
   saveModelWeights();
   renderModelControls();
-  renderSavedPicks();
-  renderReferencePick();
-  renderCandidates();
-  setStatus("模型設定已重設。");
+  scheduleModelRender("模型設定已重設。");
 });
 
 els.historyKeyword.addEventListener("input", () => {
@@ -1514,7 +2001,7 @@ if (els.notifyToggle) {
 if (els.notifyTest) {
   els.notifyTest.addEventListener("click", () => {
     const latest = state.latest;
-    const title = latest ? `${latest.name} 最新開獎通知` : "Lotto Lab 開獎通知";
+    const title = latest ? `${latest.name} 最新開獎通知` : "摘星王開獎通知";
     const body = latest ? `第 ${latest.period || "-"} 期：${latest.numbers.map(pad).join("、")}` : "這是一則測試通知。";
     showLocalTestNotification(title, body);
   });
@@ -1531,5 +2018,7 @@ initHistoryYears();
 renderModelControls();
 applyPlanAccess();
 updateNotificationUi();
+startCountdown();
 loadConfig();
 load();
+startAutoRefresh();

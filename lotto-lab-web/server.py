@@ -10,6 +10,7 @@ import random
 import re
 import socket
 import ssl
+import threading
 import time
 import posixpath
 import urllib.error
@@ -49,7 +50,9 @@ PILIO_TAIWAN_URL = "https://www.pilio.idv.tw/lto539/list.asp?indexpage={page}&or
 CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
-CACHE_TTL_SECONDS = 15 * 60
+CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "300"))
+BACKTEST_FALLBACK_LIMIT = 90
+BACKTEST_MIN_HISTORY = 36
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 API_RATE_LIMITS = {
@@ -62,10 +65,18 @@ API_RATE_LIMITS = {
 ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
 STRIPE_PAYMENT_LINK = os.environ.get("LOTTO_STRIPE_PAYMENT_LINK", "").strip()
 PUSH_PUBLIC_KEY = os.environ.get("LOTTO_VAPID_PUBLIC_KEY", "").strip()
-PUSH_PRIVATE_KEY = os.environ.get("LOTTO_VAPID_PRIVATE_KEY", "").strip()
+PUSH_PRIVATE_KEY = os.environ.get("LOTTO_VAPID_PRIVATE_KEY", "").strip().replace("\\n", "\n")
 PUSH_CONTACT_EMAIL = os.environ.get("LOTTO_PUSH_CONTACT_EMAIL", "admin@example.com").strip()
 NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
 SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", ROOT / "data" / "push_subscriptions.json"))
+NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", ROOT / "data" / "notify_state.json"))
+AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "180"))
+AUTO_NOTIFY_GAMES = [
+    game.strip()
+    for game in os.environ.get("LOTTO_AUTO_NOTIFY_GAMES", "tw539,ca-fantasy5").split(",")
+    if game.strip() in ALLOWED_GAMES
+]
 
 
 @dataclass
@@ -76,6 +87,7 @@ class CacheItem:
 
 cache: dict[str, CacheItem] = {}
 rate_limit_hits: dict[tuple[str, str], list[float]] = {}
+notify_lock = threading.Lock()
 
 
 def clamp_int(value: str, default: int, minimum: int, maximum: int) -> int:
@@ -159,6 +171,104 @@ def send_push_message(subscription: dict[str, Any], payload: dict[str, Any]) -> 
         vapid_private_key=PUSH_PRIVATE_KEY,
         vapid_claims={"sub": subject},
     )
+
+
+def load_notify_state() -> dict[str, Any]:
+    try:
+        if not NOTIFY_STATE_FILE.exists():
+            return {}
+        payload = json.loads(NOTIFY_STATE_FILE.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_notify_state(state: dict[str, Any]) -> None:
+    NOTIFY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    NOTIFY_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def already_notified(game: str, draw: dict[str, Any]) -> bool:
+    state = load_notify_state()
+    key = f"{draw.get('period', '')}|{draw.get('date', '')}|{'.'.join(str(number) for number in draw.get('numbers', []))}"
+    return bool(key and state.get(game) == key)
+
+
+def mark_notified(game: str, draw: dict[str, Any]) -> None:
+    state = load_notify_state()
+    state[game] = f"{draw.get('period', '')}|{draw.get('date', '')}|{'.'.join(str(number) for number in draw.get('numbers', []))}"
+    save_notify_state(state)
+
+
+def latest_notification_message(game: str, lottery: dict[str, Any]) -> dict[str, Any]:
+    numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
+    return {
+        "title": f"{lottery.get('name', '摘星王')} 已開獎",
+        "body": f"第 {lottery.get('period', '-')} 期：{numbers}",
+        "url": f"/?game={game}",
+        "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
+    }
+
+
+def broadcast_push_message(message: dict[str, Any]) -> tuple[int, int, int]:
+    subscriptions = load_push_subscriptions()
+    sent = 0
+    failed = 0
+    alive = []
+    for item in subscriptions:
+        subscription = item.get("subscription", {})
+        try:
+            send_push_message(subscription, message)
+            sent += 1
+            alive.append(item)
+        except Exception as exc:
+            failed += 1
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            if status_code not in (404, 410):
+                alive.append(item)
+    if len(alive) != len(subscriptions):
+        save_push_subscriptions(alive)
+    return sent, failed, len(alive)
+
+
+def notify_latest_game(game: str) -> dict[str, Any]:
+    if not push_server_ready():
+        return {"ok": False, "game": game, "error": "尚未設定完整推播金鑰"}
+    if not load_push_subscriptions():
+        return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": 0, "skipped": True, "message": "目前沒有訂閱用戶"}
+    lottery = build_payload(game, 90)["latest"]
+    if already_notified(game, lottery):
+        return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": len(load_push_subscriptions()), "skipped": True, "message": "這一期已通知過"}
+    message = latest_notification_message(game, lottery)
+    sent, failed, alive = broadcast_push_message(message)
+    if sent > 0:
+        mark_notified(game, lottery)
+    return {"ok": True, "game": game, "sent": sent, "failed": failed, "subscriberCount": alive, "message": message}
+
+
+def auto_notify_loop() -> None:
+    time.sleep(20)
+    while True:
+        try:
+            if push_server_ready() and AUTO_NOTIFY_GAMES:
+                with notify_lock:
+                    for game in AUTO_NOTIFY_GAMES:
+                        result = notify_latest_game(game)
+                        if result.get("sent") or result.get("failed"):
+                            print(
+                                "auto notify",
+                                game,
+                                "sent",
+                                result.get("sent", 0),
+                                "failed",
+                                result.get("failed", 0),
+                                "subscribers",
+                                result.get("subscriberCount", 0),
+                            )
+        except Exception as exc:
+            print(f"auto notify error: {exc}")
+        time.sleep(max(60, AUTO_NOTIFY_INTERVAL_SECONDS))
 
 
 def cached(key: str, loader):
@@ -1070,21 +1180,56 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
     }
 
 
+def analyze_with_stable_backtest(
+    draws: list[dict[str, Any]],
+    backtest_draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> dict[str, Any]:
+    analysis = analyze(draws, max_number=max_number, pick_count=pick_count)
+    current_backtest = analysis.get("backtest", {})
+    if current_backtest.get("testedCount") or len(backtest_draws) < BACKTEST_MIN_HISTORY:
+        return analysis
+
+    selected_profile, fallback_backtest, model_results = choose_model_profile(
+        backtest_draws[:BACKTEST_FALLBACK_LIMIT],
+        max_number=max_number,
+        pick_count=pick_count,
+    )
+    if not fallback_backtest.get("testedCount"):
+        return analysis
+
+    analysis["backtest"] = fallback_backtest
+    analysis["modelProfiles"] = model_results
+    analysis["patterns"]["selectedProfile"] = selected_profile
+    analysis["patterns"]["selectedLabel"] = MODEL_PROFILES.get(selected_profile, MODEL_PROFILES["balanced"])["label"]
+    analysis["backtest"]["method"] = (
+        f"目前選擇近 {len(draws)} 期，短期樣本不足以單獨回測；"
+        f"模型回測已自動改用近 {min(len(backtest_draws), BACKTEST_FALLBACK_LIMIT)} 期穩定樣本。"
+        f"{fallback_backtest.get('method', '')}"
+    )
+    return analysis
+
+
 def build_payload(game: str, limit: int) -> dict[str, Any]:
     if game == "tw539":
         latest = taiwan_latest()
-        history = taiwan_history(limit)
+        fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
+        history = taiwan_history(fetch_limit)
         if history and not same_draw(history[0], latest):
             history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
         draws = history[:limit]
-        analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
+        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
+        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
         return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
     if game == "ca-fantasy5":
-        history = california_history(limit)
+        fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
+        history = california_history(fetch_limit)
         if not history:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         draws = history[:limit]
-        analysis = cached(cache_key_for_draws("analysis", game, limit, draws), lambda: analyze(draws))
+        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
+        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
         return {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
     raise ValueError("unknown game")
 
@@ -1175,6 +1320,9 @@ class Handler(SimpleHTTPRequestHandler):
                     "notifications": {
                         "supported": bool(PUSH_PUBLIC_KEY),
                         "serverReady": push_server_ready(),
+                        "autoNotify": AUTO_NOTIFY_ENABLED,
+                        "autoNotifyIntervalSeconds": max(60, AUTO_NOTIFY_INTERVAL_SECONDS),
+                        "autoNotifyGames": AUTO_NOTIFY_GAMES,
                         "publicKey": PUSH_PUBLIC_KEY,
                         "subscriberCount": len(load_push_subscriptions()),
                     },
@@ -1258,16 +1406,8 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "尚未設定完整推播金鑰"}, status=400)
                     return
                 game = clean_game(payload.get("game", "tw539"))
-                lottery = build_payload(game, 90)["latest"]
-                numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
-                message = {
-                    "title": f"{lottery.get('name', 'Lotto Lab')} 已開獎",
-                    "body": f"第 {lottery.get('period', '-')} 期：{numbers}",
-                    "url": f"/?game={game}",
-                    "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
-                }
-                sent, failed, alive = self.broadcast_notification(message)
-                self.send_json({"ok": True, "sent": sent, "failed": failed, "subscriberCount": alive, "message": message})
+                with notify_lock:
+                    self.send_json(notify_latest_game(game))
                 return
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=500)
@@ -1287,25 +1427,7 @@ class Handler(SimpleHTTPRequestHandler):
         return payload
 
     def broadcast_notification(self, message: dict[str, Any]) -> tuple[int, int, int]:
-        subscriptions = load_push_subscriptions()
-        sent = 0
-        failed = 0
-        alive = []
-        for item in subscriptions:
-            subscription = item.get("subscription", {})
-            try:
-                send_push_message(subscription, message)
-                sent += 1
-                alive.append(item)
-            except Exception as exc:
-                failed += 1
-                response = getattr(exc, "response", None)
-                status_code = getattr(response, "status_code", None)
-                if status_code not in (404, 410):
-                    alive.append(item)
-        if len(alive) != len(subscriptions):
-            save_push_subscriptions(alive)
-        return sent, failed, len(alive)
+        return broadcast_push_message(message)
 
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -1313,6 +1435,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+        parsed = urlparse(self.path)
+        if parsed.path in ("/", "/index.html", "/sw.js", "/manifest.webmanifest"):
+            self.send_header("Cache-Control", "no-cache")
+        elif parsed.path.startswith(("/app.js", "/styles.css", "/icon")):
+            self.send_header("Cache-Control", "public, max-age=86400")
         super().end_headers()
 
     def send_json(self, payload: dict[str, Any], status: int = 200, extra_headers: dict[str, str] | None = None):
@@ -1320,6 +1447,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         for key, value in (extra_headers or {}).items():
             self.send_header(key, value)
         self.end_headers()
@@ -1330,7 +1458,10 @@ def main():
     port = int(os.environ.get("PORT", "8787"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)
-    print(f"Lotto Lab running at http://{host}:{port}")
+    if AUTO_NOTIFY_ENABLED:
+        threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
+        print(f"auto notify enabled every {max(60, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
+    print(f"摘星王 running at http://{host}:{port}")
     server.serve_forever()
 
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = "lotto-lab-v29";
+const CACHE_NAME = "lotto-lab-v34";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -58,9 +58,9 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { title: "Lotto Lab 開獎通知", body: event.data ? event.data.text() : "最新開獎已更新。" };
+    payload = { title: "摘星王開獎通知", body: event.data ? event.data.text() : "最新開獎已更新。" };
   }
-  const title = payload.title || "Lotto Lab 開獎通知";
+  const title = payload.title || "摘星王開獎通知";
   const options = {
     body: payload.body || "最新開獎已更新。",
     icon: payload.icon || "/icon-192.png",
