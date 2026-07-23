@@ -4846,6 +4846,58 @@ def attach_flagship_analysis(
     return result
 
 
+def legacy_76_attach_flagship_analysis(
+    game: str,
+    latest: dict[str, Any],
+    flagship_limit: int,
+    history: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    flagship_analysis: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep every public recommendation on the same 7/6 deterministic pick."""
+    recommendation = [int(number) for number in (analysis.get("recommendation") or [])[:5]]
+    if len(recommendation) != 5:
+        recommendation = legacy_76_recommendation(history, max_number=39, pick_count=5)
+    fingerprint = draw_fingerprint(history)
+    snapshot = {
+        "key": (
+            f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:"
+            f"window-{flagship_limit}:legacy-76:data-{fingerprint}"
+        ),
+        "status": "published",
+        "profile": "legacy-76",
+        "source": "7/6 原始統計",
+        "historyFingerprint": fingerprint,
+    }
+    result = dict(analysis)
+    result["recommendation"] = list(recommendation)
+    result["flagshipRecommendation"] = list(recommendation)
+    result["adaptiveRecommendation"] = list(recommendation)
+    result["flagshipSnapshot"] = snapshot
+    result["adaptiveSnapshot"] = dict(snapshot, source="7/6 原始統計（共用推薦）")
+    result["flagshipAnalysisLimit"] = flagship_limit
+    result["adaptiveFallback"] = False
+    result["adaptiveMethod"] = "7/6 原始模式：全期出現頻率 58%＋遺漏值 42%。"
+    result["flagshipProfile"] = "legacy-76"
+    result["flagshipResearchEvidence"] = result.get("researchEvidence", {})
+    history_analysis = dict(result)
+    history_analysis["flagshipRecommendation"] = list(recommendation)
+    history_analysis["adaptiveRecommendation"] = list(recommendation)
+    persist_flagship_analysis_history(
+        game,
+        latest,
+        flagship_limit,
+        history,
+        history_analysis,
+        snapshot,
+    )
+    return result
+
+
+# The historical attachment layer must not re-sample the restored 7/6 pick.
+attach_flagship_analysis = legacy_76_attach_flagship_analysis
+
+
 def build_payload(
     game: str,
     limit: int,
