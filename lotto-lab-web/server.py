@@ -4212,7 +4212,10 @@ LEGACY_76_WEIGHTS = {"frequency": 0.58, "gap": 0.42}
 RESET_CORE_VERSION = LEGACY_76_MODEL_VERSION
 # The API cache also stores the backtest shape. Bump this when a new, clearly
 # labelled comparison field is added so an old cached payload cannot hide it.
-ADAPTIVE_PATTERN_VERSION = f"{LEGACY_76_MODEL_VERSION}-benchmark-v1"
+# The displayed recommendation and its walk-forward report must use the same
+# analysis window.  Bump the payload cache when that contract changes so an
+# older report cannot remain beside the new recommendation.
+ADAPTIVE_PATTERN_VERSION = f"{LEGACY_76_MODEL_VERSION}-aligned-backtest-v1"
 
 
 def legacy_76_score_table(
@@ -4982,7 +4985,7 @@ def build_payload(
         persist_draw_history([latest, *history])
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}-{ADAPTIVE_PATTERN_VERSION}"
-        analysis = dict(cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit)))
+        analysis = dict(cached(analysis_key, lambda: analyze_with_stable_backtest(draws, draws, backtest_limit=requested_backtest_limit)))
         flagship_draws = history[:requested_flagship_limit]
         flagship_key = f"{cache_key_for_draws('flagship-analysis', game, requested_flagship_limit, history)}-backtest-{BACKTEST_DEFAULT_LIMIT}-{ADAPTIVE_PATTERN_VERSION}"
         flagship_analysis = analysis if (
@@ -4991,7 +4994,7 @@ def build_payload(
             flagship_key,
             lambda: analyze_with_stable_backtest(
                 flagship_draws,
-                history,
+                flagship_draws,
                 backtest_limit=BACKTEST_DEFAULT_LIMIT,
                 recommendation_draws=flagship_draws,
             ),
@@ -5011,7 +5014,7 @@ def build_payload(
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}-backtest-{requested_backtest_limit}-{ADAPTIVE_PATTERN_VERSION}"
         latest = history[0]
-        analysis = dict(cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history, backtest_limit=requested_backtest_limit)))
+        analysis = dict(cached(analysis_key, lambda: analyze_with_stable_backtest(draws, draws, backtest_limit=requested_backtest_limit)))
         flagship_draws = history[:requested_flagship_limit]
         flagship_key = f"{cache_key_for_draws('flagship-analysis', game, requested_flagship_limit, history)}-backtest-{BACKTEST_DEFAULT_LIMIT}-{ADAPTIVE_PATTERN_VERSION}"
         flagship_analysis = analysis if (
@@ -5020,7 +5023,7 @@ def build_payload(
             flagship_key,
             lambda: analyze_with_stable_backtest(
                 flagship_draws,
-                history,
+                flagship_draws,
                 backtest_limit=BACKTEST_DEFAULT_LIMIT,
                 recommendation_draws=flagship_draws,
             ),
