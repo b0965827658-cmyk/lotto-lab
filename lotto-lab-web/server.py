@@ -4210,7 +4210,9 @@ def analyze_with_stable_backtest(
 LEGACY_76_MODEL_VERSION = "legacy-2026-07-06"
 LEGACY_76_WEIGHTS = {"frequency": 0.58, "gap": 0.42}
 RESET_CORE_VERSION = LEGACY_76_MODEL_VERSION
-ADAPTIVE_PATTERN_VERSION = LEGACY_76_MODEL_VERSION
+# The API cache also stores the backtest shape. Bump this when a new, clearly
+# labelled comparison field is added so an old cached payload cannot hide it.
+ADAPTIVE_PATTERN_VERSION = f"{LEGACY_76_MODEL_VERSION}-benchmark-v1"
 
 
 def legacy_76_score_table(
@@ -4328,6 +4330,69 @@ def legacy_76_backtest(
         "analysisWindow": len(ordered),
         "modelVersion": LEGACY_76_MODEL_VERSION,
         "method": "7/6 原始模式：全期出現頻率 58%＋遺漏值 42%；每個目標期只使用更早的歷史資料。",
+    }
+
+
+def legacy_76_candidate_benchmark(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> dict[str, Any]:
+    """Compare the current top-16 pool with history without changing picks.
+
+    This is intentionally separate from ``legacy_76_backtest``. It answers
+    "did any combination in the current candidate pool ever match a past
+    draw?" It must never be presented as a forward prediction or used to
+    rewrite the recommendation, because it can inspect already-known draws.
+    """
+    ordered = canonical_analysis_draws(draws)
+    scored, _, _ = legacy_76_score_table(ordered, max_number)
+    pool = [item["number"] for item in scored[: min(16, max_number)]]
+    if len(pool) < pick_count or not ordered:
+        return {
+            "testedCount": len(ordered),
+            "candidatePool": pool,
+            "bestHit": 0,
+            "bestPick": [],
+            "bestDraw": None,
+            "method": "資料不足，暫時無法建立候選歷史對照。",
+        }
+
+    draw_masks = []
+    for draw in ordered:
+        mask = 0
+        for number in normalize_numbers(draw.get("numbers", [])):
+            if 1 <= number <= max_number:
+                mask |= 1 << (number - 1)
+        draw_masks.append((draw, mask))
+
+    best_hit = 0
+    best_pick: tuple[int, ...] = ()
+    best_draw: dict[str, Any] | None = None
+    for combination in itertools.combinations(pool, pick_count):
+        pick_mask = 0
+        for number in combination:
+            pick_mask |= 1 << (number - 1)
+        for draw, draw_mask in draw_masks:
+            # Keep compatibility with the Python runtime used by the free
+            # Render service, which may not expose int.bit_count().
+            hits = bin(pick_mask & draw_mask).count("1")
+            if hits > best_hit:
+                best_hit = hits
+                best_pick = tuple(sorted(combination))
+                best_draw = {
+                    key: value
+                    for key, value in draw.items()
+                    if key not in {"source", "sourceUrl"}
+                }
+
+    return {
+        "testedCount": len(ordered),
+        "candidatePool": pool,
+        "bestHit": best_hit,
+        "bestPick": list(best_pick),
+        "bestDraw": best_draw,
+        "method": "同一個 7/6 前 16 碼候選池，逐組與已發生歷史獎號做事後對照；不會回寫主推薦。",
     }
 
 
@@ -4544,6 +4609,7 @@ def legacy_76_analysis(
     overdue = sorted(gaps, key=lambda number: (-gaps[number], number))[:10]
     recommendation = legacy_76_recommendation(selected, max_number, pick_count)
     backtest = legacy_76_backtest(reference, max_number, pick_count, backtest_limit)
+    backtest["candidateBenchmark"] = legacy_76_candidate_benchmark(selected, max_number, pick_count)
     patterns = legacy_76_pattern_summary(selected, max_number, "legacy-76")
     components = [
         {"id": "frequency", "label": "全期頻率", "weight": 58},
