@@ -287,7 +287,14 @@ def cache_key_for_draws(prefix: str, game: str, limit: int, draws: list[dict[str
 
 
 def fetch_text(url: str, timeout: int = 25) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Cache-Control": "no-cache, no-store",
+            "Pragma": "no-cache",
+        },
+    )
     with open_url(req, timeout=timeout) as response:
         raw = response.read()
     for encoding in ("utf-8-sig", "utf-8", "big5", "cp950"):
@@ -299,7 +306,14 @@ def fetch_text(url: str, timeout: int = 25) -> str:
 
 
 def fetch_bytes(url: str, timeout: int = 40) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Cache-Control": "no-cache, no-store",
+            "Pragma": "no-cache",
+        },
+    )
     with open_url(req, timeout=timeout) as response:
         return response.read()
 
@@ -313,6 +327,11 @@ def open_url(req: urllib.request.Request, timeout: int):
             context = ssl._create_unverified_context()
             return urllib.request.urlopen(req, timeout=timeout, context=context)
         raise
+
+
+def cache_busted_url(url: str) -> str:
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}_lotto_ts={time.time_ns()}"
 
 
 def normalize_numbers(nums: list[int]) -> list[int]:
@@ -370,7 +389,7 @@ def pilio_taiwan_history(limit: int = 90) -> list[dict[str, Any]]:
         page_count = max(1, min(8, (limit + 22) // 23))
         for page in range(1, page_count + 1):
             url = PILIO_TAIWAN_URL.format(page=page)
-            text = fetch_text(url, timeout=15)
+            text = fetch_text(cache_busted_url(url), timeout=15)
             rows = re.findall(
                 r'<td class="date-cell">\s*(.*?)\s*</td>\s*<td class="number-cell">\s*(.*?)\s*</td>',
                 text,
@@ -402,13 +421,14 @@ def pilio_taiwan_history(limit: int = 90) -> list[dict[str, Any]]:
 
 def taiwan_latest() -> dict[str, Any]:
     def load():
+        official = None
         try:
-            payload = json.loads(fetch_text(TAIWAN_LAST_URL, timeout=10))
+            payload = json.loads(fetch_text(cache_busted_url(TAIWAN_LAST_URL), timeout=10))
             entries = payload.get("content", {}).get("lastNumberList", [])
             daily_cash = next((item for item in entries if item.get("gameCode") == 5120), None)
             if not daily_cash:
                 raise RuntimeError("台灣彩券 API 目前沒有回傳今彩 539 最新資料")
-            return {
+            official = {
                 "game": "tw539",
                 "name": "今彩 539",
                 "period": daily_cash.get("period", ""),
@@ -418,10 +438,19 @@ def taiwan_latest() -> dict[str, Any]:
                 "sourceUrl": TAIWAN_LAST_URL,
             }
         except Exception:
-            history = pilio_taiwan_history(1)
-            if history:
-                return history[0]
-            raise
+            official = None
+
+        try:
+            fallback = pilio_taiwan_history(1)
+        except Exception:
+            fallback = []
+        if not official:
+            if fallback:
+                return fallback[0]
+            raise RuntimeError("官方與備援來源目前都沒有回傳今彩 539 最新資料")
+        if fallback and fallback[0].get("date", "") > official.get("date", ""):
+            return fallback[0]
+        return official
 
     return cached("taiwan-latest", load)
 
