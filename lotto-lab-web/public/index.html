@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=45" />
+    <link rel="stylesheet" href="/styles.css?v=46" />
   </head>
   <body>
     <main class="shell">
@@ -239,23 +239,20 @@
         <div class="tab-panel" data-tab-panel="stats">
         <article class="panel stats-intro">
           <p class="label">近期統計</p>
-          <h2>冷熱號與遺漏</h2>
-          <p class="fineprint">集中查看近期熱號、冷號與最久未開號碼，分析期數沿用上方設定。</p>
+          <h2>01～39 冷熱與遺漏</h2>
+          <p class="fineprint">完整列出每個號碼距離上次開出的期數，並用顏色標示目前位置。</p>
         </article>
-        <article class="panel">
-          <div class="panel-head compact">
-            <p class="label">熱號</p>
+        <article class="panel stats-overview">
+          <div class="stats-meta">
             <span id="drawCount">-</span>
+            <div class="stats-legend" aria-label="顏色說明">
+              <span class="stats-key stats-key--overdue">最久未開</span>
+              <span class="stats-key stats-key--hot">熱號</span>
+              <span class="stats-key stats-key--cold">中冷號</span>
+              <span class="stats-key stats-key--normal">一般</span>
+            </div>
           </div>
-          <div class="rank-list" id="hotList"></div>
-        </article>
-        <article class="panel">
-          <p class="label">冷號</p>
-          <div class="rank-list" id="coldList"></div>
-        </article>
-        <article class="panel">
-          <p class="label">最久未開</p>
-          <div class="rank-list" id="overdueList"></div>
+          <div class="stats-matrix" id="statsMatrix"></div>
         </article>
         </div>
 
@@ -365,6 +362,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=45"></script>
+    <script src="/app.js?v=46"></script>
   </body>
 </html>

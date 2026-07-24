@@ -122,9 +122,7 @@ const els = {
   pickBalls: $("#pickBalls"),
   pickMeta: $("#pickMeta"),
   note: $("#analysisNote"),
-  hot: $("#hotList"),
-  cold: $("#coldList"),
-  overdue: $("#overdueList"),
+  statsMatrix: $("#statsMatrix"),
   history: $("#historyRows"),
   drawCount: $("#drawCount"),
   plans: $("#planGrid"),
@@ -317,18 +315,32 @@ function startCountdown() {
   state.countdownTimer = window.setInterval(renderCountdown, 1000);
 }
 
-function rankRows(items, mode) {
-  const max = Math.max(...items.map((item) => item.count ?? item.gap), 1);
-  return items
+function statsMatrixRows(items) {
+  const rows = Array.from({ length: 39 }, (_, index) => items.find((item) => item.number === index + 1) || {
+    number: index + 1,
+    count: 0,
+    gap: 0,
+  });
+  const countRank = [...rows].sort((a, b) => b.count - a.count || a.number - b.number);
+  const gapRank = [...rows].sort((a, b) => b.gap - a.gap || a.number - b.number);
+  const overdueSet = new Set(gapRank.slice(0, Math.max(6, Math.ceil(rows.length * 0.2))).map((item) => item.number));
+  const hotSet = new Set(countRank.slice(0, Math.max(8, Math.ceil(rows.length * 0.25))).map((item) => item.number));
+  const coldSet = new Set(countRank.slice(-Math.max(8, Math.ceil(rows.length * 0.25))).map((item) => item.number));
+
+  return rows
     .map((item) => {
-      const value = item.count ?? item.gap;
-      const label = mode === "gap" ? `${value} 期` : `${value} 次`;
-      const width = Math.max(6, Math.round((value / max) * 100));
+      const status = overdueSet.has(item.number) ? "overdue" : hotSet.has(item.number) ? "hot" : coldSet.has(item.number) ? "cold" : "normal";
+      const statusLabel = {
+        overdue: "最久未開",
+        hot: "熱號",
+        cold: "中冷號",
+        normal: "一般",
+      }[status];
+      const gapLabel = `未開 ${item.gap} 期`;
       return `
-        <div class="rank">
-          <span class="mini-ball">${pad(item.number)}</span>
-          <span class="bar"><span style="width:${width}%"></span></span>
-          <span class="rank-value">${label}</span>
+        <div class="stats-cell stats-cell--${status}" title="${pad(item.number)}：${gapLabel}，${statusLabel}">
+          <span class="stats-cell-number">${pad(item.number)}</span>
+          <span class="stats-cell-detail"><strong>${gapLabel}</strong><small>${statusLabel}</small></span>
         </div>
       `;
     })
@@ -1636,9 +1648,7 @@ function render(payload, companionPayload = null) {
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles);
-  els.hot.innerHTML = rankRows(analysis.hot, "count");
-  els.cold.innerHTML = rankRows(analysis.cold, "count");
-  els.overdue.innerHTML = rankRows(analysis.overdue, "gap");
+  els.statsMatrix.innerHTML = statsMatrixRows(analysis.frequency);
   renderHistory();
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderSavedPicks();
