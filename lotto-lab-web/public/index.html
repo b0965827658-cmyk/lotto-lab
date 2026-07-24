@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=36" />
+    <link rel="stylesheet" href="/styles.css?v=37" />
   </head>
   <body>
     <main class="shell">
@@ -165,13 +165,14 @@
             <button id="usePickBtn" class="text-button">套用參考</button>
           </div>
           <form class="saved-form" id="savedForm">
-            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 1" />
-            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 2" />
-            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 3" />
-            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 4" />
-            <input class="number-input" type="number" min="1" max="39" inputmode="numeric" aria-label="號碼 5" />
-            <button class="save-button" type="submit">儲存</button>
+            <div class="saved-number-picker" id="savedNumberPicker" role="group" aria-label="自動對號 1 到 39"></div>
+            <div class="saved-picker-toolbar">
+              <span id="savedSelectionMeta" class="saved-selection-meta">已選 0 顆，請點選號碼球</span>
+              <button id="clearSavedNumbers" class="text-button" type="button" disabled>清除選擇</button>
+            </div>
+            <button class="save-button" type="submit">儲存這組號碼</button>
           </form>
+          <p class="fineprint saved-notice">直接點選 1～39 號球，可選 1 顆到最多 39 顆；開獎後會自動對獎。</p>
           <div class="saved-list" id="savedList"></div>
         </article>
 
@@ -340,6 +341,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=36"></script>
+    <script src="/app.js?v=37"></script>
   </body>
 </html>
