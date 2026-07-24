@@ -408,6 +408,18 @@ select {
   align-items: stretch;
 }
 
+.subscription-disclaimer {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 4px solid var(--gold);
+  background: #fff8e7;
+  color: #72500b;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.7;
+}
+
 .plan-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -662,6 +674,12 @@ body[data-plan="free"] .pro-required {
 
 .model-panel {
   grid-column: 1 / -1;
+}
+
+.model-period-control {
+  width: min(100%, 320px);
+  justify-content: space-between;
+  margin-top: 14px;
 }
 
 .model-page-link {
@@ -1790,6 +1808,10 @@ th {
   .model-page-link {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .model-period-control {
+    width: 100%;
   }
 
   .tab-panel:not(.active) {

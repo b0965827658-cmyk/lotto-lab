@@ -50,7 +50,7 @@ PILIO_TAIWAN_URL = "https://www.pilio.idv.tw/lto539/list.asp?indexpage={page}&or
 CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
-CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "300"))
+CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "30"))
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 BACKTEST_SAMPLE_LIMIT = 24
@@ -72,7 +72,7 @@ NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
 SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", ROOT / "data" / "push_subscriptions.json"))
 NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", ROOT / "data" / "notify_state.json"))
 AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
-AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "180"))
+AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "60"))
 AUTO_NOTIFY_GAMES = [
     game.strip()
     for game in os.environ.get("LOTTO_AUTO_NOTIFY_GAMES", "tw539,ca-fantasy5").split(",")
@@ -204,7 +204,7 @@ def mark_notified(game: str, draw: dict[str, Any]) -> None:
 def latest_notification_message(game: str, lottery: dict[str, Any]) -> dict[str, Any]:
     numbers = "、".join(f"{number:02d}" for number in lottery.get("numbers", []))
     return {
-        "title": f"{lottery.get('name', '摘星王')} 已開獎",
+        "title": f"{lottery.get('name', '摘星狙擊手')} 已開獎",
         "body": f"第 {lottery.get('period', '-')} 期：{numbers}",
         "url": f"/?game={game}",
         "tag": f"lotto-lab-{game}-{lottery.get('period', lottery.get('date', 'latest'))}",
@@ -323,6 +323,22 @@ def same_draw(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return left.get("date") == right.get("date") and normalize_numbers(left.get("numbers", [])) == normalize_numbers(right.get("numbers", []))
 
 
+def dedupe_draws(draws: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove repeated source rows without changing the order of the draws."""
+    unique = []
+    seen = set()
+    for draw in draws:
+        numbers = tuple(normalize_numbers(draw.get("numbers", [])))
+        date = draw.get("date", "")
+        period = draw.get("period", "")
+        key = (draw.get("game", ""), date, numbers) if date else (draw.get("game", ""), period, numbers)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(draw)
+    return unique
+
+
 def parse_date(value: str) -> str:
     value = value.strip()
     if not value:
@@ -379,7 +395,7 @@ def pilio_taiwan_history(limit: int = 90) -> list[dict[str, Any]]:
                     }
                 )
         draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
-        return draws[:limit]
+        return dedupe_draws(draws)[:limit]
 
     return cached(f"pilio-taiwan-history-{limit}", load)
 
@@ -460,7 +476,7 @@ def parse_taiwan_zip(zip_url: str) -> list[dict[str, Any]]:
                 }
             )
     parsed.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
-    return parsed
+    return dedupe_draws(parsed)
 
 
 def taiwan_year_history(year: int) -> list[dict[str, Any]]:
@@ -483,7 +499,7 @@ def bundled_taiwan_history() -> list[dict[str, Any]]:
         with BUNDLED_TAIWAN_HISTORY.open("r", encoding="utf-8") as file:
             rows = json.load(file)
         rows.sort(key=lambda item: (item.get("date", ""), item.get("period", "")), reverse=True)
-        return rows
+        return dedupe_draws(rows)
 
     return cached("bundled-taiwan-539-history", load)
 
@@ -491,20 +507,20 @@ def bundled_taiwan_history() -> list[dict[str, Any]]:
 def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
     fast_history = pilio_taiwan_history(limit)
     if len(fast_history) >= min(limit, 20):
-        return fast_history[:limit]
+        return dedupe_draws(fast_history)[:limit]
     bundled = bundled_taiwan_history()
     if bundled:
         latest = taiwan_latest()
-        if latest and all(draw.get("period") != latest.get("period") for draw in bundled):
+        if latest and not any(same_draw(latest, draw) for draw in bundled):
             bundled = [latest, *bundled]
-        return bundled[:limit]
+        return dedupe_draws(bundled)[:limit]
     try:
         rows = taiwan_dataset_rows()
         latest_row = max(rows, key=lambda row: int(row.get("資料所屬年度", "0") or "0"))
         latest_year = int(latest_row.get("資料所屬年度", "0") or "0") + 1911
-        return taiwan_year_history(latest_year)[:limit]
+        return dedupe_draws(taiwan_year_history(latest_year))[:limit]
     except Exception:
-        return pilio_taiwan_history(limit)
+        return dedupe_draws(pilio_taiwan_history(limit))[:limit]
 
 
 def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", number: int | None = None, limit: int = 2000) -> dict[str, Any]:
@@ -524,7 +540,7 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
         try:
             latest = taiwan_latest()
             latest_year = int(latest["date"][:4]) if latest.get("date") else None
-            if latest_year in searched_years and all(draw.get("period") != latest.get("period") for draw in draws):
+            if latest_year in searched_years and not any(same_draw(latest, draw) for draw in draws):
                 draws.append(latest)
         except Exception:
             pass
@@ -534,11 +550,12 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
             draws.extend(taiwan_year_history(year))
         latest = taiwan_latest()
         latest_year = int(latest["date"][:4]) if latest.get("date") else None
-        if latest_year in searched_years and all(draw.get("period") != latest.get("period") for draw in draws):
+        if latest_year in searched_years and not any(same_draw(latest, draw) for draw in draws):
             draws.append(latest)
     query = keyword.strip().lower()
     if query or number:
         draws = filter_history_rows(draws, query, number)
+    draws = dedupe_draws(draws)
     draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     return {
         "history": public_draws(draws[:limit]),
@@ -1462,7 +1479,7 @@ def main():
     if AUTO_NOTIFY_ENABLED:
         threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
         print(f"auto notify enabled every {max(60, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
-    print(f"摘星王 running at http://{host}:{port}")
+    print(f"摘星狙擊手 running at http://{host}:{port}")
     server.serve_forever()
 
 

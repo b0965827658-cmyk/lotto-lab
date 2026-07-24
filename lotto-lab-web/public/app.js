@@ -11,6 +11,7 @@ const state = {
   history: [],
   displayHistory: [],
   requestId: 0,
+  loading: false,
   apiCache: new Map(),
   candidateCache: new Map(),
   backtestCache: new Map(),
@@ -41,11 +42,12 @@ const MODEL_STORAGE_KEY = "lotto-lab-model-weights";
 const FOCUS_STORAGE_KEY = "lotto-lab-analysis-focus";
 const PLAN_STORAGE_KEY = "lotto-lab-plan-preview";
 const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
-const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v1";
+const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v2";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
-const POLL_INTERVAL_MS = 4 * 60 * 1000;
+const POLL_INTERVAL_MS = 30 * 1000;
 const FETCH_TIMEOUT_MS = 18000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
+const MAX_CANDIDATE_CACHE_SIZE = 120;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
 
 const FOCUS_PRESETS = {
@@ -1006,7 +1008,12 @@ function buildCandidate(pool, rng = Math.random) {
 }
 
 function generateCandidates() {
-  const cacheKey = `${state.game}-${state.limit}-${state.latest?.date || ""}-${state.latest?.period || ""}-${state.analysisFocus}-${JSON.stringify(state.modelWeights)}`;
+  const analysisFingerprint = [
+    state.analysis?.drawCount || 0,
+    state.analysis?.backtest?.testedCount || 0,
+    state.analysis?.patterns?.selectedProfile || "",
+  ].join(":");
+  const cacheKey = `${state.game}-${state.limit}-${state.latest?.date || ""}-${state.latest?.period || ""}-${analysisFingerprint}-${state.analysisFocus}-${JSON.stringify(state.modelWeights)}`;
   const cached = state.candidateCache.get(cacheKey);
   if (cached) return cached;
   try {
@@ -1029,6 +1036,9 @@ function generateCandidates() {
       .sort((a, b) => b.score.total - a.score.total || b.backtest.bestHit - a.backtest.bestHit)
       .slice(0, 5);
     state.candidateCache.set(cacheKey, result);
+    while (state.candidateCache.size > MAX_CANDIDATE_CACHE_SIZE) {
+      state.candidateCache.delete(state.candidateCache.keys().next().value);
+    }
     return result;
   } catch (error) {
     console.error("Candidate generation failed", error);
@@ -1287,7 +1297,7 @@ function scheduleModelRender(message = "模型設定已更新。") {
   if (state.modelRenderTimer) {
     window.clearTimeout(state.modelRenderTimer);
   }
-  setStatus("模型正在重新計算...");
+  setStatus("數據分析中...");
   state.modelRenderTimer = window.setTimeout(() => {
     state.modelRenderTimer = null;
     renderModelOutput();
@@ -1808,7 +1818,7 @@ async function toggleNotifications() {
   }
 }
 
-async function showLocalTestNotification(title = "摘星王開獎通知", body = "這是一則測試通知。", options = {}) {
+async function showLocalTestNotification(title = "摘星狙擊手開獎通知", body = "這是一則測試通知。", options = {}) {
   if (!notificationSupported()) {
     setStatus("這個瀏覽器目前不支援通知。", true);
     return;
@@ -1836,7 +1846,7 @@ async function notifyIfLatestChanged(latest, previousKey) {
   const nextKey = drawKey(latest);
   if (!latest || !nextKey || !previousKey || previousKey === nextKey) return;
   if (Notification.permission !== "granted") return;
-  const title = `${latest.name || "摘星王"} 已更新`;
+  const title = `${latest.name || "摘星狙擊手"} 已更新`;
   const body = `第 ${latest.period || "-"} 期：${(latest.numbers || []).map(pad).join("、")}`;
   await showLocalTestNotification(title, body, { silent: true });
 }
@@ -1873,6 +1883,8 @@ function companionGameFor(game) {
 
 async function load(options = {}) {
   const silent = Boolean(options.silent);
+  if (state.loading) return;
+  state.loading = true;
   if (!isProPlan() && state.limit > 90) {
     state.limit = 90;
     els.limit.value = "90";
@@ -1885,9 +1897,9 @@ async function load(options = {}) {
   const requestId = ++state.requestId;
   if (cachedPayload) {
     render(cachedPayload, cachedCompanionPayload);
-    if (!silent) setStatus("已先顯示暫存資料，正在背景確認最新開獎...");
+    if (!silent) setStatus("已顯示暫存資料，正在確認最新開獎與重新分析...");
   } else {
-    if (!silent) setStatus("正在讀取資料...");
+    if (!silent) setStatus("正在同步開獎資料與數據分析...");
   }
   if (!silent) els.refresh.disabled = true;
   try {
@@ -1911,6 +1923,7 @@ async function load(options = {}) {
     els.dashboard.hidden = true;
     if (!silent) setStatus(error.name === "AbortError" ? "讀取逾時，請稍後再試。" : error.message, true);
   } finally {
+    state.loading = false;
     if (requestId === state.requestId) {
       els.refresh.disabled = false;
     }
@@ -2120,7 +2133,7 @@ if (els.notifyToggle) {
 if (els.notifyTest) {
   els.notifyTest.addEventListener("click", () => {
     const latest = state.latest;
-    const title = latest ? `${latest.name} 最新開獎通知` : "摘星王開獎通知";
+    const title = latest ? `${latest.name} 最新開獎通知` : "摘星狙擊手開獎通知";
     const body = latest ? `第 ${latest.period || "-"} 期：${latest.numbers.map(pad).join("、")}` : "這是一則測試通知。";
     showLocalTestNotification(title, body);
   });

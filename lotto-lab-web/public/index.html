@@ -5,19 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#166a52" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="摘星王" />
+    <meta name="apple-mobile-web-app-title" content="摘星狙擊手" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <title>摘星王</title>
+    <title>摘星狙擊手</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=44" />
+    <link rel="stylesheet" href="/styles.css?v=45" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">摘星王</p>
+          <p class="eyebrow">摘星狙擊手</p>
           <h1>開獎號碼與統計選號</h1>
         </div>
         <button id="refreshBtn" class="icon-button" title="重新整理" aria-label="重新整理">↻</button>
@@ -28,19 +28,6 @@
           <button class="segment active" data-game="tw539">今彩 539</button>
           <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
         </div>
-        <label class="select-wrap">
-          分析期數
-          <select id="limitSelect">
-            <option value="10">近 10 期</option>
-            <option value="20">近 20 期</option>
-            <option value="36">近 36 期</option>
-            <option value="60">60 期</option>
-            <option value="90" selected>90 期</option>
-            <option value="120">120 期</option>
-            <option value="180">180 期</option>
-            <option value="365">365 期</option>
-          </select>
-        </label>
         <div class="notify-quick">
           <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
           <span id="notifyBadge" class="count-pill">未啟用</span>
@@ -49,7 +36,7 @@
         </div>
       </section>
 
-      <section class="status" id="status">正在讀取資料...</section>
+      <section class="status" id="status" aria-live="polite">正在同步開獎資料與數據分析...</section>
 
       <section class="dashboard" id="dashboard" hidden>
         <nav class="page-tabs" aria-label="功能分頁">
@@ -144,6 +131,19 @@
             </div>
             <button id="resetModelBtn" class="text-button">重設</button>
           </div>
+          <label class="select-wrap model-period-control">
+            分析資料期數
+            <select id="limitSelect">
+              <option value="10">近 10 期</option>
+              <option value="20">近 20 期</option>
+              <option value="36">近 36 期</option>
+              <option value="60">60 期</option>
+              <option value="90" selected>90 期</option>
+              <option value="120">120 期</option>
+              <option value="180">180 期</option>
+              <option value="365">365 期</option>
+            </select>
+          </label>
           <div class="model-controls" id="modelControls">
             <div class="focus-controls" id="focusControls" aria-label="分析重點">
               <button type="button" class="focus-chip active" data-focus="balanced">綜合</button>
@@ -360,10 +360,11 @@
             <p class="fineprint">解鎖進階模型、跨年紀錄與高分組合。</p>
           </div>
           <div class="plan-grid" id="planGrid"></div>
+          <p class="subscription-disclaimer">本訂閱附加功能僅輔助整理統計與提高選號參考，不代表百發百中。請理性投注，祝您中獎。</p>
         </article>
         </div>
       </section>
     </main>
-    <script src="/app.js?v=44"></script>
+    <script src="/app.js?v=45"></script>
   </body>
 </html>
