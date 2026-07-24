@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=41" />
+    <link rel="stylesheet" href="/styles.css?v=42" />
   </head>
   <body>
     <main class="shell">
@@ -56,6 +56,9 @@
           <button class="page-tab active" type="button" data-tab="latest">最新開獎</button>
           <button class="page-tab" type="button" data-tab="history">歷史開獎</button>
           <button class="page-tab" type="button" data-tab="model">模型</button>
+          <button class="page-tab" type="button" data-tab="stats">冷熱號</button>
+          <button class="page-tab" type="button" data-tab="model-pattern">模型版路</button>
+          <button class="page-tab" type="button" data-tab="backtest">模型回測</button>
           <button class="page-tab" type="button" data-tab="subscription">升級訂閱</button>
         </nav>
 
@@ -133,86 +136,6 @@
         </div>
 
         <div class="tab-panel" data-tab-panel="model">
-        <section class="analysis-overview" aria-label="近期分析摘要">
-        <article class="panel countdown-panel">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">下次開獎</p>
-              <h2 id="countdownTime">--:--:--</h2>
-            </div>
-            <span id="countdownBadge" class="count-pill">預估</span>
-          </div>
-          <div class="countdown-meta">
-            <span id="countdownGame">-</span>
-            <strong id="countdownDrawAt">-</strong>
-            <small id="countdownHint">依各彩種開獎時間估算。</small>
-          </div>
-        </article>
-
-        <article class="panel pick-panel">
-          <p class="label">統計參考選號</p>
-          <div class="balls accent" id="pickBalls"></div>
-          <div class="pick-meta" id="pickMeta"></div>
-          <p class="fineprint" id="analysisNote"></p>
-        </article>
-        </section>
-
-        <article class="panel backtest-panel" data-tier="pro" data-lock-title="Pro 模型回測" data-lock-text="訂閱後可查看近期命中表現與模型排名。">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">模型回測</p>
-              <h2>最近表現</h2>
-            </div>
-            <span id="backtestBadge" class="count-pill">-</span>
-          </div>
-          <div class="metric-grid">
-            <div>
-              <strong id="avgHit">-</strong>
-              <span>平均命中</span>
-            </div>
-            <div>
-              <strong id="threePlusRate">-</strong>
-              <span>摸邊率</span>
-            </div>
-            <div>
-              <strong id="bestHit">-</strong>
-              <span>最高命中</span>
-            </div>
-          </div>
-          <div class="backtest-recent" id="backtestRecent"></div>
-          <p class="fineprint" id="backtestMethod"></p>
-        </article>
-
-        <article class="panel pattern-panel" data-tier="pro" data-lock-title="Pro 版路分析" data-lock-text="訂閱後可查看區間、尾數、拖牌與連莊推理。">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">版路分析</p>
-              <h2 id="patternModel">-</h2>
-            </div>
-            <span id="patternRepeat" class="count-pill">-</span>
-          </div>
-          <div class="pattern-grid" id="patternGrid"></div>
-          <div class="pattern-lines" id="patternLines"></div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-head compact">
-            <p class="label">熱號</p>
-            <span id="drawCount">-</span>
-          </div>
-          <div class="rank-list" id="hotList"></div>
-        </article>
-
-        <article class="panel">
-          <p class="label">冷號</p>
-          <div class="rank-list" id="coldList"></div>
-        </article>
-
-        <article class="panel">
-          <p class="label">最久未開</p>
-          <div class="rank-list" id="overdueList"></div>
-        </article>
-
         <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 模型設定" data-lock-text="訂閱後可切換板路模式並調整權重。">
           <div class="panel-head compact">
             <div>
@@ -255,6 +178,39 @@
           <p class="fineprint" id="modelSummary">目前模型：熱度 30%、遺漏 25%、分散 25%、回測 20%。</p>
         </article>
 
+        <article class="panel model-page-link" data-tier="pro" data-lock-title="Pro 模型版路" data-lock-text="訂閱後可查看近期區間、尾數、拖牌與連莊推理。">
+          <div>
+            <p class="label">模型版路</p>
+            <h2>自動分析近期版路</h2>
+            <p class="fineprint">模型設定下方提供獨立版路頁，集中查看近期區間、尾數、拖牌與連莊。</p>
+          </div>
+          <button class="text-button" type="button" data-tab="model-pattern">查看版路</button>
+        </article>
+
+        <section class="analysis-overview" aria-label="近期分析摘要">
+        <article class="panel countdown-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">下次開獎</p>
+              <h2 id="countdownTime">--:--:--</h2>
+            </div>
+            <span id="countdownBadge" class="count-pill">預估</span>
+          </div>
+          <div class="countdown-meta">
+            <span id="countdownGame">-</span>
+            <strong id="countdownDrawAt">-</strong>
+            <small id="countdownHint">依各彩種開獎時間估算。</small>
+          </div>
+        </article>
+
+        <article class="panel pick-panel">
+          <p class="label">統計參考選號</p>
+          <div class="balls accent" id="pickBalls"></div>
+          <div class="pick-meta" id="pickMeta"></div>
+          <p class="fineprint" id="analysisNote"></p>
+        </article>
+        </section>
+
         <article class="panel mode-snapshot-panel" data-tier="pro" data-lock-title="Pro 模式版路" data-lock-text="訂閱後可查看每個模式各自產生的候選組合。">
           <div class="panel-head compact">
             <div>
@@ -277,6 +233,71 @@
           </div>
           <p class="fineprint">依追蹤分數排序，保留隨機性；這是分析候選，不是中獎保證。</p>
           <div class="candidate-list" id="candidateList"></div>
+        </article>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="stats">
+        <article class="panel stats-intro">
+          <p class="label">近期統計</p>
+          <h2>冷熱號與遺漏</h2>
+          <p class="fineprint">集中查看近期熱號、冷號與最久未開號碼，分析期數沿用上方設定。</p>
+        </article>
+        <article class="panel">
+          <div class="panel-head compact">
+            <p class="label">熱號</p>
+            <span id="drawCount">-</span>
+          </div>
+          <div class="rank-list" id="hotList"></div>
+        </article>
+        <article class="panel">
+          <p class="label">冷號</p>
+          <div class="rank-list" id="coldList"></div>
+        </article>
+        <article class="panel">
+          <p class="label">最久未開</p>
+          <div class="rank-list" id="overdueList"></div>
+        </article>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="model-pattern">
+        <article class="panel pattern-panel" data-tier="pro" data-lock-title="Pro 版路分析" data-lock-text="訂閱後可查看區間、尾數、拖牌與連莊推理。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">模型版路</p>
+              <h2 id="patternModel">-</h2>
+            </div>
+            <span id="patternRepeat" class="count-pill">-</span>
+          </div>
+          <div class="pattern-grid" id="patternGrid"></div>
+          <div class="pattern-lines" id="patternLines"></div>
+        </article>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="backtest">
+        <article class="panel backtest-panel" data-tier="pro" data-lock-title="Pro 模型回測" data-lock-text="訂閱後可查看近期命中表現與模型排名。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">模型回測</p>
+              <h2>最近表現</h2>
+            </div>
+            <span id="backtestBadge" class="count-pill">-</span>
+          </div>
+          <div class="metric-grid">
+            <div>
+              <strong id="avgHit">-</strong>
+              <span>平均命中</span>
+            </div>
+            <div>
+              <strong id="threePlusRate">-</strong>
+              <span>摸邊率</span>
+            </div>
+            <div>
+              <strong id="bestHit">-</strong>
+              <span>最高命中</span>
+            </div>
+          </div>
+          <div class="backtest-recent" id="backtestRecent"></div>
+          <p class="fineprint" id="backtestMethod"></p>
         </article>
         </div>
 
@@ -343,6 +364,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=41"></script>
+    <script src="/app.js?v=42"></script>
   </body>
 </html>

@@ -176,7 +176,7 @@ select {
 .page-tabs {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
   padding: 8px;
   border: 1px solid var(--line);
@@ -212,6 +212,12 @@ select {
 
 .tab-panel[data-tab-panel="history"] .wide,
 .tab-panel[data-tab-panel="subscription"] .subscription-panel {
+  grid-column: 1 / -1;
+}
+
+.tab-panel[data-tab-panel="stats"] .stats-intro,
+.tab-panel[data-tab-panel="model-pattern"] .pattern-panel,
+.tab-panel[data-tab-panel="backtest"] .backtest-panel {
   grid-column: 1 / -1;
 }
 
@@ -655,7 +661,19 @@ body[data-plan="free"] .pro-required {
 }
 
 .model-panel {
-  grid-column: span 1;
+  grid-column: 1 / -1;
+}
+
+.model-page-link {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.model-page-link .text-button {
+  flex: 0 0 auto;
 }
 
 .text-button {
@@ -1759,13 +1777,19 @@ th {
   .wide,
   .subscription-panel,
   .saved-panel,
-  .model-panel,
-  .backtest-panel,
+    .model-panel,
+    .model-page-link,
+    .backtest-panel,
   .pattern-panel,
   .candidate-panel {
     display: grid;
     grid-template-columns: 1fr;
     grid-column: span 1;
+  }
+
+  .model-page-link {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .tab-panel:not(.active) {

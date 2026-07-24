@@ -1193,9 +1193,8 @@ function renderCandidates() {
   }
   els.candidates.innerHTML = candidates
     .map(
-      (candidate, index) => `
+      (candidate) => `
         <div class="candidate-item">
-          <div class="candidate-rank">#${index + 1}</div>
           <div>
             <div class="saved-balls">${miniBalls(candidate.numbers)}</div>
             <div class="candidate-meta">
@@ -1317,7 +1316,7 @@ function renderModelBacktest(backtest, profiles = []) {
       (profile, index) => `
         <div class="model-rank ${index === 0 ? "best" : ""}">
           <div>
-            <strong>${index + 1}. ${profile.label}</strong>
+            <strong>${profile.label}</strong>
             <span>均中 ${profile.averageHit} · 摸邊 ${profile.onePlusRate ?? 0}% · 2中+ ${profile.twoPlusRate ?? 0}%</span>
           </div>
           <em>${profile.bestHit} 中</em>
