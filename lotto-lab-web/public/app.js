@@ -316,7 +316,8 @@ function startCountdown() {
 }
 
 function statsMatrixRows(items) {
-  const rows = Array.from({ length: 39 }, (_, index) => items.find((item) => item.number === index + 1) || {
+  const sourceRows = Array.isArray(items) ? items : [];
+  const rows = Array.from({ length: 39 }, (_, index) => sourceRows.find((item) => item.number === index + 1) || {
     number: index + 1,
     count: 0,
     gap: 0,
@@ -1648,7 +1649,7 @@ function render(payload, companionPayload = null) {
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles);
-  els.statsMatrix.innerHTML = statsMatrixRows(analysis.frequency);
+  if (els.statsMatrix) els.statsMatrix.innerHTML = statsMatrixRows(analysis.frequency);
   renderHistory();
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderSavedPicks();

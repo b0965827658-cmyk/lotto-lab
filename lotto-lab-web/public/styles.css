@@ -1588,6 +1588,19 @@ body[data-plan="free"] .pro-required {
   gap: 10px;
 }
 
+.stats-loading {
+  grid-column: 1 / -1;
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: 900;
+  text-align: center;
+}
+
 .stats-cell {
   display: flex;
   align-items: center;
