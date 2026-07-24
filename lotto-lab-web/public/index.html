@@ -131,11 +131,17 @@
             </div>
             <button id="resetModelBtn" class="text-button">重設</button>
           </div>
+          <div class="model-period-controls">
           <label class="select-wrap model-period-control">
             分析資料期數
             <select id="limitSelect">
+              <option value="7">近 7 期</option>
               <option value="10">近 10 期</option>
+              <option value="14">近 14 期</option>
               <option value="20">近 20 期</option>
+              <option value="21">近 21 期</option>
+              <option value="28">近 28 期</option>
+              <option value="35">近 35 期</option>
               <option value="36">近 36 期</option>
               <option value="60">60 期</option>
               <option value="90" selected>90 期</option>
@@ -144,6 +150,14 @@
               <option value="365">365 期</option>
             </select>
           </label>
+          <label class="select-wrap model-custom-period">
+            自訂 1～365 期
+            <input id="limitCustom" type="number" min="1" max="365" value="90" inputmode="numeric" />
+          </label>
+          <button id="applyLimitBtn" class="text-button" type="button">套用期數</button>
+          <button id="autoWindowBtn" class="text-button highlight-button" type="button">自動找最佳期數</button>
+          </div>
+          <div class="best-window-box" id="bestWindowBox" hidden></div>
           <div class="model-controls" id="modelControls">
             <div class="focus-controls" id="focusControls" aria-label="分析重點">
               <button type="button" class="focus-chip active" data-focus="balanced">綜合</button>
@@ -365,6 +379,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=53"></script>
+    <script src="/app.js?v=54"></script>
   </body>
 </html>

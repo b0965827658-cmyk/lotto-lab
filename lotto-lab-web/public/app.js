@@ -1,6 +1,8 @@
 const state = {
   game: "tw539",
   limit: 90,
+  bestWindow: null,
+  bestWindowLoading: false,
   plan: "free",
   subscription: null,
   analysisFocus: "balanced",
@@ -49,6 +51,8 @@ const FETCH_TIMEOUT_MS = 18000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MAX_CANDIDATE_CACHE_SIZE = 120;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
+const MIN_ANALYSIS_LIMIT = 1;
+const MAX_ANALYSIS_LIMIT = 365;
 
 const FOCUS_PRESETS = {
   balanced: {
@@ -139,6 +143,10 @@ const els = {
   modelInputs: Array.from(document.querySelectorAll("[data-weight]")),
   focusButtons: Array.from(document.querySelectorAll("[data-focus]")),
   modelSummary: $("#modelSummary"),
+  limitCustom: $("#limitCustom"),
+  applyLimit: $("#applyLimitBtn"),
+  autoWindow: $("#autoWindowBtn"),
+  bestWindow: $("#bestWindowBox"),
   resetModel: $("#resetModelBtn"),
   historyKeyword: $("#historyKeyword"),
   historyNumber: $("#historyNumber"),
@@ -634,6 +642,95 @@ function renderModelControls() {
   const weights = normalizedWeights();
   const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
   els.modelSummary.textContent = `${focus.label}：${focus.description} 權重為熱度 ${Math.round(weights.heat * 100)}%、遺漏 ${Math.round(weights.overdue * 100)}%、分散 ${Math.round(weights.spread * 100)}%、回測 ${Math.round(weights.backtest * 100)}%。`;
+}
+
+function normalizedAnalysisLimit(value) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < MIN_ANALYSIS_LIMIT || number > MAX_ANALYSIS_LIMIT) return null;
+  return number;
+}
+
+function clearBestWindow() {
+  state.bestWindow = null;
+  if (els.bestWindow) {
+    els.bestWindow.hidden = true;
+    els.bestWindow.innerHTML = "";
+  }
+}
+
+function syncAnalysisLimitControls() {
+  if (els.limitCustom) els.limitCustom.value = String(state.limit);
+  if (els.limit) els.limit.value = String(state.limit);
+}
+
+function applyAnalysisLimit(value) {
+  const limit = normalizedAnalysisLimit(value);
+  if (!limit) {
+    setStatus("期數請輸入 1 到 365。", true);
+    return false;
+  }
+  if (!isProPlan() && limit > 90) {
+    setStatus("目前最多分析 90 期；Pro 可使用 91～365 期。", true);
+    return false;
+  }
+  state.limit = limit;
+  syncAnalysisLimitControls();
+  clearBestWindow();
+  state.candidateCache.clear();
+  state.backtestCache.clear();
+  load();
+  return true;
+}
+
+function renderBestWindow(best) {
+  if (!els.bestWindow) return;
+  if (!best?.limit || !Array.isArray(best.recommendation) || best.recommendation.length !== 5) {
+    clearBestWindow();
+    return;
+  }
+  const backtest = best.backtest || {};
+  const roles = (best.recommendationRoles || []).slice(0, 2).map((item) => pad(item.number)).join("、");
+  els.bestWindow.hidden = false;
+  els.bestWindow.innerHTML = `
+    <div class="best-window-head">
+      <div>
+        <span class="label">自動挑選結果</span>
+        <strong>近 ${best.limit} 期表現最高</strong>
+      </div>
+      <span class="best-window-score">${best.quality} 分</span>
+    </div>
+    <div class="balls accent best-window-balls">${balls(best.recommendation)}</div>
+    <div class="best-window-meta">
+      <span>平均 ${backtest.averageHit ?? "-"} 中</span>
+      <span>2 中以上 ${backtest.twoPlusRate ?? 0}%</span>
+      <span>最高 ${backtest.bestHit ?? "-"} 中</span>
+      ${roles ? `<span>主／副 ${roles}</span>` : ""}
+    </div>
+    <p>這是歷史回測表現最高的參考窗口，不代表下一期必然中獎。</p>
+    <button class="text-button" type="button" data-apply-best-window>套用近 ${best.limit} 期</button>
+  `;
+  const applyButton = els.bestWindow.querySelector("[data-apply-best-window]");
+  if (applyButton) applyButton.addEventListener("click", () => applyAnalysisLimit(best.limit));
+}
+
+async function findBestAnalysisWindow() {
+  if (!requirePro("自動挑選最佳期數")) return;
+  if (state.bestWindowLoading) return;
+  state.bestWindowLoading = true;
+  if (els.autoWindow) els.autoWindow.disabled = true;
+  setStatus("正在比較 36～365 期的有效歷史表現，請稍候...");
+  try {
+    const payload = await fetchJsonWithTimeout(`/api/lottery?game=${state.game}&limit=365&optimize=1&t=${Date.now()}`);
+    if (!payload.ok || !payload.bestWindow) throw new Error(payload.error || "最佳期數分析失敗");
+    state.bestWindow = payload.bestWindow;
+    renderBestWindow(state.bestWindow);
+    setStatus(`已找到近 ${state.bestWindow.limit} 期的最高分參考組合。`);
+  } catch (error) {
+    setStatus(error.name === "AbortError" ? "最佳期數分析逾時，請稍後再試。" : error.message, true);
+  } finally {
+    state.bestWindowLoading = false;
+    if (els.autoWindow) els.autoWindow.disabled = false;
+  }
 }
 
 function gameLabel(game) {
@@ -2033,7 +2130,7 @@ async function load(options = {}) {
   state.loading = true;
   if (!isProPlan() && state.limit > 90) {
     state.limit = 90;
-    els.limit.value = "90";
+    syncAnalysisLimitControls();
   }
   const cacheKey = `${state.game}-${state.limit}`;
   const companionGame = companionGameFor(state.game);
@@ -2146,6 +2243,7 @@ document.querySelectorAll(".segment").forEach((button) => {
     document.querySelectorAll(".segment").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
     state.game = button.dataset.game;
+    clearBestWindow();
     renderCountdown();
     load();
   });
@@ -2155,18 +2253,16 @@ els.tabButtons.forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tab));
 });
 
-els.limit.addEventListener("change", () => {
-  if (!isProPlan() && Number(els.limit.value) > 90) {
-    els.limit.value = "90";
-    state.limit = 90;
-    setStatus("目前最多分析 90 期；Pro 可使用 120、180、365 期。", true);
-    return;
-  }
-  state.limit = Number(els.limit.value);
-  state.candidateCache.clear();
-  state.backtestCache.clear();
-  load();
-});
+els.limit.addEventListener("change", () => applyAnalysisLimit(els.limit.value));
+if (els.applyLimit) {
+  els.applyLimit.addEventListener("click", () => applyAnalysisLimit(els.limitCustom?.value));
+}
+if (els.limitCustom) {
+  els.limitCustom.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") applyAnalysisLimit(els.limitCustom.value);
+  });
+}
+if (els.autoWindow) els.autoWindow.addEventListener("click", findBestAnalysisWindow);
 
 els.refresh.addEventListener("click", load);
 els.crossYearSearch.addEventListener("click", runCrossYearSearch);
@@ -2293,6 +2389,7 @@ state.plan = loadPlanPreview();
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 initHistoryYears();
+syncAnalysisLimitControls();
 renderModelControls();
 renderSavedNumberPicker();
 applyPlanAccess();

@@ -764,6 +764,112 @@ body[data-plan="free"] .pro-required {
   margin-top: 14px;
 }
 
+.model-period-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.model-period-controls .model-period-control,
+.model-period-controls .model-custom-period {
+  margin-top: 0;
+}
+
+.model-custom-period {
+  width: 150px;
+}
+
+.model-custom-period input {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 10px;
+  font: inherit;
+  font-weight: 900;
+}
+
+.highlight-button {
+  border-color: rgba(214, 152, 34, 0.7);
+  background: #fff9ec;
+  color: #9b6900;
+}
+
+.best-window-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid rgba(214, 152, 34, 0.45);
+  border-radius: 8px;
+  background: #fff9ec;
+  padding: 14px;
+}
+
+.best-window-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.best-window-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.best-window-head .label {
+  color: #9b6900;
+}
+
+.best-window-head strong {
+  color: #5c4312;
+  font-size: 18px;
+}
+
+.best-window-score {
+  color: #9b6900;
+  font-size: 18px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.best-window-balls {
+  justify-content: flex-start;
+  margin-top: 0;
+}
+
+.best-window-balls .ball {
+  background: #d69822;
+}
+
+.best-window-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.best-window-meta span {
+  border: 1px solid rgba(155, 105, 0, 0.25);
+  border-radius: 999px;
+  color: #72500b;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.best-window-box p {
+  margin: 0;
+  color: #765f2f;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
 .model-page-link {
   grid-column: 1 / -1;
   display: flex;
@@ -2208,6 +2314,27 @@ th {
 
   .model-period-control {
     width: 100%;
+  }
+
+  .model-period-controls {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .model-period-controls .model-period-control,
+  .model-period-controls .model-custom-period,
+  .model-period-controls .text-button {
+    width: 100%;
+  }
+
+  .model-period-controls .model-period-control {
+    grid-column: 1 / -1;
+  }
+
+  .best-window-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .stats-meta {

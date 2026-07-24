@@ -54,6 +54,7 @@ CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "30"))
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 BACKTEST_SAMPLE_LIMIT = 24
+AUTO_WINDOW_CANDIDATES = (36, 60, 90, 120, 180, 240, 300, 365)
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 API_RATE_LIMITS = {
@@ -1269,6 +1270,75 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
     }
 
 
+def choose_best_analysis_window(
+    history: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> dict[str, Any] | None:
+    ordered = list(history)
+    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    candidates = [window for window in AUTO_WINDOW_CANDIDATES if window <= len(ordered)]
+    rows = []
+    seed_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for window in candidates:
+        window_draws = ordered[:window]
+        pick = model_recommendation(
+            window_draws,
+            max_number=max_number,
+            pick_count=pick_count,
+            seed_label=seed_label,
+            profile_name="balanced",
+        )
+        backtest = rolling_backtest(window_draws, max_number=max_number, pick_count=pick_count, profile_name="balanced")
+        if backtest.get("testedCount", 0) < 5:
+            continue
+        scores = recommendation_number_scores(
+            window_draws,
+            max_number=max_number,
+            seed_label=seed_label,
+            profile_name="balanced",
+        )
+        roles = [
+            {"number": number, "rank": rank, "score": round(scores.get(number, 0), 4)}
+            for rank, number in enumerate(sorted(pick, key=lambda number: (-scores.get(number, 0), number)), start=1)
+        ]
+        quality = round(
+            backtest.get("averageHit", 0) * 100
+            + backtest.get("twoPlusRate", 0) * 1.25
+            + backtest.get("threePlusRate", 0) * 2.5
+            + backtest.get("bestHit", 0) * 12
+            + backtest.get("distribution", {}).get("2", 0) * 0.5,
+            2,
+        )
+        rows.append(
+            {
+                "limit": window,
+                "quality": quality,
+                "recommendation": pick,
+                "recommendationRoles": roles,
+                "backtest": backtest,
+                "modelLabel": MODEL_PROFILES["balanced"]["label"],
+            }
+        )
+    if not rows:
+        return None
+    best = max(
+        rows,
+        key=lambda row: (
+            row["quality"],
+            row["backtest"].get("averageHit", 0),
+            row["backtest"].get("twoPlusRate", 0),
+            row["backtest"].get("bestHit", 0),
+            -row["limit"],
+        ),
+    )
+    return {
+        **best,
+        "comparedWindows": [row["limit"] for row in rows],
+        "method": "比較有足夠歷史樣本的多個分析窗口，依平均命中、2 中以上比例與最高命中綜合排序。",
+    }
+
+
 def analyze_with_stable_backtest(
     draws: list[dict[str, Any]],
     backtest_draws: list[dict[str, Any]],
@@ -1300,7 +1370,7 @@ def analyze_with_stable_backtest(
     return analysis
 
 
-def build_payload(game: str, limit: int) -> dict[str, Any]:
+def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, Any]:
     if game == "tw539":
         latest = taiwan_latest()
         fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
@@ -1310,7 +1380,10 @@ def build_payload(game: str, limit: int) -> dict[str, Any]:
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
         analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
-        return {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
+        payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
+        if optimize:
+            payload["bestWindow"] = choose_best_analysis_window(history)
+        return payload
     if game == "ca-fantasy5":
         fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
         history = california_history(fetch_limit)
@@ -1319,7 +1392,10 @@ def build_payload(game: str, limit: int) -> dict[str, Any]:
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
         analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
-        return {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
+        payload = {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
+        if optimize:
+            payload["bestWindow"] = choose_best_analysis_window(history)
+        return payload
     raise ValueError("unknown game")
 
 
@@ -1422,8 +1498,9 @@ class Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
-                limit = clamp_int(params.get("limit", ["180"])[0], 180, 10, 365)
-                payload = build_payload(game, limit)
+                limit = clamp_int(params.get("limit", ["180"])[0], 180, 1, 365)
+                optimize = params.get("optimize", ["0"])[0].strip().lower() in {"1", "true", "yes"}
+                payload = build_payload(game, limit, optimize=optimize)
                 self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
             except ValueError as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
