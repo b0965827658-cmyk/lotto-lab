@@ -1615,15 +1615,22 @@ body[data-plan="free"] .pro-required {
 }
 
 .stats-cell--overdue {
+  --stats-accent: #078b55;
   background: #effaf3;
 }
 
 .stats-cell--hot {
+  --stats-accent: #c72d43;
   background: #fff3f4;
 }
 
 .stats-cell--cold {
+  --stats-accent: #b57900;
   background: #fff9e9;
+}
+
+.stats-cell--normal {
+  --stats-accent: #697773;
 }
 
 .stats-cell-number {
@@ -1633,7 +1640,7 @@ body[data-plan="free"] .pro-required {
   width: 42px;
   height: 42px;
   border-radius: 50%;
-  background: currentColor;
+  background: var(--stats-accent);
   color: #fff;
   font-size: 16px;
   font-weight: 900;
