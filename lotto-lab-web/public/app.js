@@ -120,6 +120,7 @@ const els = {
   countdownDrawAt: $("#countdownDrawAt"),
   countdownHint: $("#countdownHint"),
   pickBalls: $("#pickBalls"),
+  keyNumbers: $("#keyNumbers"),
   pickMeta: $("#pickMeta"),
   note: $("#analysisNote"),
   statsMatrix: $("#statsMatrix"),
@@ -1181,10 +1182,35 @@ function currentReferenceNumbers() {
   return referenceCandidate()?.numbers || [];
 }
 
+function keyNumberMarkup(numbers) {
+  const roles = (state.analysis?.recommendationRoles || [])
+    .filter((item) => numbers.includes(Number(item.number)))
+    .sort((a, b) => (a.rank || 99) - (b.rank || 99) || Number(a.number) - Number(b.number));
+  const fallback = numbers.map((number, index) => ({ number, rank: index + 1 }));
+  const [primary, secondary] = (roles.length >= 2 ? roles : fallback).slice(0, 2);
+  if (!primary || !secondary) return "";
+  return `
+    <div class="key-number-row">
+      <div class="key-number key-number--primary">
+        <span>主要號碼</span>
+        <strong>${pad(primary.number)}</strong>
+        <small>模型第 1 順位</small>
+      </div>
+      <div class="key-number-key">本組 5 碼中的重點</div>
+      <div class="key-number key-number--secondary">
+        <span>副號碼</span>
+        <strong>${pad(secondary.number)}</strong>
+        <small>模型第 2 順位</small>
+      </div>
+    </div>
+  `;
+}
+
 function renderReferencePick() {
   const candidate = referenceCandidate();
   if (!candidate) {
     els.pickBalls.innerHTML = "";
+    if (els.keyNumbers) els.keyNumbers.innerHTML = "";
     els.pickMeta.innerHTML = "";
     return;
   }
@@ -1192,6 +1218,7 @@ function renderReferencePick() {
   const tailProfile = hotTailProfile();
   const shortCycle = shortCycleProfile();
   els.pickBalls.innerHTML = balls(candidate.numbers);
+  if (els.keyNumbers) els.keyNumbers.innerHTML = keyNumberMarkup(candidate.numbers);
   els.pickMeta.innerHTML = `
     <span>綜合推理</span>
     <span>模型最高分 5 碼</span>
@@ -1351,6 +1378,7 @@ function renderModeSnapshots() {
         <span class="logic-score">${score.total} 分</span>
       </div>
       <div class="balls accent logic-summary-balls">${balls(numbers)}</div>
+      ${keyNumberMarkup(numbers)}
       <div class="logic-summary-meta">
         <span>熱度、遺漏、區間、尾數、回測</span>
         <span>近期尾數：${tails}</span>
@@ -1632,6 +1660,7 @@ function renderPatterns(patterns) {
     <div class="logic-pick-hero">
       <span>目前唯一推薦組合</span>
       <div class="balls accent logic-pick-balls">${balls(numbers)}</div>
+      ${keyNumberMarkup(numbers)}
       <em>依目前資料綜合計分排序，不代表實際機率或保證中獎。</em>
     </div>
   `;

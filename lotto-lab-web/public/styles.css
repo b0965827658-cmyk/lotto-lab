@@ -657,6 +657,87 @@ body[data-plan="free"] .pro-required {
   font-weight: 900;
 }
 
+.key-number-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.key-number {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-height: 72px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 8px;
+  text-align: center;
+}
+
+.key-number > span,
+.key-number > small {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.key-number > strong {
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.key-number--primary {
+  border-color: rgba(246, 217, 138, 0.78);
+  background: rgba(214, 152, 34, 0.18);
+}
+
+.key-number--primary > strong {
+  color: #f6d98a;
+}
+
+.key-number-key {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.logic-summary .key-number-row,
+.logic-pick-hero .key-number-row {
+  width: min(100%, 420px);
+}
+
+.logic-pick-hero .key-number {
+  border-color: var(--line);
+  background: #fff;
+}
+
+.logic-pick-hero .key-number > span,
+.logic-pick-hero .key-number > small {
+  color: var(--muted);
+}
+
+.logic-pick-hero .key-number > strong {
+  color: var(--green);
+}
+
+.logic-pick-hero .key-number--primary {
+  border-color: rgba(214, 152, 34, 0.6);
+  background: #fff9ec;
+}
+
+.logic-pick-hero .key-number--primary > strong {
+  color: #b57900;
+}
+
+.logic-pick-hero .key-number-key {
+  color: var(--muted);
+}
+
 .saved-panel {
   grid-column: span 1;
 }

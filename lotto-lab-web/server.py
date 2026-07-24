@@ -958,6 +958,38 @@ def score_number(n: int, profile: dict[str, Any], model: dict[str, Any]) -> floa
     return sum(features[key] * weights.get(key, 0) for key in features)
 
 
+def recommendation_number_scores(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    seed_label: str = "",
+    profile_name: str = "balanced",
+) -> dict[int, float]:
+    if profile_name == "classic":
+        stats = number_stats(draws, max_number)
+        frequency = stats["frequency"]
+        recent_frequency = stats["recentFrequency"]
+        gaps = stats["gaps"]
+        max_freq = max(frequency.values()) or 1
+        max_recent = max(recent_frequency.values()) or 1
+        max_gap = max(gaps.values()) or 1
+        return {
+            n: (
+                (frequency[n] / max_freq) * 0.45
+                + (recent_frequency[n] / max_recent) * 0.18
+                + (gaps[n] / max_gap) * 0.27
+                + random.Random(f"{seed_label}:{n}").random() * 0.10
+            )
+            for n in range(1, max_number + 1)
+        }
+
+    model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
+    profile = pattern_profile(draws, max_number)
+    return {
+        n: score_number(n, profile, model) + random.Random(f"{seed_label}:{profile_name}:{n}").random() * 0.035
+        for n in range(1, max_number + 1)
+    }
+
+
 def model_recommendation(
     draws: list[dict[str, Any]],
     max_number: int = 39,
@@ -969,9 +1001,12 @@ def model_recommendation(
         return classic_recommendation(draws, max_number=max_number, pick_count=pick_count, seed_label=seed_label)
     model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
     profile = pattern_profile(draws, max_number)
-    number_scores = {}
-    for n in range(1, max_number + 1):
-        number_scores[n] = score_number(n, profile, model) + random.Random(f"{seed_label}:{profile_name}:{n}").random() * 0.035
+    number_scores = recommendation_number_scores(
+        draws,
+        max_number=max_number,
+        seed_label=seed_label,
+        profile_name=profile_name,
+    )
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(24, max_number)]
     rng = random.Random(f"lotto-lab:{profile_name}:{seed_label}:{','.join(map(str, pool))}")
@@ -992,19 +1027,12 @@ def model_recommendation(
 
 
 def classic_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5, seed_label: str = "") -> list[int]:
-    stats = number_stats(draws, max_number)
-    frequency = stats["frequency"]
-    recent_frequency = stats["recentFrequency"]
-    gaps = stats["gaps"]
-    max_freq = max(frequency.values()) or 1
-    max_recent = max(recent_frequency.values()) or 1
-    max_gap = max(gaps.values()) or 1
-    number_scores = {}
-    for n in range(1, max_number + 1):
-        heat = frequency[n] / max_freq
-        recent = recent_frequency[n] / max_recent
-        overdue = gaps[n] / max_gap
-        number_scores[n] = heat * 0.45 + recent * 0.18 + overdue * 0.27 + random.Random(f"{seed_label}:{n}").random() * 0.10
+    number_scores = recommendation_number_scores(
+        draws,
+        max_number=max_number,
+        seed_label=seed_label,
+        profile_name="classic",
+    )
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(22, max_number)]
     rng = random.Random(f"lotto-lab:{seed_label}:{','.join(map(str, pool))}")
@@ -1211,6 +1239,19 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
         seed_label=seed_label,
         profile_name=selected_profile,
     )
+    recommendation_scores = recommendation_number_scores(
+        draws,
+        max_number=max_number,
+        seed_label=seed_label,
+        profile_name=selected_profile,
+    )
+    recommendation_roles = [
+        {"number": number, "rank": rank, "score": round(recommendation_scores.get(number, 0), 4)}
+        for rank, number in enumerate(
+            sorted(recommendation, key=lambda number: (-recommendation_scores.get(number, 0), number)),
+            start=1,
+        )
+    ]
     patterns = pattern_summary(draws, max_number, selected_profile)
 
     return {
@@ -1220,6 +1261,7 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
         "overdue": [{"number": n, "gap": gaps[n]} for n in overdue],
         "frequency": [{"number": n, "count": frequency[n], "gap": gaps[n]} for n in frequency],
         "recommendation": recommendation,
+        "recommendationRoles": recommendation_roles,
         "backtest": backtest,
         "modelProfiles": model_results,
         "patterns": patterns,
