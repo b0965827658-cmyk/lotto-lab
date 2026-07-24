@@ -1297,6 +1297,7 @@ function scheduleModelRender(message = "模型設定已更新。") {
 }
 
 function renderModelBacktest(backtest, profiles = []) {
+  if (!els.backtestBadge || !els.backtestRecent || !els.backtestMethod) return;
   if (!backtest || !backtest.testedCount) {
     els.backtestBadge.textContent = "資料不足";
     els.avgHit.textContent = "-";
@@ -1306,11 +1307,20 @@ function renderModelBacktest(backtest, profiles = []) {
     els.backtestMethod.textContent = "";
     return;
   }
+  const distribution = Object.fromEntries(
+    Array.from({ length: 6 }, (_, hits) => [hits, Number(backtest.distribution?.[hits] ?? backtest.distribution?.[String(hits)] ?? 0)]),
+  );
+  const recentRows = Array.isArray(backtest.recentRows) ? backtest.recentRows : [];
+  const modelProfiles = Array.isArray(profiles) ? profiles : [];
+  const averageHit = Number.isFinite(Number(backtest.averageHit)) ? backtest.averageHit : "-";
+  const onePlusRate = Number.isFinite(Number(backtest.onePlusRate)) ? backtest.onePlusRate : 0;
+  const twoPlusRate = Number.isFinite(Number(backtest.twoPlusRate)) ? backtest.twoPlusRate : 0;
+  const threePlusRate = Number.isFinite(Number(backtest.threePlusRate)) ? backtest.threePlusRate : 0;
   els.backtestBadge.textContent = `${backtest.testedCount} 期`;
-  els.avgHit.textContent = backtest.averageHit;
-  els.threePlusRate.textContent = `${backtest.onePlusRate ?? 0}%`;
+  els.avgHit.textContent = averageHit;
+  els.threePlusRate.textContent = `${onePlusRate}%`;
   els.bestHit.textContent = `${backtest.bestHit} 中`;
-  const ranking = profiles
+  const ranking = modelProfiles
     .slice(0, 5)
     .map(
       (profile, index) => `
@@ -1324,11 +1334,10 @@ function renderModelBacktest(backtest, profiles = []) {
       `,
     )
     .join("");
-  const distribution = backtest.distribution || {};
-  const twoPlusText = `${backtest.twoPlusRate ?? 0}%`;
-  const threePlusText = `${backtest.threePlusRate ?? 0}%`;
+  const twoPlusText = `${twoPlusRate}%`;
+  const threePlusText = `${threePlusRate}%`;
   const warning =
-    (backtest.threePlusRate ?? 0) === 0
+    threePlusRate === 0
       ? `<div class="backtest-warning">最近 ${backtest.testedCount} 期沒有 3 中以上，這時候先看摸邊率和 2 中以上，比只盯 3 中更準。</div>`
       : "";
   const validationRows = validationRowsForLatest();
@@ -1368,7 +1377,7 @@ function renderModelBacktest(backtest, profiles = []) {
     ${backtest.method}
     <span class="backtest-method-line">命中分布：0中 ${distribution[0] || 0}、1中 ${distribution[1] || 0}、2中 ${distribution[2] || 0}、3中以上 ${backtest.threePlusCount || 0}。2中以上 ${twoPlusText}，3中以上 ${threePlusText}。</span>
   `;
-  els.backtestRecent.innerHTML = backtest.recentRows
+  els.backtestRecent.innerHTML = recentRows
     .map(
       (row) => `
         <div class="backtest-card">

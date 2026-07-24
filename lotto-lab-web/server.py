@@ -53,6 +53,7 @@ USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "300"))
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
+BACKTEST_SAMPLE_LIMIT = 24
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 API_RATE_LIMITS = {
@@ -982,7 +983,7 @@ def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_cou
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     distribution = {str(n): 0 for n in range(pick_count + 1)}
     rows = []
-    sample_size = min(18, max(0, len(ordered) - 25))
+    sample_size = min(BACKTEST_SAMPLE_LIMIT, max(0, len(ordered) - 25))
     for index in range(sample_size):
         target = ordered[index]
         training = ordered[index + 1 : index + 91]
