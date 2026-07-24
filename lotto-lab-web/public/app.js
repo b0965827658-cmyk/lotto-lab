@@ -72,9 +72,9 @@ const FOCUS_PRESETS = {
     description: "偏久未開號，避免整組太集中。",
   },
   pattern: {
-    label: "版路",
+    label: "邏輯整合",
     weights: { heat: 18, overdue: 18, spread: 42, backtest: 22 },
-    description: "優先看區間、奇偶、大小與尾數分散。",
+    description: "把區間、尾數、拖牌與連莊訊號納入綜合計分。",
   },
   interval: {
     label: "區間",
@@ -831,7 +831,7 @@ function scoreDetails(score) {
     ["分散", score.spread],
     ["回測", score.backtest],
     ["區間", score.interval || 0],
-    ["版路", score.pattern || 0],
+    ["邏輯", score.pattern || 0],
   ]
     .map(
       ([label, value]) => `
@@ -1171,9 +1171,7 @@ function validationRowsForLatest() {
 }
 
 function referenceCandidate() {
-  const candidates = generateCandidates();
-  if (candidates.length) return candidates[0];
-  const numbers = state.analysis?.recommendation || [];
+  const numbers = [...(state.analysis?.recommendation || [])];
   if (numbers.length !== 5) return null;
   const backtest = backtestPick(numbers);
   return { numbers, backtest, score: scorePick(numbers, backtest) };
@@ -1195,12 +1193,13 @@ function renderReferencePick() {
   const shortCycle = shortCycleProfile();
   els.pickBalls.innerHTML = balls(candidate.numbers);
   els.pickMeta.innerHTML = `
-    <span>${focus.label}</span>
+    <span>綜合推理</span>
+    <span>模型最高分 5 碼</span>
     <span>${focus.description}</span>
     <span>熱尾 ${tailProfile.label}</span>
     ${state.game === "ca-fantasy5" ? `<span>${shortCycle.label}</span>` : ""}
     <span>分數 ${candidate.score.total}</span>
-    <span>版路 +${candidate.score.pattern || 0}</span>
+    <span>邏輯 +${candidate.score.pattern || 0}</span>
     <span>最高 ${candidate.backtest.bestHit} 中</span>
     <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
   `;
@@ -1248,7 +1247,7 @@ function renderCandidates() {
             <div class="saved-balls">${miniBalls(candidate.numbers)}</div>
             <div class="candidate-meta">
               <span>${candidate.score.total} · ${candidate.score.label}</span>
-              <span>版路 +${candidate.score.pattern || 0}</span>
+              <span>邏輯 +${candidate.score.pattern || 0}</span>
               <span>最高 ${candidate.backtest.bestHit} 中</span>
               <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
             </div>
@@ -1267,7 +1266,7 @@ function renderCandidates() {
   });
 }
 
-function renderModeSnapshots() {
+function renderModeSnapshotArchive() {
   if (!els.modeSnapshots) return;
   if (!isProPlan()) {
     els.modeSnapshots.innerHTML = `<div class="empty-state">各模式快照屬於 Pro 訂閱版；可先用「預覽 Pro」查看。</div>`;
@@ -1324,6 +1323,43 @@ function renderModeSnapshots() {
       scheduleModelRender(`已切換到 ${preset.label} 模式。`);
     });
   });
+}
+
+function renderModeSnapshots() {
+  if (!els.modeSnapshots) return;
+  if (!isProPlan()) {
+    els.modeSnapshots.innerHTML = `<div class="empty-state">綜合邏輯推理屬於 Pro 訂閱版；可先用「預覽 Pro」查看。</div>`;
+    return;
+  }
+  const numbers = [...(state.analysis?.recommendation || [])];
+  if (numbers.length !== 5) {
+    els.modeSnapshots.innerHTML = `<div class="empty-state">資料讀取後會顯示綜合推理 5 碼。</div>`;
+    return;
+  }
+  const backtest = backtestPick(numbers);
+  const score = scorePick(numbers, backtest);
+  const patterns = state.analysis?.patterns || {};
+  const tails = (patterns.tails || []).slice(0, 3).map((item) => `${item.tail}尾`).join("、") || "資料累積中";
+  const intervals = (patterns.intervals || []).slice(0, 2).map((item) => item.label).join("、") || "資料累積中";
+  els.modeSnapshots.innerHTML = `
+    <div class="logic-summary">
+      <div class="logic-summary-head">
+        <div>
+          <span class="mode-snapshot-kicker">單一綜合結果</span>
+          <strong>最高分參考 5 碼</strong>
+        </div>
+        <span class="logic-score">${score.total} 分</span>
+      </div>
+      <div class="balls accent logic-summary-balls">${balls(numbers)}</div>
+      <div class="logic-summary-meta">
+        <span>熱度、遺漏、區間、尾數、回測</span>
+        <span>近期尾數：${tails}</span>
+        <span>集中區間：${intervals}</span>
+        <span>回測最高 ${backtest.bestHit} 中</span>
+      </div>
+      <p class="logic-summary-note">這 5 碼是目前綜合模型分數最高的參考組合，不是實際機率，也不保證中獎。</p>
+    </div>
+  `;
 }
 
 function renderModelOutput() {
@@ -1453,7 +1489,7 @@ function renderModelBacktest(backtest, profiles = []) {
   rememberModelSnapshots();
 }
 
-function renderPatterns(patterns, profiles = []) {
+function renderPatternDetails(patterns, profiles = []) {
   if (!patterns) {
     els.patternModel.textContent = "-";
     els.patternRepeat.textContent = "-";
@@ -1572,6 +1608,49 @@ function renderPatterns(patterns, profiles = []) {
     <div class="pattern-wide">
       <span>模型比較</span>
       <strong class="pattern-line-main">${profileText || empty}</strong>
+    </div>
+  `;
+}
+
+function renderPatterns(patterns) {
+  if (!els.patternModel || !els.patternGrid || !els.patternLines) return;
+  const numbers = [...(state.analysis?.recommendation || [])];
+  if (numbers.length !== 5) {
+    els.patternModel.textContent = "綜合推理最高分 5 碼";
+    els.patternRepeat.textContent = "資料不足";
+    els.patternGrid.innerHTML = `<div class="empty-state">資料累積後會顯示綜合推理 5 碼。</div>`;
+    els.patternLines.innerHTML = "";
+    return;
+  }
+  const backtest = state.analysis?.backtest || {};
+  const profile = patterns?.selectedLabel || "綜合模型";
+  const tails = (patterns?.tails || []).slice(0, 3).map((item) => `${item.tail}尾 ${item.count}次`).join("、") || "資料累積中";
+  const intervals = (patterns?.intervals || []).slice(0, 2).map((item) => `${item.label} ${item.rate}%`).join("、") || "資料累積中";
+  els.patternModel.textContent = "綜合推理最高分 5 碼";
+  els.patternRepeat.textContent = `${profile} · 單一結果`;
+  els.patternGrid.innerHTML = `
+    <div class="logic-pick-hero">
+      <span>目前唯一推薦組合</span>
+      <div class="balls accent logic-pick-balls">${balls(numbers)}</div>
+      <em>依目前資料綜合計分排序，不代表實際機率或保證中獎。</em>
+    </div>
+  `;
+  els.patternLines.innerHTML = `
+    <div class="logic-reason-card">
+      <span>綜合推理依據</span>
+      <strong>熱度＋遺漏＋區間＋尾數＋回測</strong>
+    </div>
+    <div class="logic-reason-card">
+      <span>近期尾數參考</span>
+      <strong>${tails}</strong>
+    </div>
+    <div class="logic-reason-card">
+      <span>近期集中區間</span>
+      <strong>${intervals}</strong>
+    </div>
+    <div class="logic-reason-card">
+      <span>歷史回測參考</span>
+      <strong>近 ${backtest.testedCount || 0} 期 · 平均 ${backtest.averageHit ?? "-"} 中 · 最高 ${backtest.bestHit ?? "-"} 中</strong>
     </div>
   `;
 }

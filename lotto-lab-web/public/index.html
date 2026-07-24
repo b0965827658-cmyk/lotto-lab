@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=51" />
+    <link rel="stylesheet" href="/styles.css?v=52" />
   </head>
   <body>
     <main class="shell">
@@ -44,7 +44,7 @@
           <button class="page-tab" type="button" data-tab="history">歷史開獎</button>
           <button class="page-tab" type="button" data-tab="model">模型</button>
           <button class="page-tab" type="button" data-tab="stats">冷熱號</button>
-          <button class="page-tab" type="button" data-tab="model-pattern">模型版路</button>
+          <button class="page-tab" type="button" data-tab="model-pattern">邏輯推理</button>
           <button class="page-tab" type="button" data-tab="backtest">模型回測</button>
           <button class="page-tab" type="button" data-tab="subscription">升級訂閱</button>
         </nav>
@@ -151,7 +151,7 @@
               <button type="button" class="focus-chip" data-focus="hot">追熱</button>
               <button type="button" class="focus-chip" data-focus="overdue">追冷</button>
               <button type="button" class="focus-chip" data-focus="interval">區間</button>
-              <button type="button" class="focus-chip" data-focus="pattern">版路</button>
+              <button type="button" class="focus-chip" data-focus="pattern">邏輯整合</button>
               <button type="button" class="focus-chip" data-focus="backtest">回測</button>
             </div>
             <label class="range-row">
@@ -178,13 +178,13 @@
           <p class="fineprint" id="modelSummary">目前模型：熱度 30%、遺漏 25%、分散 25%、回測 20%。</p>
         </article>
 
-        <article class="panel model-page-link" data-tier="pro" data-lock-title="Pro 模型版路" data-lock-text="訂閱後可查看近期區間、尾數、拖牌與連莊推理。">
+        <article class="panel model-page-link" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看綜合模型最高分的 5 個號碼與推理摘要。">
           <div>
-            <p class="label">模型版路</p>
-            <h2>自動分析近期版路</h2>
-            <p class="fineprint">模型設定下方提供獨立版路頁，集中查看近期區間、尾數、拖牌與連莊。</p>
+            <p class="label">邏輯推理</p>
+            <h2>綜合推理最高分 5 碼</h2>
+            <p class="fineprint">把熱度、遺漏、區間、尾數、版路與回測整合成一組，避免多組模式造成誤解。</p>
           </div>
-          <button class="text-button" type="button" data-tab="model-pattern">查看版路</button>
+          <button class="text-button" type="button" data-tab="model-pattern">查看推理</button>
         </article>
 
         <section class="analysis-overview" aria-label="近期分析摘要">
@@ -211,15 +211,15 @@
         </article>
         </section>
 
-        <article class="panel mode-snapshot-panel" data-tier="pro" data-lock-title="Pro 模式版路" data-lock-text="訂閱後可查看每個模式各自產生的候選組合。">
+        <article class="panel mode-snapshot-panel" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看綜合模型最高分的 5 個號碼與推理摘要。">
           <div class="panel-head compact">
             <div>
-              <p class="label">模式版路</p>
-              <h2>各模式快照</h2>
+              <p class="label">邏輯推理</p>
+              <h2>綜合模型最高分 5 碼</h2>
             </div>
-            <span class="count-pill">含區間</span>
+            <span class="count-pill">單一結果</span>
           </div>
-          <p class="fineprint">每個模式各自產生一組，保留最高命中與 3 中以上次數；點卡片可切換到該模式。</p>
+          <p class="fineprint">以下只顯示一組綜合推理結果；分數是依目前資料排序的統計參考，不代表實際機率或保證中獎。</p>
           <div class="mode-snapshot-list" id="modeSnapshotList"></div>
         </article>
 
@@ -259,11 +259,11 @@
         </div>
 
         <div class="tab-panel" data-tab-panel="model-pattern">
-        <article class="panel pattern-panel" data-tier="pro" data-lock-title="Pro 版路分析" data-lock-text="訂閱後可查看區間、尾數、拖牌與連莊推理。">
+        <article class="panel pattern-panel logic-panel" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看綜合模型最高分的 5 個號碼與推理摘要。">
           <div class="panel-head compact">
             <div>
-              <p class="label">模型版路</p>
-              <h2 id="patternModel">-</h2>
+              <p class="label">邏輯推理</p>
+              <h2 id="patternModel">綜合推理最高分 5 碼</h2>
             </div>
             <span id="patternRepeat" class="count-pill">-</span>
           </div>
@@ -364,6 +364,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=51"></script>
+    <script src="/app.js?v=52"></script>
   </body>
 </html>

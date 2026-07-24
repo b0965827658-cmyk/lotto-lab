@@ -978,6 +978,81 @@ body[data-plan="free"] .pro-required {
   margin-top: 14px;
 }
 
+.logic-summary {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 8px;
+  background: #173f38;
+  color: #fff;
+}
+
+.logic-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.logic-summary-head > div {
+  display: grid;
+  gap: 7px;
+}
+
+.logic-summary .mode-snapshot-kicker {
+  justify-self: start;
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.logic-summary-head strong {
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.logic-score {
+  color: #f6d98a;
+  font-size: 18px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.logic-summary-balls {
+  margin: 4px 0 0;
+}
+
+.logic-summary-balls .ball {
+  width: 56px;
+  height: 56px;
+  font-size: 21px;
+}
+
+.logic-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.logic-summary-meta span {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.86);
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.logic-summary-note {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .mode-snapshot-card {
   display: grid;
   gap: 8px;
@@ -1201,6 +1276,44 @@ body[data-plan="free"] .pro-required {
 
 .pattern-lines .pattern-soft {
   background: #f4f8f5;
+}
+
+.logic-pick-hero {
+  grid-column: 1 / -1;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  border: 1px solid rgba(22, 106, 82, 0.25);
+  border-radius: 8px;
+  background: #edf7f1;
+  padding: 18px;
+  text-align: center;
+}
+
+.logic-pick-hero > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.logic-pick-hero .balls {
+  margin: 4px 0;
+}
+
+.logic-pick-hero em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.logic-reason-card {
+  display: grid;
+  gap: 6px;
+}
+
+.logic-reason-card strong {
+  color: var(--green) !important;
 }
 
 .backtest-recent {
@@ -2103,6 +2216,21 @@ th {
 
   .mode-snapshot-list {
     grid-template-columns: 1fr;
+  }
+
+  .logic-summary-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .logic-summary-balls {
+    gap: 7px;
+  }
+
+  .logic-summary-balls .ball {
+    width: 46px;
+    height: 46px;
+    font-size: 18px;
   }
 
   .candidate-rank {
