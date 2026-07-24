@@ -1,3 +1,6 @@
-data/*.sqlite3
-data/*.db
-data/*.sqlite
+__pycache__/
+*.pyc
+.DS_Store
+outputs/
+work/
+.env

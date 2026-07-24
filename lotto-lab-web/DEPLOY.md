@@ -25,14 +25,6 @@ http://127.0.0.1:8787/?v=10
 - `LOTTO_PUSH_CONTACT_EMAIL`: Contact email used in the push sender claim.
 - `LOTTO_NOTIFY_SECRET`: Secret required by `/api/notify-latest` before it broadcasts notifications.
 - `LOTTO_SUBSCRIPTIONS_FILE`: Optional path for saved push subscriptions. Defaults to `data/push_subscriptions.json`.
-- `DATABASE_URL`: Optional PostgreSQL connection URL. When present, the app stores draw history, notification subscriptions, saved picks, and notification state in PostgreSQL.
-- `LOTTO_SQLITE_PATH`: Optional local SQLite path. Defaults to `data/lotto.sqlite3` and is used automatically when `DATABASE_URL` is not set.
-
-## Persistent Storage
-
-The app now initializes its database automatically. On your Mac, it uses SQLite and keeps the database at `data/lotto.sqlite3`, so your personal history and saved settings remain after restarting the app. Existing JSON notification files are migrated into SQLite on first start.
-
-For a permanent hosted database, create or connect a PostgreSQL database in Render and add its internal connection URL to the web service as `DATABASE_URL`. The app will switch to PostgreSQL on the next deploy without changing the frontend. If no hosted database is connected, Render's default service filesystem should be treated as temporary, so local SQLite is the reliable self-use option until that connection is made.
 
 Generate VAPID keys locally after installing the requirements:
 
