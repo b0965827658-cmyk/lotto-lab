@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=37" />
+    <link rel="stylesheet" href="/styles.css?v=38" />
   </head>
   <body>
     <main class="shell">
@@ -96,6 +96,44 @@
           </article>
         </section>
 
+        <article class="panel saved-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">我的號碼</p>
+              <h2>自動對最新一期</h2>
+            </div>
+            <button id="usePickBtn" class="text-button">套用參考</button>
+          </div>
+          <form class="saved-form" id="savedForm">
+            <div class="saved-number-picker" id="savedNumberPicker" role="group" aria-label="自動對號 1 到 39"></div>
+            <div class="saved-picker-toolbar">
+              <span id="savedSelectionMeta" class="saved-selection-meta">已選 0 顆，請點選號碼球</span>
+              <button id="clearSavedNumbers" class="text-button" type="button" disabled>清除選擇</button>
+            </div>
+            <button class="save-button" type="submit">儲存這組號碼</button>
+          </form>
+          <p class="fineprint saved-notice">直接點選 1～39 號球，可選 1 顆到最多 39 顆；開獎後會自動對獎。</p>
+          <div class="saved-list" id="savedList"></div>
+        </article>
+
+        <article class="panel wide disclaimer-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">使用提醒</p>
+              <h2>免責聲明</h2>
+            </div>
+            <span class="count-pill">重要</span>
+          </div>
+          <div class="disclaimer-grid">
+            <p>本服務提供的選號、版路、回測與統計內容，僅供資料分析與娛樂參考，不保證中獎，也不構成投注、投資或財務建議。</p>
+            <p>開獎號碼與期別會盡量以官方資料及公開來源校對；若資料來源延遲、改版或異常，仍以台灣彩券與 California Lottery 官方公告為準。</p>
+            <p>使用者應自行判斷投注風險，理性投注，避免超出可負擔範圍。本服務不代售彩券，也不處理兌獎、投注或獎金相關事務。</p>
+          </div>
+        </article>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="model">
+        <section class="analysis-overview" aria-label="近期分析摘要">
         <article class="panel countdown-panel">
           <div class="panel-head compact">
             <div>
@@ -117,6 +155,7 @@
           <div class="pick-meta" id="pickMeta"></div>
           <p class="fineprint" id="analysisNote"></p>
         </article>
+        </section>
 
         <article class="panel backtest-panel" data-tier="pro" data-lock-title="Pro 模型回測" data-lock-text="訂閱後可查看近期命中表現與模型排名。">
           <div class="panel-head compact">
@@ -156,26 +195,6 @@
           <div class="pattern-lines" id="patternLines"></div>
         </article>
 
-        <article class="panel saved-panel">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">我的號碼</p>
-              <h2>自動對最新一期</h2>
-            </div>
-            <button id="usePickBtn" class="text-button">套用參考</button>
-          </div>
-          <form class="saved-form" id="savedForm">
-            <div class="saved-number-picker" id="savedNumberPicker" role="group" aria-label="自動對號 1 到 39"></div>
-            <div class="saved-picker-toolbar">
-              <span id="savedSelectionMeta" class="saved-selection-meta">已選 0 顆，請點選號碼球</span>
-              <button id="clearSavedNumbers" class="text-button" type="button" disabled>清除選擇</button>
-            </div>
-            <button class="save-button" type="submit">儲存這組號碼</button>
-          </form>
-          <p class="fineprint saved-notice">直接點選 1～39 號球，可選 1 顆到最多 39 顆；開獎後會自動對獎。</p>
-          <div class="saved-list" id="savedList"></div>
-        </article>
-
         <article class="panel">
           <div class="panel-head compact">
             <p class="label">熱號</p>
@@ -194,23 +213,6 @@
           <div class="rank-list" id="overdueList"></div>
         </article>
 
-        <article class="panel wide disclaimer-panel">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">使用提醒</p>
-              <h2>免責聲明</h2>
-            </div>
-            <span class="count-pill">重要</span>
-          </div>
-          <div class="disclaimer-grid">
-            <p>本服務提供的選號、版路、回測與統計內容，僅供資料分析與娛樂參考，不保證中獎，也不構成投注、投資或財務建議。</p>
-            <p>開獎號碼與期別會盡量以官方資料及公開來源校對；若資料來源延遲、改版或異常，仍以台灣彩券與 California Lottery 官方公告為準。</p>
-            <p>使用者應自行判斷投注風險，理性投注，避免超出可負擔範圍。本服務不代售彩券，也不處理兌獎、投注或獎金相關事務。</p>
-          </div>
-        </article>
-        </div>
-
-        <div class="tab-panel" data-tab-panel="model">
         <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 模型設定" data-lock-text="訂閱後可切換板路模式並調整權重。">
           <div class="panel-head compact">
             <div>
@@ -341,6 +343,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=37"></script>
+    <script src="/app.js?v=38"></script>
   </body>
 </html>
