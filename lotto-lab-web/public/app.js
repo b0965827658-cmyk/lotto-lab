@@ -565,7 +565,6 @@ function saveModelWeights() {
 
 function saveAnalysisFocus() {
   localStorage.setItem(FOCUS_STORAGE_KEY, state.analysisFocus);
-  state.candidateCache.clear();
 }
 
 function normalizedWeights() {
