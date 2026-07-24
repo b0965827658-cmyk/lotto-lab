@@ -6,6 +6,7 @@ const state = {
   analysisFocus: "balanced",
   latest: null,
   latestByGame: {},
+  savedSelection: [],
   analysis: null,
   history: [],
   displayHistory: [],
@@ -126,7 +127,9 @@ const els = {
   drawCount: $("#drawCount"),
   plans: $("#planGrid"),
   savedForm: $("#savedForm"),
-  savedInputs: Array.from(document.querySelectorAll(".number-input")),
+  savedPicker: $("#savedNumberPicker"),
+  savedSelectionMeta: $("#savedSelectionMeta"),
+  clearSavedNumbers: $("#clearSavedNumbers"),
   savedList: $("#savedList"),
   usePick: $("#usePickBtn"),
   generate: $("#generateBtn"),
@@ -595,22 +598,37 @@ function gameLabel(game) {
   return game === "ca-fantasy5" ? "加州天天樂" : "今彩 539";
 }
 
-function parseSavedInputs() {
-  const numbers = els.savedInputs.map((input) => Number(input.value));
-  if (numbers.some((n) => !Number.isInteger(n) || n < 1 || n > 39)) {
-    throw new Error("請輸入 1 到 39 的五個號碼。");
-  }
-  const unique = new Set(numbers);
-  if (unique.size !== 5) {
-    throw new Error("五個號碼不能重複。");
-  }
-  return [...unique].sort((a, b) => a - b);
+function parseSavedSelection() {
+  const numbers = [...new Set(state.savedSelection)]
+    .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39)
+    .sort((left, right) => left - right);
+  if (!numbers.length) throw new Error("請至少選擇 1 顆號碼球。");
+  return numbers;
 }
 
-function fillSavedInputs(numbers) {
-  els.savedInputs.forEach((input, index) => {
-    input.value = numbers[index] ?? "";
-  });
+function fillSavedSelection(numbers) {
+  state.savedSelection = [...new Set((numbers || []).map(Number))]
+    .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39)
+    .sort((left, right) => left - right)
+    .slice(0, 39);
+  renderSavedNumberPicker();
+}
+
+function renderSavedNumberPicker() {
+  if (!els.savedPicker) return;
+  const selected = new Set(state.savedSelection);
+  els.savedPicker.innerHTML = Array.from({ length: 39 }, (_, index) => index + 1)
+    .map((number) => {
+      const active = selected.has(number);
+      return `<button class="saved-number-ball${active ? " is-selected" : ""}" type="button" data-saved-number="${number}" aria-pressed="${active}" aria-label="${pad(number)}號">${pad(number)}</button>`;
+    })
+    .join("");
+  if (els.savedSelectionMeta) {
+    els.savedSelectionMeta.textContent = state.savedSelection.length
+      ? `已選 ${state.savedSelection.length} 顆：${state.savedSelection.map(pad).join("、")}`
+      : "已選 0 顆，請點選號碼球";
+  }
+  if (els.clearSavedNumbers) els.clearSavedNumbers.disabled = state.savedSelection.length === 0;
 }
 
 function matchCount(numbers, winners) {
@@ -1990,12 +2008,28 @@ els.crossYearSearch.addEventListener("click", runCrossYearSearch);
 els.savedForm.addEventListener("submit", (event) => {
   event.preventDefault();
   try {
-    const numbers = parseSavedInputs();
-    if (savePick(numbers)) fillSavedInputs([]);
+    const numbers = parseSavedSelection();
+    if (savePick(numbers)) fillSavedSelection([]);
   } catch (error) {
     setStatus(error.message, true);
   }
 });
+
+if (els.savedPicker) {
+  els.savedPicker.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-saved-number]");
+    if (!button) return;
+    const number = Number(button.dataset.savedNumber);
+    state.savedSelection = state.savedSelection.includes(number)
+      ? state.savedSelection.filter((item) => item !== number)
+      : [...state.savedSelection, number].sort((left, right) => left - right);
+    renderSavedNumberPicker();
+  });
+}
+
+if (els.clearSavedNumbers) {
+  els.clearSavedNumbers.addEventListener("click", () => fillSavedSelection([]));
+}
 
 els.usePick.addEventListener("click", () => {
   const numbers = currentReferenceNumbers();
@@ -2003,7 +2037,7 @@ els.usePick.addEventListener("click", () => {
     setStatus("目前還沒有可套用的參考選號。", true);
     return;
   }
-  fillSavedInputs(numbers);
+  fillSavedSelection(numbers);
   setStatus("已套用統計參考選號，確認後可儲存。");
 });
 
@@ -2094,6 +2128,7 @@ state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
 initHistoryYears();
 renderModelControls();
+renderSavedNumberPicker();
 applyPlanAccess();
 updateNotificationUi();
 startCountdown();
