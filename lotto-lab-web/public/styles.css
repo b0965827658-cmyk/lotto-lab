@@ -231,6 +231,13 @@ select {
   gap: 14px;
 }
 
+.analysis-overview {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .draw-card {
   position: relative;
   min-width: 0;
@@ -247,6 +254,7 @@ select {
 
 .draw-card::before,
 .draw-card::after {
+  display: none;
   position: absolute;
   pointer-events: none;
 }
@@ -336,15 +344,28 @@ select {
 }
 
 .draw-balls {
-  justify-content: flex-start;
+  justify-content: center;
+  width: 100%;
   margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 12px;
+  background: rgba(3, 23, 18, 0.42);
+  box-sizing: border-box;
+  gap: 14px;
 }
 
 .draw-card .ball {
+  display: grid;
+  place-items: center;
+  flex: 0 0 56px;
+  padding: 0;
   width: 56px;
   height: 56px;
   background: #e4a625;
   color: #17231c;
+  line-height: 1;
+  text-align: center;
   box-shadow:
     inset 0 -8px 14px rgba(78, 42, 0, 0.16),
     0 5px 0 rgba(255, 255, 255, 0.12);
@@ -1685,6 +1706,10 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .analysis-overview {
+    grid-template-columns: 1fr;
+  }
+
   .draw-card,
   .draw-card-content {
     min-height: 220px;
@@ -1813,9 +1838,15 @@ th {
   }
 
   .draw-card .ball {
+    flex-basis: 48px;
     width: 48px;
     height: 48px;
     font-size: 18px;
+  }
+
+  .draw-balls {
+    gap: 8px;
+    padding: 12px 10px;
   }
 
   .history-number-cell {
