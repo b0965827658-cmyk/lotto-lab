@@ -672,7 +672,7 @@ body[data-plan="free"] .pro-required {
 
 .saved-number-picker {
   display: grid;
-  grid-template-columns: repeat(13, minmax(0, 1fr));
+  grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: 7px;
 }
 
@@ -683,14 +683,18 @@ body[data-plan="free"] .pro-required {
   max-width: 42px;
   aspect-ratio: 1;
   justify-self: center;
+  padding: 0;
+  box-sizing: border-box;
   border: 2px solid #dbe4df;
   border-radius: 50%;
   background: #edf2ef;
   color: var(--green);
   cursor: pointer;
+  appearance: none;
   font-size: 14px;
   font-weight: 950;
   line-height: 1;
+  text-align: center;
   transition: transform 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease;
 }
 
