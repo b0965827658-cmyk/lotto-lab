@@ -341,7 +341,7 @@ function statsMatrixRows(items) {
       return `
         <div class="stats-cell stats-cell--${status}" title="${pad(item.number)}：${gapLabel}，${statusLabel}">
           <span class="stats-cell-number">${pad(item.number)}</span>
-          <span class="stats-cell-detail" aria-label="${gapLabel}"><strong>${item.gap}</strong><small>期</small></span>
+          <span class="stats-cell-detail"><strong>${gapLabel}</strong><small>${statusLabel}</small></span>
         </div>
       `;
     })
