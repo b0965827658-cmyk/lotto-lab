@@ -210,6 +210,30 @@ function historyBallMarkup(draw) {
     .join("");
 }
 
+function historyTailMarkup(draw) {
+  const counts = Array.from({ length: 10 }, () => 0);
+  (draw.numbers || []).forEach((number) => {
+    counts[number % 10] += 1;
+  });
+  return `
+    <div class="history-tail-summary">
+      <span class="history-tail-title">尾數 0～9 <small>本期出現顆數</small></span>
+      <div class="history-tails">
+        ${counts
+          .map(
+            (count, tail) => `
+              <span class="history-tail ${count ? "is-hit" : ""}" title="${tail} 尾：${count} 顆">
+                <strong>${tail}</strong>
+                <small>${count}</small>
+              </span>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
 function zonedParts(date, timeZone) {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -365,7 +389,10 @@ function historyRows(draws) {
             <span class="history-weekday">${weekdayLabel(draw.date)}</span>
           </td>
           <td><span class="history-period">${draw.period || "-"}</span></td>
-          <td class="history-number-cell"><div class="history-balls">${historyBallMarkup(draw)}</div></td>
+          <td class="history-number-cell">
+            <div class="history-balls">${historyBallMarkup(draw)}</div>
+            ${historyTailMarkup(draw)}
+          </td>
         </tr>
       `,
     )
