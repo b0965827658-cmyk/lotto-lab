@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=35" />
+    <link rel="stylesheet" href="/styles.css?v=36" />
   </head>
   <body>
     <main class="shell">
@@ -60,19 +60,41 @@
         </nav>
 
         <div class="tab-panel active" data-tab-panel="latest">
-        <article class="panel latest-panel">
-          <div class="panel-head">
-            <div>
-              <p class="label">最新一期</p>
-              <h2 id="gameName">-</h2>
+        <section class="latest-draws" aria-label="最新開獎雙彩種">
+          <article class="draw-card draw-card--tw539" data-watermark="539">
+            <div class="draw-card-content">
+              <div class="draw-card-head">
+                <div>
+                  <p class="draw-kicker">最新一期</p>
+                  <h2>今彩 539</h2>
+                </div>
+                <span class="draw-badge">台灣彩券</span>
+              </div>
+              <div class="meta draw-meta">
+                <span id="tw539Period">期別 -</span>
+                <span id="tw539Date">日期 -</span>
+              </div>
+              <div class="balls draw-balls" id="tw539Balls"></div>
             </div>
-          </div>
-          <div class="meta">
-            <span id="period">期別 -</span>
-            <span id="date">日期 -</span>
-          </div>
-          <div class="balls" id="latestBalls"></div>
-        </article>
+          </article>
+
+          <article class="draw-card draw-card--ca" data-watermark="FANTASY 5">
+            <div class="draw-card-content">
+              <div class="draw-card-head">
+                <div>
+                  <p class="draw-kicker">另一彩種最新一期</p>
+                  <h2>加州天天樂</h2>
+                </div>
+                <span class="draw-badge">California</span>
+              </div>
+              <div class="meta draw-meta">
+                <span id="caPeriod">期別 -</span>
+                <span id="caDate">日期 -</span>
+              </div>
+              <div class="balls draw-balls" id="caBalls"></div>
+            </div>
+          </article>
+        </section>
 
         <article class="panel countdown-panel">
           <div class="panel-head compact">
@@ -264,6 +286,12 @@
             </div>
             <span id="historyCount" class="count-pill">-</span>
           </div>
+          <div class="history-legend" aria-label="歷史號碼顏色說明">
+            <span><i class="legend-ball legend-ball--base"></i>一般開獎</span>
+            <span><i class="legend-ball legend-ball--repeat"></i>連莊</span>
+            <span><i class="legend-ball legend-ball--consecutive"></i>連號</span>
+            <span><i class="legend-ball legend-ball--both"></i>連莊＋連號</span>
+          </div>
           <div class="history-search">
             <label>
               起始年
@@ -289,9 +317,9 @@
             <table>
               <thead>
                 <tr>
-                  <th>日期</th>
+                  <th>開獎日期</th>
                   <th>期別</th>
-                  <th>號碼</th>
+                  <th>開獎號碼</th>
                 </tr>
               </thead>
               <tbody id="historyRows"></tbody>
@@ -312,6 +340,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=35"></script>
+    <script src="/app.js?v=36"></script>
   </body>
 </html>

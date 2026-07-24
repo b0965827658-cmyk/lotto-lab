@@ -5,6 +5,7 @@ const state = {
   subscription: null,
   analysisFocus: "balanced",
   latest: null,
+  latestByGame: {},
   analysis: null,
   history: [],
   displayHistory: [],
@@ -104,10 +105,12 @@ const els = {
   status: $("#status"),
   refresh: $("#refreshBtn"),
   limit: $("#limitSelect"),
-  gameName: $("#gameName"),
-  period: $("#period"),
-  date: $("#date"),
-  latestBalls: $("#latestBalls"),
+  tw539Period: $("#tw539Period"),
+  tw539Date: $("#tw539Date"),
+  tw539Balls: $("#tw539Balls"),
+  caPeriod: $("#caPeriod"),
+  caDate: $("#caDate"),
+  caBalls: $("#caBalls"),
   countdownTime: $("#countdownTime"),
   countdownBadge: $("#countdownBadge"),
   countdownGame: $("#countdownGame"),
@@ -168,10 +171,39 @@ function balls(numbers) {
   return numbers.map((n) => `<span class="ball">${pad(n)}</span>`).join("");
 }
 
-function miniBalls(numbers, winners = []) {
+function miniBalls(numbers, winners = [], extraClass = "") {
   const winnerSet = new Set(winners);
   return numbers
-    .map((n) => `<span class="mini-ball ${winnerSet.has(n) ? "hit" : ""}">${pad(n)}</span>`)
+    .map((n) => `<span class="mini-ball ${extraClass} ${winnerSet.has(n) ? "hit" : ""}">${pad(n)}</span>`)
+    .join("");
+}
+
+function weekdayLabel(date) {
+  if (!date) return "-";
+  const parsed = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return new Intl.DateTimeFormat("zh-Hant-TW", { weekday: "short" }).format(parsed);
+}
+
+function historyBallMarkup(draw) {
+  const previousIndex = state.displayHistory.indexOf(draw) + 1;
+  const previousDraw = previousIndex > 0 ? state.displayHistory[previousIndex] : null;
+  const previousSet = new Set(previousDraw?.numbers || []);
+  const sorted = [...(draw.numbers || [])].sort((a, b) => a - b);
+  const consecutiveSet = new Set();
+  sorted.forEach((number, index) => {
+    if (index > 0 && number - sorted[index - 1] === 1) {
+      consecutiveSet.add(number);
+      consecutiveSet.add(sorted[index - 1]);
+    }
+  });
+  return (draw.numbers || [])
+    .map((number) => {
+      const isRepeat = previousSet.has(number);
+      const isConsecutive = consecutiveSet.has(number);
+      const tone = isRepeat && isConsecutive ? "is-both" : isRepeat ? "is-repeat" : isConsecutive ? "is-consecutive" : "";
+      return `<span class="mini-ball history-ball ${tone}">${pad(number)}</span>`;
+    })
     .join("");
 }
 
@@ -310,9 +342,12 @@ function historyRows(draws) {
     .map(
       (draw) => `
         <tr>
-          <td>${draw.date || "-"}</td>
-          <td>${draw.period || "-"}</td>
-          <td class="number-text">${draw.numbers.map(pad).join(" · ")}</td>
+          <td>
+            <span class="history-date">${draw.date || "-"}</span>
+            <span class="history-weekday">${weekdayLabel(draw.date)}</span>
+          </td>
+          <td><span class="history-period">${draw.period || "-"}</span></td>
+          <td class="history-number-cell"><div class="history-balls">${historyBallMarkup(draw)}</div></td>
         </tr>
       `,
     )
@@ -1519,18 +1554,50 @@ function renderSavedPicks() {
   });
 }
 
-function render(payload) {
+function renderLatestDraws() {
+  const tw539 = state.latestByGame.tw539;
+  const caFantasy5 = state.latestByGame["ca-fantasy5"];
+  const cards = [
+    {
+      draw: tw539,
+      period: els.tw539Period,
+      date: els.tw539Date,
+      balls: els.tw539Balls,
+    },
+    {
+      draw: caFantasy5,
+      period: els.caPeriod,
+      date: els.caDate,
+      balls: els.caBalls,
+    },
+  ];
+  cards.forEach(({ draw, period, date, balls: ballsEl }) => {
+    if (!draw) {
+      period.textContent = "期別 同步中";
+      date.textContent = "日期 -";
+      ballsEl.innerHTML = `<span class="draw-empty">等待最新資料</span>`;
+      return;
+    }
+    period.textContent = `期別 ${draw.period || "-"}`;
+    date.textContent = `日期 ${draw.date || "-"}`;
+    ballsEl.innerHTML = balls(draw.numbers || []);
+  });
+}
+
+function render(payload, companionPayload = null) {
   const { latest, history, analysis, updatedAt } = payload;
   state.latest = latest;
+  state.latestByGame = {
+    ...state.latestByGame,
+    [state.game]: latest,
+    ...(companionPayload?.latest ? { [companionPayload.latest.game || (state.game === "tw539" ? "ca-fantasy5" : "tw539")]: companionPayload.latest } : {}),
+  };
   state.analysis = analysis;
   state.history = history;
   state.displayHistory = history;
   els.historyScope.textContent = "目前顯示本次載入的分析期數。";
   els.dashboard.hidden = false;
-  els.gameName.textContent = latest.name;
-  els.period.textContent = `期別 ${latest.period || "-"}`;
-  els.date.textContent = `日期 ${latest.date || "-"}`;
-  els.latestBalls.innerHTML = balls(latest.numbers);
+  renderLatestDraws();
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles);
@@ -1775,6 +1842,10 @@ async function loadConfig() {
   }
 }
 
+function companionGameFor(game) {
+  return game === "tw539" ? "ca-fantasy5" : "tw539";
+}
+
 async function load(options = {}) {
   const silent = Boolean(options.silent);
   if (!isProPlan() && state.limit > 90) {
@@ -1782,10 +1853,13 @@ async function load(options = {}) {
     els.limit.value = "90";
   }
   const cacheKey = `${state.game}-${state.limit}`;
+  const companionGame = companionGameFor(state.game);
+  const companionCacheKey = `${companionGame}-10`;
   const cachedPayload = readCachedPayload(cacheKey);
+  const cachedCompanionPayload = readCachedPayload(companionCacheKey);
   const requestId = ++state.requestId;
   if (cachedPayload) {
-    render(cachedPayload);
+    render(cachedPayload, cachedCompanionPayload);
     if (!silent) setStatus("已先顯示暫存資料，正在背景確認最新開獎...");
   } else {
     if (!silent) setStatus("正在讀取資料...");
@@ -1793,11 +1867,15 @@ async function load(options = {}) {
   if (!silent) els.refresh.disabled = true;
   try {
     const previousSeen = readLastSeenDraw()[state.game] || "";
-    const payload = await fetchJsonWithTimeout(`/api/lottery?game=${state.game}&limit=${state.limit}&t=${Date.now()}`);
+    const [payload, companionPayload] = await Promise.all([
+      fetchJsonWithTimeout(`/api/lottery?game=${state.game}&limit=${state.limit}&t=${Date.now()}`),
+      fetchJsonWithTimeout(`/api/lottery?game=${companionGame}&limit=10&t=${Date.now()}`).catch(() => null),
+    ]);
     if (!payload.ok) throw new Error(payload.error || "資料讀取失敗");
     if (requestId !== state.requestId) return;
     writeCachedPayload(cacheKey, payload);
-    render(payload);
+    if (companionPayload?.ok) writeCachedPayload(companionCacheKey, companionPayload);
+    render(payload, companionPayload);
     await notifyIfLatestChanged(payload.latest, previousSeen).catch(() => {});
     writeLastSeenDraw(state.game, payload.latest);
   } catch (error) {
