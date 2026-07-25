@@ -425,6 +425,23 @@ body {
   }
 }
 
+.backtest-card .saved-balls {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.backtest-card .saved-balls .mini-ball {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  align-content: center !important;
+  line-height: 1 !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
 .topbar {
   border-color: rgba(190, 220, 246, 0.38) !important;
   background: linear-gradient(112deg, #102b49 0%, #1b527d 60%, #293d76 100%) !important;
