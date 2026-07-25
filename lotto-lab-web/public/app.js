@@ -8,6 +8,7 @@ const state = {
   analysisFocus: "balanced",
   latest: null,
   latestByGame: {},
+  latestLoading: false,
   savedSelection: [],
   analysis: null,
   history: [],
@@ -48,6 +49,7 @@ const MODEL_SNAPSHOT_STORAGE_KEY = "lotto-lab-model-snapshots";
 const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v2";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const POLL_INTERVAL_MS = 30 * 1000;
+const LATEST_POLL_INTERVAL_MS = 15 * 1000;
 const FETCH_TIMEOUT_MS = 18000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MAX_CANDIDATE_CACHE_SIZE = 120;
@@ -2212,6 +2214,7 @@ function companionGameFor(game) {
 
 async function load(options = {}) {
   const silent = Boolean(options.silent);
+  const forceRefresh = Boolean(options.forceRefresh);
   if (state.loading) return;
   state.loading = true;
   if (!isProPlan() && state.limit > 90) {
@@ -2221,8 +2224,8 @@ async function load(options = {}) {
   const cacheKey = `${state.game}-${state.limit}`;
   const companionGame = companionGameFor(state.game);
   const companionCacheKey = `${companionGame}-10`;
-  const cachedPayload = readCachedPayload(cacheKey);
-  const cachedCompanionPayload = readCachedPayload(companionCacheKey);
+  const cachedPayload = forceRefresh ? null : readCachedPayload(cacheKey);
+  const cachedCompanionPayload = forceRefresh ? null : readCachedPayload(companionCacheKey);
   const requestId = ++state.requestId;
   if (cachedPayload) {
     render(cachedPayload, cachedCompanionPayload);
@@ -2259,14 +2262,56 @@ async function load(options = {}) {
   }
 }
 
+async function refreshLatestOnly() {
+  if (state.latestLoading || state.loading || document.visibilityState !== "visible") return;
+  state.latestLoading = true;
+  try {
+    const games = ["tw539", "ca-fantasy5"];
+    const payloads = await Promise.all(
+      games.map((game) => fetchJsonWithTimeout(`/api/latest?game=${game}&t=${Date.now()}`).catch(() => null)),
+    );
+    let activeGameChanged = false;
+    let newestActive = null;
+    for (const payload of payloads) {
+      if (!payload?.ok || !payload.latest) continue;
+      const game = payload.game || payload.latest.game;
+      if (!game) continue;
+      const previous = state.latestByGame[game];
+      const changed = drawKey(previous) !== drawKey(payload.latest);
+      state.latestByGame[game] = payload.latest;
+      if (game === state.game) {
+        state.latest = payload.latest;
+        newestActive = payload.latest;
+      }
+      if (changed) {
+        const previousSeen = readLastSeenDraw()[game] || drawKey(previous);
+        await notifyIfLatestChanged(payload.latest, previousSeen).catch(() => {});
+        writeLastSeenDraw(game, payload.latest);
+        if (game === state.game) activeGameChanged = true;
+      }
+    }
+    if (payloads.some((payload) => payload?.ok)) renderLatestDraws();
+    if (activeGameChanged && newestActive) {
+      setStatus(`已抓到新開獎號碼：第 ${newestActive.period || "-"} 期，正在同步分析...`);
+      await load({ silent: true, forceRefresh: true });
+    }
+  } finally {
+    state.latestLoading = false;
+  }
+}
+
 function startAutoRefresh() {
   window.setInterval(() => {
     if (document.visibilityState === "visible") {
       load({ silent: true });
     }
   }, POLL_INTERVAL_MS);
+  window.setInterval(() => {
+    refreshLatestOnly();
+  }, LATEST_POLL_INTERVAL_MS);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
+      refreshLatestOnly();
       load({ silent: true });
     }
   });

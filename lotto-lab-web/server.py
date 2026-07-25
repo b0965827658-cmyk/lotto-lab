@@ -51,6 +51,7 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "30"))
+LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "10"))
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 BACKTEST_SAMPLE_LIMIT = 24
@@ -58,6 +59,7 @@ AUTO_WINDOW_CANDIDATES = (36, 60, 90, 120, 180, 240, 300, 365)
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
 API_RATE_LIMITS = {
+    "/api/latest": (180, 60),
     "/api/lottery": (90, 60),
     "/api/history-search": (45, 60),
     "/api/config": (120, 60),
@@ -273,9 +275,10 @@ def auto_notify_loop() -> None:
         time.sleep(max(60, AUTO_NOTIFY_INTERVAL_SECONDS))
 
 
-def cached(key: str, loader):
+def cached(key: str, loader, ttl_seconds: int | None = None):
     hit = cache.get(key)
-    if hit and time.time() - hit.created_at < CACHE_TTL_SECONDS:
+    ttl = CACHE_TTL_SECONDS if ttl_seconds is None else max(1, ttl_seconds)
+    if hit and time.time() - hit.created_at < ttl:
         return hit.value
     value = loader()
     cache[key] = CacheItem(value=value, created_at=time.time())
@@ -453,7 +456,7 @@ def taiwan_latest() -> dict[str, Any]:
             return fallback[0]
         return official
 
-    return cached("taiwan-latest", load)
+    return cached("taiwan-latest", load, ttl_seconds=LATEST_CACHE_TTL_SECONDS)
 
 
 def taiwan_dataset_rows() -> list[dict[str, str]]:
@@ -606,45 +609,58 @@ def filter_history_rows(draws: list[dict[str, Any]], query: str = "", number: in
     ]
 
 
+def parse_california_history(source_html: str) -> list[dict[str, Any]]:
+    text = re.sub(r"<[^>]+>", "\n", source_html)
+    text = re.sub(r"&nbsp;?", " ", text)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    parsed = []
+    for i, line in enumerate(lines):
+        period_match = re.match(r"第\s*(\d+)\s*期", line)
+        if not period_match:
+            continue
+        window = lines[i : i + 24]
+        date = next((m.group(1) for part in window for m in [re.search(r"(20\d{2}-\d{2}-\d{2})", part)] if m), "")
+        nums = []
+        for part in window:
+            if re.fullmatch(r"\d{1,2}", part):
+                value = int(part)
+                if 1 <= value <= 39:
+                    nums.append(value)
+            if len(nums) == 5:
+                break
+        if date and len(nums) == 5:
+            parsed.append(
+                {
+                    "game": "ca-fantasy5",
+                    "name": "加州天天樂 Fantasy 5",
+                    "period": period_match.group(1),
+                    "date": date,
+                    "numbers": normalize_numbers(nums),
+                    "source": "速彩加州天天樂頁面",
+                    "sourceUrl": CALIFORNIA_FANTASY5_URL,
+                }
+            )
+    dedup = {item["period"]: item for item in parsed}
+    values = list(dedup.values())
+    values.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    return values
+
+
 def california_history(limit: int = 180) -> list[dict[str, Any]]:
     def load():
-        html = fetch_text(CALIFORNIA_FANTASY5_URL)
-        text = re.sub(r"<[^>]+>", "\n", html)
-        text = re.sub(r"&nbsp;?", " ", text)
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        parsed = []
-        for i, line in enumerate(lines):
-            period_match = re.match(r"第\s*(\d+)\s*期", line)
-            if not period_match:
-                continue
-            window = lines[i : i + 24]
-            date = next((m.group(1) for part in window for m in [re.search(r"(20\d{2}-\d{2}-\d{2})", part)] if m), "")
-            nums = []
-            for part in window:
-                if re.fullmatch(r"\d{1,2}", part):
-                    value = int(part)
-                    if 1 <= value <= 39:
-                        nums.append(value)
-                if len(nums) == 5:
-                    break
-            if date and len(nums) == 5:
-                parsed.append(
-                    {
-                        "game": "ca-fantasy5",
-                        "name": "加州天天樂 Fantasy 5",
-                        "period": period_match.group(1),
-                        "date": date,
-                        "numbers": normalize_numbers(nums),
-                        "source": "速彩加州天天樂頁面",
-                        "sourceUrl": CALIFORNIA_FANTASY5_URL,
-                    }
-                )
-        dedup = {item["period"]: item for item in parsed}
-        values = list(dedup.values())
-        values.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
-        return values
+        return parse_california_history(fetch_text(CALIFORNIA_FANTASY5_URL))
 
     return cached("california-history", load)[:limit]
+
+
+def california_latest() -> dict[str, Any]:
+    def load():
+        values = parse_california_history(fetch_text(CALIFORNIA_FANTASY5_URL, timeout=15))
+        if not values:
+            raise RuntimeError("加州天天樂資料頁目前沒有可解析的最新開獎資料")
+        return values[0]
+
+    return cached("california-latest", load, ttl_seconds=LATEST_CACHE_TTL_SECONDS)
 
 
 def search_california_history(from_year: int, to_year: int, keyword: str = "", number: int | None = None, limit: int = 2000) -> dict[str, Any]:
@@ -1775,6 +1791,17 @@ class Handler(SimpleHTTPRequestHandler):
                     },
                 }
             )
+            return
+        if parsed.path == "/api/latest":
+            params = parse_qs(parsed.query)
+            try:
+                game = clean_game(params.get("game", ["tw539"])[0])
+                latest = taiwan_latest() if game == "tw539" else california_latest()
+                self.send_json({"ok": True, "game": game, "latest": public_draw(latest), "updatedAt": datetime.now().isoformat(timespec="seconds")})
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=502)
             return
         if parsed.path == "/api/lottery":
             params = parse_qs(parsed.query)
