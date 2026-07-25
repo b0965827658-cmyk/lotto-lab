@@ -231,7 +231,7 @@ function historyTailMarkup(draw) {
   });
   return `
     <div class="history-tail-summary">
-      <span class="history-tail-title">尾數 0～9 <small>本期出現顆數</small></span>
+      <span class="history-tail-title">當期開獎號碼</span>
       <div class="history-tails">
         ${counts
           .map(
