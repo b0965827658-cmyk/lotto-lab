@@ -231,9 +231,9 @@ function historyTailMarkup(draw) {
         ${counts
           .map(
             (count, tail) => `
-              <span class="history-tail ${count ? "is-hit" : ""}" title="${tail} 尾：${count} 顆">
-                <strong>${tail}</strong>
-                <small>${count}</small>
+              <span class="history-tail ${count ? "is-hit" : ""}" title="${tail} 尾：${count} 顆" aria-label="${tail} 尾，開出 ${count} 顆">
+                <strong class="history-tail-number">${tail}尾</strong>
+                <span class="history-tail-count"><b>${count}</b><small>顆</small></span>
               </span>
             `,
           )
