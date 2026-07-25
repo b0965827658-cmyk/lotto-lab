@@ -2229,19 +2229,14 @@ th {
   border-top: 1px dashed var(--line);
 }
 
-.history-tail-title {
+.history-tail-current-numbers {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 7px;
   margin-bottom: 6px;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.history-tail-title small {
-  font-size: 12px;
-  font-weight: 700;
+  overflow-x: auto;
+  white-space: nowrap;
 }
 
 .history-tails {

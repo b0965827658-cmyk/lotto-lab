@@ -231,7 +231,9 @@ function historyTailMarkup(draw) {
   });
   return `
     <div class="history-tail-summary">
-      <span class="history-tail-title">當期開獎號碼</span>
+      <div class="history-tail-current-numbers" aria-label="當期開獎號碼">
+        ${historyBallMarkup(draw)}
+      </div>
       <div class="history-tails">
         ${counts
           .map(
