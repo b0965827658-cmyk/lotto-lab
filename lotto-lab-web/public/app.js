@@ -12,6 +12,7 @@ const state = {
   analysis: null,
   history: [],
   displayHistory: [],
+  historyView: "numbers",
   requestId: 0,
   loading: false,
   apiCache: new Map(),
@@ -129,6 +130,8 @@ const els = {
   note: $("#analysisNote"),
   statsMatrix: $("#statsMatrix"),
   history: $("#historyRows"),
+  historyTails: $("#historyTailRows"),
+  historyNumberLegend: $("#historyNumberLegend"),
   drawCount: $("#drawCount"),
   plans: $("#planGrid"),
   savedForm: $("#savedForm"),
@@ -156,6 +159,8 @@ const els = {
   historyToYear: $("#historyToYear"),
   crossYearSearch: $("#crossYearSearch"),
   historyScope: $("#historyScope"),
+  historyViewButtons: Array.from(document.querySelectorAll("[data-history-view]")),
+  historyViewPanels: Array.from(document.querySelectorAll("[data-history-view-panel]")),
   backtestBadge: $("#backtestBadge"),
   avgHit: $("#avgHit"),
   threePlusRate: $("#threePlusRate"),
@@ -400,9 +405,30 @@ function historyRows(draws) {
           <td><span class="history-period">${draw.period || "-"}</span></td>
           <td class="history-number-cell">
             <div class="history-balls">${historyBallMarkup(draw)}</div>
-            ${historyTailMarkup(draw)}
           </td>
         </tr>
+      `,
+    )
+    .join("");
+}
+
+function historyTailRows(draws) {
+  if (!draws.length) {
+    return `<div class="empty-cell">查無符合條件的開獎紀錄</div>`;
+  }
+  return draws
+    .map(
+      (draw) => `
+        <article class="history-tail-record">
+          <div class="history-tail-record-meta">
+            <div>
+              <strong class="history-date">${draw.date || "-"}</strong>
+              <span class="history-weekday">${weekdayLabel(draw.date)}</span>
+            </div>
+            <span class="history-period">${draw.period || "-"}</span>
+          </div>
+          ${historyTailMarkup(draw)}
+        </article>
       `,
     )
     .join("");
@@ -422,7 +448,21 @@ function filteredHistory() {
 function renderHistory() {
   const rows = filteredHistory();
   els.history.innerHTML = historyRows(rows);
+  if (els.historyTails) els.historyTails.innerHTML = historyTailRows(rows);
   els.historyCount.textContent = `${rows.length} / ${state.displayHistory.length} 期`;
+}
+
+function setHistoryView(view) {
+  state.historyView = view === "tails" ? "tails" : "numbers";
+  els.historyViewButtons.forEach((button) => {
+    const active = button.dataset.historyView === state.historyView;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  els.historyViewPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.historyViewPanel !== state.historyView;
+  });
+  if (els.historyNumberLegend) els.historyNumberLegend.hidden = state.historyView !== "numbers";
 }
 
 function setStatus(message, isError = false) {
@@ -2262,6 +2302,11 @@ document.querySelectorAll(".segment").forEach((button) => {
 els.tabButtons.forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tab));
 });
+
+els.historyViewButtons.forEach((button) => {
+  button.addEventListener("click", () => setHistoryView(button.dataset.historyView));
+});
+setHistoryView(state.historyView);
 
 els.limit.addEventListener("change", () => applyAnalysisLimit(els.limit.value));
 if (els.applyLimit) {

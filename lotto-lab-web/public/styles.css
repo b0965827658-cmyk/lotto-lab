@@ -2052,6 +2052,71 @@ body[data-plan="free"] .pro-required {
   gap: 6px;
 }
 
+.history-view-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 14px 0 10px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f3f7f4;
+}
+
+.history-view-tab {
+  flex: 1 1 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.history-view-tab.active {
+  background: var(--green);
+  color: #ffffff;
+  box-shadow: 0 3px 8px rgba(22, 106, 82, 0.16);
+}
+
+.history-view-panel[hidden] {
+  display: none;
+}
+
+.history-tail-records {
+  display: grid;
+  gap: 10px;
+}
+
+.history-tail-record {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.3fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.history-tail-record-meta {
+  display: grid;
+  gap: 5px;
+}
+
+.history-tail-record .history-tail-summary {
+  max-width: none;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.history-tail-record .history-tail-title {
+  margin-bottom: 8px;
+}
+
 .legend-ball {
   display: inline-block;
   width: 16px;
@@ -2529,6 +2594,19 @@ th {
 
   .history-number-cell {
     padding: 8px 0 2px;
+  }
+
+  .history-tail-record {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .history-tail-record-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
   }
 
   .table-wrap thead {

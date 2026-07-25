@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=56" />
+    <link rel="stylesheet" href="/styles.css?v=57" />
   </head>
   <body>
     <main class="shell">
@@ -324,7 +324,7 @@
             </div>
             <span id="historyCount" class="count-pill">-</span>
           </div>
-          <div class="history-legend" aria-label="歷史號碼顏色說明">
+          <div class="history-legend" id="historyNumberLegend" aria-label="歷史號碼顏色說明">
             <span><i class="legend-ball legend-ball--base"></i>一般開獎</span>
             <span><i class="legend-ball legend-ball--repeat"></i>連莊</span>
             <span><i class="legend-ball legend-ball--consecutive"></i>連號</span>
@@ -351,17 +351,26 @@
             <button id="clearHistorySearch" class="text-button">清除</button>
           </div>
           <p class="fineprint" id="historyScope">目前顯示本次載入的分析期數。</p>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>開獎日期</th>
-                  <th>期別</th>
-                  <th>開獎號碼</th>
-                </tr>
-              </thead>
-              <tbody id="historyRows"></tbody>
-            </table>
+          <div class="history-view-tabs" role="tablist" aria-label="歷史紀錄分類">
+            <button class="history-view-tab active" type="button" role="tab" aria-selected="true" data-history-view="numbers">號碼紀錄</button>
+            <button class="history-view-tab" type="button" role="tab" aria-selected="false" data-history-view="tails">尾數統計</button>
+          </div>
+          <div class="history-view-panel" data-history-view-panel="numbers">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>開獎日期</th>
+                    <th>期別</th>
+                    <th>開獎號碼</th>
+                  </tr>
+                </thead>
+                <tbody id="historyRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="history-view-panel" data-history-view-panel="tails" hidden>
+            <div class="history-tail-records" id="historyTailRows"></div>
           </div>
         </article>
         </div>
@@ -379,6 +388,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=57"></script>
+    <script src="/app.js?v=58"></script>
   </body>
 </html>
