@@ -1053,6 +1053,276 @@ def classic_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pi
     return list(best)
 
 
+def california_logic_scores(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
+    """Score California Fantasy 5 with its own short-cycle selection rules."""
+    ordered = list(draws)
+    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    stats = number_stats(ordered, max_number)
+    recent10 = ordered[:10]
+    recent5 = ordered[:5]
+    recent3 = ordered[:3]
+
+    def frequencies(rows: list[dict[str, Any]]) -> dict[int, int]:
+        values = {number: 0 for number in range(1, max_number + 1)}
+        for draw in rows:
+            for number in draw["numbers"]:
+                if number in values:
+                    values[number] += 1
+        return values
+
+    recent5_frequency = frequencies(recent5)
+    recent10_frequency = frequencies(recent10)
+    recent3_signal = {number: 0 for number in range(1, max_number + 1)}
+    edge_signal = {number: 0.0 for number in range(1, max_number + 1)}
+    for draw_index, draw in enumerate(recent3):
+        draw_weight = 3 - draw_index
+        for number in draw["numbers"]:
+            if number in recent3_signal:
+                recent3_signal[number] += draw_weight
+            for offset in (-1, 1):
+                nearby = number + offset
+                if 1 <= nearby <= max_number:
+                    edge_signal[nearby] += draw_weight * (1.0 if abs(offset) == 1 else 0.0)
+
+    tail_last_seen = {tail: None for tail in range(10)}
+    for draw_index, draw in enumerate(ordered):
+        for number in draw["numbers"]:
+            tail = number % 10
+            if tail_last_seen[tail] is None:
+                tail_last_seen[tail] = draw_index
+    tail_gaps = {
+        tail: (last_seen if last_seen is not None else len(ordered))
+        for tail, last_seen in tail_last_seen.items()
+    }
+
+    max_recent5 = max(recent5_frequency.values(), default=0) or 1
+    max_recent10 = max(recent10_frequency.values(), default=0) or 1
+    max_recent3 = max(recent3_signal.values(), default=0) or 1
+    max_edge = max(edge_signal.values(), default=0) or 1
+    scores: dict[int, float] = {}
+    blocked_numbers: list[int] = []
+    blocked_tails: list[int] = []
+    for number in range(1, max_number + 1):
+        gap = stats["gaps"].get(number, len(ordered))
+        tail_gap = tail_gaps[number % 10]
+        number_blocked = gap >= 20
+        tail_blocked = tail_gap >= 4
+        if number_blocked:
+            blocked_numbers.append(number)
+        if tail_blocked and number % 10 not in blocked_tails:
+            blocked_tails.append(number % 10)
+
+        hot_score = recent5_frequency[number] / max_recent5
+        ten_period_score = recent10_frequency[number] / max_recent10
+        recent_draw_score = recent3_signal[number] / max_recent3
+        edge_score = edge_signal[number] / max_edge
+        freshness_score = max(0.0, 1.0 - min(gap, 20) / 20)
+        tail_freshness_score = max(0.0, 1.0 - min(tail_gap, 6) / 6)
+        score = (
+            hot_score * 0.24
+            + ten_period_score * 0.18
+            + recent_draw_score * 0.22
+            + edge_score * 0.18
+            + freshness_score * 0.10
+            + tail_freshness_score * 0.08
+        )
+        if number_blocked:
+            score -= 0.65
+        if tail_blocked:
+            score -= 0.35
+        scores[number] = round(score, 6)
+
+    return {
+        "ordered": ordered,
+        "scores": scores,
+        "gaps": stats["gaps"],
+        "tailGaps": tail_gaps,
+        "blockedNumbers": blocked_numbers,
+        "blockedTails": sorted(blocked_tails),
+        "recent5Frequency": recent5_frequency,
+        "recent10Frequency": recent10_frequency,
+        "recent3Signal": recent3_signal,
+        "edgeSignal": edge_signal,
+    }
+
+
+def california_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> list[int]:
+    logic = california_logic_scores(draws, max_number=max_number)
+    scores = logic["scores"]
+    gaps = logic["gaps"]
+    tail_gaps = logic["tailGaps"]
+
+    # Keep the requested exclusions whenever there are enough alternatives.
+    eligible = [
+        number
+        for number in range(1, max_number + 1)
+        if gaps.get(number, 0) < 20 and tail_gaps.get(number % 10, 0) < 4
+    ]
+    if len(eligible) < pick_count:
+        eligible = [number for number in range(1, max_number + 1) if gaps.get(number, 0) < 20]
+    if len(eligible) < pick_count:
+        eligible = list(range(1, max_number + 1))
+
+    ranked = sorted(eligible, key=lambda number: (-scores[number], number))
+    return sorted(ranked[:pick_count])
+
+
+def california_rolling_backtest(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> dict[str, Any]:
+    ordered = list(draws)
+    ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+    distribution = {str(number): 0 for number in range(pick_count + 1)}
+    rows = []
+    sample_size = min(BACKTEST_SAMPLE_LIMIT, max(0, len(ordered) - 10))
+    for index in range(sample_size):
+        target = ordered[index]
+        training = ordered[index + 1 : index + 91]
+        if len(training) < 10:
+            continue
+        pick = california_recommendation(training, max_number=max_number, pick_count=pick_count)
+        hits = len(set(pick) & set(target["numbers"]))
+        distribution[str(hits)] += 1
+        rows.append(
+            {
+                "period": target.get("period", ""),
+                "date": target.get("date", ""),
+                "pick": pick,
+                "actual": target["numbers"],
+                "hits": hits,
+            }
+        )
+    tested = len(rows)
+    hit_sum = sum(row["hits"] for row in rows)
+    one_plus = sum(1 for row in rows if row["hits"] >= 1)
+    two_plus = sum(1 for row in rows if row["hits"] >= 2)
+    three_plus = sum(1 for row in rows if row["hits"] >= 3)
+    best_hit = max((row["hits"] for row in rows), default=0)
+    return {
+        "testedCount": tested,
+        "averageHit": round(hit_sum / tested, 2) if tested else 0,
+        "onePlusCount": one_plus,
+        "onePlusRate": round((one_plus / tested) * 100, 1) if tested else 0,
+        "twoPlusCount": two_plus,
+        "twoPlusRate": round((two_plus / tested) * 100, 1) if tested else 0,
+        "threePlusCount": three_plus,
+        "threePlusRate": round((three_plus / tested) * 100, 1) if tested else 0,
+        "bestHit": best_hit,
+        "distribution": distribution,
+        "recentRows": rows[:10],
+        "method": "天天樂專屬回測：先排除長期未開號碼與長冷尾數，再整合近10期熱度、前2-3期、鄰近邊號與近10期出現次數。",
+    }
+
+
+def analyze_california(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    stats = number_stats(draws, max_number)
+    frequency = stats["frequency"]
+    gaps = stats["gaps"]
+    hot = sorted(frequency, key=lambda number: (-frequency[number], number))[:10]
+    cold = sorted(frequency, key=lambda number: (frequency[number], number))[:10]
+    overdue = sorted(gaps, key=lambda number: (-gaps[number], number))[:10]
+    logic = california_logic_scores(draws, max_number=max_number)
+    recommendation = california_recommendation(draws, max_number=max_number, pick_count=pick_count)
+    recommendation_roles = [
+        {"number": number, "rank": rank, "score": logic["scores"].get(number, 0)}
+        for rank, number in enumerate(
+            sorted(recommendation, key=lambda number: (-logic["scores"].get(number, 0), number)),
+            start=1,
+        )
+    ]
+    backtest = california_rolling_backtest(draws, max_number=max_number, pick_count=pick_count)
+    quality = round(
+        backtest["averageHit"] * 100
+        + backtest["twoPlusRate"] * 1.35
+        + backtest["threePlusRate"] * 2.6
+        + backtest["bestHit"] * 14,
+        2,
+    )
+    patterns = pattern_summary(draws, max_number, "california-special")
+    patterns["selectedProfile"] = "california-special"
+    patterns["selectedLabel"] = "天天樂專屬整合邏輯"
+    return {
+        "drawCount": len(draws),
+        "hot": [{"number": number, "count": frequency[number]} for number in hot],
+        "cold": [{"number": number, "count": frequency[number]} for number in cold],
+        "overdue": [{"number": number, "gap": gaps[number]} for number in overdue],
+        "frequency": [{"number": number, "count": frequency[number], "gap": gaps[number]} for number in frequency],
+        "recommendation": recommendation,
+        "recommendationRoles": recommendation_roles,
+        "backtest": backtest,
+        "modelProfiles": [
+            {
+                "id": "california-special",
+                "label": "天天樂專屬整合邏輯",
+                "quality": quality,
+                "averageHit": backtest["averageHit"],
+                "onePlusRate": backtest["onePlusRate"],
+                "twoPlusRate": backtest["twoPlusRate"],
+                "threePlusRate": backtest["threePlusRate"],
+                "bestHit": backtest["bestHit"],
+                "testedCount": backtest["testedCount"],
+            }
+        ],
+        "patterns": patterns,
+        "strategy": {
+            "label": "天天樂專屬整合邏輯",
+            "summary": "排除20期未開與長冷尾數，再整合近期熱號、前2-3期、鄰近邊號與近10期高頻號碼。",
+            "steps": [
+                "20期未開號碼優先排除",
+                "多期未見尾數優先排除",
+                "補進近10期熱號與近10期高頻號碼",
+                "補進前2-3期開獎號碼與鄰近邊號",
+                "依整合分數排序取最高5碼",
+            ],
+            "excludedNumbers": logic["blockedNumbers"],
+            "excludedTails": logic["blockedTails"],
+        },
+        "note": "加州天天樂採用專屬短期邏輯：先排除20期未開與長冷尾數，再整合近期熱號、前2-3期、鄰近邊號及近10期高頻號碼；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
+    }
+
+
+def analyze_california_with_stable_backtest(
+    draws: list[dict[str, Any]],
+    backtest_draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> dict[str, Any]:
+    analysis = analyze_california(draws, max_number=max_number, pick_count=pick_count)
+    if analysis["backtest"].get("testedCount") or len(backtest_draws) < BACKTEST_MIN_HISTORY:
+        return analysis
+    fallback = california_rolling_backtest(
+        backtest_draws[:BACKTEST_FALLBACK_LIMIT],
+        max_number=max_number,
+        pick_count=pick_count,
+    )
+    analysis["backtest"] = fallback
+    analysis["modelProfiles"][0].update(
+        {
+            "quality": round(
+                fallback["averageHit"] * 100
+                + fallback["twoPlusRate"] * 1.35
+                + fallback["threePlusRate"] * 2.6
+                + fallback["bestHit"] * 14,
+                2,
+            ),
+            "averageHit": fallback["averageHit"],
+            "onePlusRate": fallback["onePlusRate"],
+            "twoPlusRate": fallback["twoPlusRate"],
+            "threePlusRate": fallback["threePlusRate"],
+            "bestHit": fallback["bestHit"],
+            "testedCount": fallback["testedCount"],
+        }
+    )
+    analysis["backtest"]["method"] = (
+        f"目前選擇近 {len(draws)} 期，短期樣本不足以單獨回測；"
+        f"天天樂專屬回測改用近 {min(len(backtest_draws), BACKTEST_FALLBACK_LIMIT)} 期穩定樣本。"
+        f"{fallback.get('method', '')}"
+    )
+    return analysis
+
+
 def rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5, profile_name: str = "balanced") -> dict[str, Any]:
     ordered = list(draws)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
@@ -1274,6 +1544,7 @@ def choose_best_analysis_window(
     history: list[dict[str, Any]],
     max_number: int = 39,
     pick_count: int = 5,
+    game: str = "tw539",
 ) -> dict[str, Any] | None:
     ordered = list(history)
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
@@ -1282,25 +1553,32 @@ def choose_best_analysis_window(
     seed_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     for window in candidates:
         window_draws = ordered[:window]
-        pick = model_recommendation(
-            window_draws,
-            max_number=max_number,
-            pick_count=pick_count,
-            seed_label=seed_label,
-            profile_name="balanced",
-        )
-        backtest = rolling_backtest(window_draws, max_number=max_number, pick_count=pick_count, profile_name="balanced")
+        if game == "ca-fantasy5":
+            pick = california_recommendation(window_draws, max_number=max_number, pick_count=pick_count)
+            backtest = california_rolling_backtest(window_draws, max_number=max_number, pick_count=pick_count)
+            logic_scores = california_logic_scores(window_draws, max_number=max_number)["scores"]
+            model_label = "天天樂專屬整合邏輯"
+        else:
+            pick = model_recommendation(
+                window_draws,
+                max_number=max_number,
+                pick_count=pick_count,
+                seed_label=seed_label,
+                profile_name="balanced",
+            )
+            backtest = rolling_backtest(window_draws, max_number=max_number, pick_count=pick_count, profile_name="balanced")
+            logic_scores = recommendation_number_scores(
+                window_draws,
+                max_number=max_number,
+                seed_label=seed_label,
+                profile_name="balanced",
+            )
+            model_label = MODEL_PROFILES["balanced"]["label"]
         if backtest.get("testedCount", 0) < 5:
             continue
-        scores = recommendation_number_scores(
-            window_draws,
-            max_number=max_number,
-            seed_label=seed_label,
-            profile_name="balanced",
-        )
         roles = [
-            {"number": number, "rank": rank, "score": round(scores.get(number, 0), 4)}
-            for rank, number in enumerate(sorted(pick, key=lambda number: (-scores.get(number, 0), number)), start=1)
+            {"number": number, "rank": rank, "score": round(logic_scores.get(number, 0), 4)}
+            for rank, number in enumerate(sorted(pick, key=lambda number: (-logic_scores.get(number, 0), number)), start=1)
         ]
         quality = round(
             backtest.get("averageHit", 0) * 100
@@ -1317,7 +1595,7 @@ def choose_best_analysis_window(
                 "recommendation": pick,
                 "recommendationRoles": roles,
                 "backtest": backtest,
-                "modelLabel": MODEL_PROFILES["balanced"]["label"],
+                "modelLabel": model_label,
             }
         )
     if not rows:
@@ -1335,7 +1613,11 @@ def choose_best_analysis_window(
     return {
         **best,
         "comparedWindows": [row["limit"] for row in rows],
-        "method": "比較有足夠歷史樣本的多個分析窗口，依平均命中、2 中以上比例與最高命中綜合排序。",
+        "method": (
+            "天天樂專屬邏輯比較多個分析窗口，依平均命中、2 中以上比例與最高命中綜合排序。"
+            if game == "ca-fantasy5"
+            else "比較有足夠歷史樣本的多個分析窗口，依平均命中、2 中以上比例與最高命中綜合排序。"
+        ),
     }
 
 
@@ -1382,7 +1664,7 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
         payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
         if optimize:
-            payload["bestWindow"] = choose_best_analysis_window(history)
+            payload["bestWindow"] = choose_best_analysis_window(history, game="tw539")
         return payload
     if game == "ca-fantasy5":
         fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
@@ -1391,10 +1673,10 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
-        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
+        analysis = cached(analysis_key, lambda: analyze_california_with_stable_backtest(draws, history))
         payload = {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
         if optimize:
-            payload["bestWindow"] = choose_best_analysis_window(history)
+            payload["bestWindow"] = choose_best_analysis_window(history, game="ca-fantasy5")
         return payload
     raise ValueError("unknown game")
 

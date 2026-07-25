@@ -1317,7 +1317,7 @@ function renderReferencePick() {
   els.pickBalls.innerHTML = balls(candidate.numbers);
   if (els.keyNumbers) els.keyNumbers.innerHTML = keyNumberMarkup(candidate.numbers);
   els.pickMeta.innerHTML = `
-    <span>綜合推理</span>
+    <span>${state.game === "ca-fantasy5" ? "天天樂專屬整合" : "綜合推理"}</span>
     <span>模型最高分 5 碼</span>
     <span>${focus.description}</span>
     <span>熱尾 ${tailProfile.label}</span>
@@ -1751,6 +1751,8 @@ function renderPatterns(patterns) {
   const profile = patterns?.selectedLabel || "綜合模型";
   const tails = (patterns?.tails || []).slice(0, 3).map((item) => `${item.tail}尾 ${item.count}次`).join("、") || "資料累積中";
   const intervals = (patterns?.intervals || []).slice(0, 2).map((item) => `${item.label} ${item.rate}%`).join("、") || "資料累積中";
+  const californiaStrategy = state.game === "ca-fantasy5" ? state.analysis?.strategy : null;
+  const strategySteps = californiaStrategy?.steps?.join(" ・ ") || "";
   els.patternModel.textContent = "綜合推理最高分 5 碼";
   els.patternRepeat.textContent = `${profile} · 單一結果`;
   els.patternGrid.innerHTML = `
@@ -1764,8 +1766,16 @@ function renderPatterns(patterns) {
   els.patternLines.innerHTML = `
     <div class="logic-reason-card">
       <span>綜合推理依據</span>
-      <strong>熱度＋遺漏＋區間＋尾數＋回測</strong>
+      <strong>${state.game === "ca-fantasy5" ? state.analysis?.strategy?.summary || "天天樂專屬整合邏輯" : "熱度＋遺漏＋區間＋尾數＋回測"}</strong>
     </div>
+    ${
+      strategySteps
+        ? `<div class="logic-reason-card">
+            <span>天天樂專屬篩選</span>
+            <strong>${strategySteps}</strong>
+          </div>`
+        : ""
+    }
     <div class="logic-reason-card">
       <span>近期尾數參考</span>
       <strong>${tails}</strong>
