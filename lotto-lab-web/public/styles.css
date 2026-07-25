@@ -391,6 +391,320 @@ input:focus-visible {
   }
 }
 
+/* Blue-gold-coral palette: a lottery atmosphere without a green-dominant UI. */
+/* Priority overrides keep later legacy selectors from bringing green back. */
+:root {
+  --bg: #eef3f8 !important;
+  --ink: #172538 !important;
+  --muted: #647487 !important;
+  --line: #d5e0ea !important;
+  --panel: #fffefa !important;
+  --green: #1b527d !important;
+  --blue: #1e6d9d !important;
+  --gold: #e2a31d !important;
+  --red: #c94d59 !important;
+  --shadow: 0 16px 40px rgba(23, 54, 84, 0.11) !important;
+}
+
+body {
+  color: #172538 !important;
+  background-color: #eef3f8 !important;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.58) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.58) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(210, 224, 239, 0.5), transparent 55%) !important;
+}
+
+.topbar {
+  border-color: rgba(190, 220, 246, 0.38) !important;
+  background: linear-gradient(112deg, #102b49 0%, #1b527d 60%, #293d76 100%) !important;
+  color: #ffffff !important;
+}
+
+.topbar .eyebrow {
+  color: #f6ce58 !important;
+}
+
+.topbar h1,
+.topbar p {
+  color: #ffffff !important;
+}
+
+.icon-button {
+  background: #f6cf59 !important;
+  color: #1d2e44 !important;
+}
+
+.segment.active {
+  background: linear-gradient(135deg, #164b75, #2874a6) !important;
+}
+
+.page-tabs {
+  background: #102d4d !important;
+}
+
+.page-tab.active {
+  background: #e2a31d !important;
+  color: #243246 !important;
+}
+
+.panel {
+  background: rgba(255, 254, 250, 0.98) !important;
+  border-color: #d5e0ea !important;
+}
+
+.draw-balls {
+  background: rgba(7, 35, 60, 0.72) !important;
+}
+
+.draw-card--ca .draw-balls {
+  background: rgba(5, 28, 61, 0.76) !important;
+}
+
+.ball,
+.mini-ball,
+.saved-number-ball,
+.history-ball {
+  border-color: rgba(203, 232, 250, 0.92) !important;
+  background: linear-gradient(145deg, #328fc0 0%, #1c5f93 70%) !important;
+  color: #ffffff !important;
+}
+
+.draw-card .ball,
+.accent .ball,
+.saved-number-ball.is-selected,
+.pick-panel .ball {
+  border-color: #ffe5a1 !important;
+  background: linear-gradient(145deg, #f8c642 0%, #d38c0b 72%) !important;
+  color: #273246 !important;
+}
+
+.pick-panel {
+  border-color: #e0a629 !important;
+  background: linear-gradient(140deg, #102b49 0%, #174e78 62%, #293d76 100%) !important;
+}
+
+.stats-cell-number.is-hot,
+.tail-value.is-hot {
+  background: #fff0f1 !important;
+  color: #bd3f4c !important;
+}
+
+.stats-cell-number.is-cold,
+.tail-value.is-cold {
+  background: #fff8df !important;
+  color: #a86f00 !important;
+}
+
+.stats-cell-number.is-overdue,
+.tail-value.is-overdue {
+  background: #eaf8ff !important;
+  color: #176f9f !important;
+}
+:root {
+  --bg: #eef3f8;
+  --ink: #172538;
+  --muted: #647487;
+  --line: #d5e0ea;
+  --panel: #fffefa;
+  --green: #1b527d;
+  --blue: #1e6d9d;
+  --gold: #e2a31d;
+  --red: #c94d59;
+  --shadow: 0 16px 40px rgba(23, 54, 84, 0.11);
+}
+
+body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.58) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.58) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(210, 224, 239, 0.5), transparent 55%);
+}
+
+.topbar {
+  border-color: rgba(190, 220, 246, 0.38);
+  background: linear-gradient(112deg, #102b49 0%, #1b527d 60%, #293d76 100%);
+  box-shadow: 0 18px 42px rgba(20, 48, 79, 0.24);
+}
+
+.topbar .eyebrow {
+  color: #f6ce58;
+}
+
+.icon-button {
+  background: #f6cf59;
+  color: #1d2e44;
+}
+
+.control-band {
+  border-color: #d5e0ea;
+  background: rgba(255, 254, 250, 0.97);
+}
+
+.segment {
+  border-color: #d5e0ea;
+  background: #f4f7fb;
+}
+
+.segment.active {
+  background: linear-gradient(135deg, #164b75, #2874a6);
+  box-shadow: 0 5px 0 rgba(17, 54, 88, 0.2);
+}
+
+.notify-quick .save-button {
+  border-color: #bf8120;
+  background: #e2a31d;
+  color: #243246;
+}
+
+.status {
+  border-color: #d5e0ea;
+  border-left-color: #e2a31d;
+  background: #fffefa;
+}
+
+.page-tabs {
+  background: #102d4d;
+  box-shadow: 0 12px 25px rgba(17, 50, 81, 0.2);
+}
+
+.page-tab.active {
+  background: #e2a31d;
+  color: #243246;
+}
+
+.panel {
+  border-color: #d5e0ea;
+  background: rgba(255, 254, 250, 0.98);
+  box-shadow: var(--shadow);
+}
+
+.draw-card {
+  box-shadow: 0 16px 30px rgba(19, 50, 80, 0.2);
+}
+
+.draw-card--tw539 {
+  border-color: #e0a629;
+}
+
+.draw-card--ca {
+  border-color: #6daedb;
+}
+
+.draw-balls {
+  border-color: rgba(255, 230, 142, 0.55);
+  background: rgba(7, 35, 60, 0.72);
+}
+
+.draw-card--ca .draw-balls {
+  border-color: rgba(139, 211, 255, 0.55);
+  background: rgba(5, 28, 61, 0.76);
+}
+
+.ball,
+.mini-ball,
+.saved-number-ball,
+.history-ball {
+  border-color: rgba(203, 232, 250, 0.92);
+  background: linear-gradient(145deg, #328fc0 0%, #1c5f93 70%);
+  color: #ffffff;
+  box-shadow:
+    inset 5px 5px 8px rgba(255, 255, 255, 0.24),
+    inset -6px -7px 10px rgba(7, 43, 79, 0.3),
+    0 4px 0 rgba(13, 51, 87, 0.22);
+}
+
+.draw-card .ball,
+.accent .ball,
+.saved-number-ball.is-selected,
+.pick-panel .ball {
+  border-color: #ffe5a1;
+  background: linear-gradient(145deg, #f8c642 0%, #d38c0b 72%);
+  color: #273246;
+}
+
+.mini-ball,
+.saved-number-ball,
+.history-ball {
+  color: #1a5c89;
+}
+
+.mini-ball.is-hit,
+.history-ball.is-hit {
+  border-color: #f0c64b;
+  background: linear-gradient(145deg, #f8ca51, #d89615);
+  color: #273246;
+}
+
+.saved-panel,
+.countdown-panel,
+.stats-panel,
+.parity-panel,
+.model-panel,
+.backtest-panel,
+.history-panel {
+  border-top-color: #1b527d;
+}
+
+.saved-panel {
+  background: linear-gradient(145deg, #fffefa, #eef5fb);
+}
+
+.pick-panel {
+  border-color: #e0a629;
+  background: linear-gradient(140deg, #102b49 0%, #174e78 62%, #293d76 100%);
+  box-shadow: 0 18px 36px rgba(17, 48, 78, 0.24);
+}
+
+.metric-card {
+  border-color: #d5e0ea;
+  background: #fbfdff;
+}
+
+.stats-matrix,
+.parity-table,
+.tail-table,
+.history-tail-record {
+  border-color: #d5e0ea;
+  background: #f7faff;
+}
+
+.stats-cell,
+.parity-table td,
+.parity-table th,
+.tail-table td,
+.tail-table th {
+  border-color: #dce6ef;
+}
+
+.stats-cell-number {
+  border-color: #b9d5e7;
+  background: #eaf4fb;
+  color: #1a5c89;
+}
+
+.stats-cell-number.is-hot,
+.tail-value.is-hot {
+  border-color: #e9a5ad;
+  background: #fff0f1;
+  color: #bd3f4c;
+}
+
+.stats-cell-number.is-cold,
+.tail-value.is-cold {
+  border-color: #f0d487;
+  background: #fff8df;
+  color: #a86f00;
+}
+
+.stats-cell-number.is-overdue,
+.tail-value.is-overdue {
+  border-color: #8ac8e8;
+  background: #eaf8ff;
+  color: #176f9f;
+}
+
 * {
   box-sizing: border-box;
 }
