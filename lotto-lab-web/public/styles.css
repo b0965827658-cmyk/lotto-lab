@@ -1803,8 +1803,10 @@ body[data-plan="free"] .pro-required {
 }
 
 .ball {
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-content: center;
   width: 52px;
   height: 52px;
   padding: 0;
@@ -1817,6 +1819,7 @@ body[data-plan="free"] .pro-required {
   font-variant-numeric: tabular-nums;
   line-height: 1;
   text-align: center;
+  vertical-align: middle;
   box-shadow: inset 0 -8px 14px rgba(0, 0, 0, 0.14);
 }
 
