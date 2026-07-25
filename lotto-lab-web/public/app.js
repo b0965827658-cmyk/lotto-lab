@@ -132,6 +132,8 @@ const els = {
   history: $("#historyRows"),
   historyTails: $("#historyTailRows"),
   historyNumberLegend: $("#historyNumberLegend"),
+  parityTailRows: $("#parityTailRows"),
+  parityTailCount: $("#parityTailCount"),
   drawCount: $("#drawCount"),
   plans: $("#planGrid"),
   savedForm: $("#savedForm"),
@@ -436,6 +438,36 @@ function historyTailRows(draws) {
     .join("");
 }
 
+function parityTailRows(draws) {
+  if (!draws.length) {
+    return `<tr><td colspan="15" class="empty-cell">查無符合條件的開獎紀錄</td></tr>`;
+  }
+  return draws
+    .map((draw) => {
+      const numbers = draw.numbers || [];
+      const odd = numbers.filter((number) => number % 2 === 1).length;
+      const even = numbers.length - odd;
+      const tails = Array.from({ length: 10 }, () => 0);
+      numbers.forEach((number) => {
+        tails[number % 10] += 1;
+      });
+      return `
+        <tr>
+          <td>
+            <span class="history-date">${draw.date || "-"}</span>
+            <span class="history-weekday">${weekdayLabel(draw.date)}</span>
+          </td>
+          <td><span class="history-period">${draw.period || "-"}</span></td>
+          <td><strong class="parity-value parity-value--odd">${odd}</strong></td>
+          <td><strong class="parity-value parity-value--even">${even}</strong></td>
+          <td><strong class="parity-value parity-value--sum">${numbers.reduce((total, number) => total + number, 0)}</strong></td>
+          ${tails.map((count) => `<td><span class="tail-count ${count ? "has-count" : ""}">${count}</span></td>`).join("")}
+        </tr>
+      `;
+    })
+    .join("");
+}
+
 function filteredHistory() {
   const keyword = state.historySearch.keyword.trim().toLowerCase();
   const number = Number(state.historySearch.number);
@@ -451,7 +483,9 @@ function renderHistory() {
   const rows = filteredHistory();
   els.history.innerHTML = historyRows(rows);
   if (els.historyTails) els.historyTails.innerHTML = historyTailRows(rows);
+  if (els.parityTailRows) els.parityTailRows.innerHTML = parityTailRows(rows);
   els.historyCount.textContent = `${rows.length} / ${state.displayHistory.length} 期`;
+  if (els.parityTailCount) els.parityTailCount.textContent = `${rows.length} 期`;
 }
 
 function setHistoryView(view) {

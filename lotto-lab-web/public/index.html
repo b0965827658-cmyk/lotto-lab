@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=59" />
+    <link rel="stylesheet" href="/styles.css?v=60" />
   </head>
   <body>
     <main class="shell">
@@ -44,6 +44,7 @@
           <button class="page-tab" type="button" data-tab="history">歷史開獎</button>
           <button class="page-tab" type="button" data-tab="model">模型</button>
           <button class="page-tab" type="button" data-tab="stats">冷熱號</button>
+          <button class="page-tab" type="button" data-tab="parity-tail">奇偶尾數</button>
           <button class="page-tab" type="button" data-tab="model-pattern">邏輯推理</button>
           <button class="page-tab" type="button" data-tab="backtest">模型回測</button>
           <button class="page-tab" type="button" data-tab="subscription">升級訂閱</button>
@@ -273,6 +274,49 @@
         </article>
         </div>
 
+        <div class="tab-panel" data-tab-panel="parity-tail">
+        <article class="panel parity-tail-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">結構分析</p>
+              <h2>奇偶尾數</h2>
+            </div>
+            <span id="parityTailCount" class="count-pill">-</span>
+          </div>
+          <p class="fineprint">每期整理奇數、偶數、總和與 0～9 尾數顆數，方便快速觀察尾數分布。</p>
+          <div class="parity-tail-legend" aria-label="奇偶尾數說明">
+            <span class="parity-key parity-key--odd">奇數</span>
+            <span class="parity-key parity-key--even">偶數</span>
+            <span class="parity-key parity-key--sum">總和</span>
+            <span class="parity-key parity-key--tail">尾數 0～9</span>
+          </div>
+          <div class="parity-tail-table-wrap">
+            <table class="parity-tail-table">
+              <thead>
+                <tr>
+                  <th>開獎日期</th>
+                  <th>期別</th>
+                  <th>奇數</th>
+                  <th>偶數</th>
+                  <th>總和</th>
+                  <th>0尾</th>
+                  <th>1尾</th>
+                  <th>2尾</th>
+                  <th>3尾</th>
+                  <th>4尾</th>
+                  <th>5尾</th>
+                  <th>6尾</th>
+                  <th>7尾</th>
+                  <th>8尾</th>
+                  <th>9尾</th>
+                </tr>
+              </thead>
+              <tbody id="parityTailRows"></tbody>
+            </table>
+          </div>
+        </article>
+        </div>
+
         <div class="tab-panel" data-tab-panel="model-pattern">
         <article class="panel pattern-panel logic-panel" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看綜合模型最高分的 5 個號碼與推理摘要。">
           <div class="panel-head compact">
@@ -388,6 +432,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=60"></script>
+    <script src="/app.js?v=61"></script>
   </body>
 </html>

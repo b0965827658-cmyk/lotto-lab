@@ -176,7 +176,7 @@ select {
 .page-tabs {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 8px;
   padding: 8px;
   border: 1px solid var(--line);
@@ -217,6 +217,7 @@ select {
 
 .tab-panel[data-tab-panel="stats"] .stats-intro,
 .tab-panel[data-tab-panel="stats"] .stats-overview,
+.tab-panel[data-tab-panel="parity-tail"] .parity-tail-panel,
 .tab-panel[data-tab-panel="model-pattern"] .pattern-panel,
 .tab-panel[data-tab-panel="backtest"] .backtest-panel {
   grid-column: 1 / -1;
@@ -2113,8 +2114,131 @@ body[data-plan="free"] .pro-required {
   border-top: 0;
 }
 
-.history-tail-record .history-tail-title {
-  margin-bottom: 8px;
+.parity-tail-panel {
+  overflow: hidden;
+}
+
+.parity-tail-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.parity-key {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.parity-key--odd,
+.parity-value--odd {
+  color: #9b4b14;
+}
+
+.parity-key--odd {
+  background: #fff0d6;
+}
+
+.parity-key--even,
+.parity-value--even {
+  color: #236b83;
+}
+
+.parity-key--even {
+  background: #e0f1f7;
+}
+
+.parity-key--sum,
+.parity-value--sum {
+  color: #5f438e;
+}
+
+.parity-key--sum {
+  background: #eee7fb;
+}
+
+.parity-key--tail {
+  background: #e8f2ed;
+  color: var(--green);
+}
+
+.parity-tail-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.parity-tail-table {
+  min-width: 920px;
+  font-variant-numeric: tabular-nums;
+}
+
+.parity-tail-table th,
+.parity-tail-table td {
+  padding: 10px 8px;
+  text-align: center;
+}
+
+.parity-tail-table th:nth-child(1),
+.parity-tail-table td:nth-child(1),
+.parity-tail-table th:nth-child(2),
+.parity-tail-table td:nth-child(2) {
+  text-align: left;
+}
+
+.parity-tail-table th:nth-child(1),
+.parity-tail-table td:nth-child(1) {
+  min-width: 112px;
+}
+
+.parity-tail-table th:nth-child(2),
+.parity-tail-table td:nth-child(2) {
+  min-width: 96px;
+}
+
+.parity-value {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  min-height: 32px;
+  border-radius: 9px;
+  font-size: 17px;
+  font-weight: 1000;
+}
+
+.parity-value--odd {
+  background: #fff4e4;
+}
+
+.parity-value--even {
+  background: #e8f6fa;
+}
+
+.parity-value--sum {
+  background: #f2edfc;
+}
+
+.tail-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 27px;
+  min-height: 27px;
+  border-radius: 50%;
+  background: #f0f3f1;
+  color: #77827c;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.tail-count.has-count {
+  background: #d6efe1;
+  color: var(--green);
 }
 
 .legend-ball {
