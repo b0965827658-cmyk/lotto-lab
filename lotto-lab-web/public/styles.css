@@ -415,6 +415,16 @@ body {
     linear-gradient(135deg, rgba(210, 224, 239, 0.5), transparent 55%) !important;
 }
 
+@media (min-width: 821px) {
+  .candidate-item {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .mode-snapshot-list .logic-summary {
+    grid-column: 1 / -1 !important;
+  }
+}
+
 .topbar {
   border-color: rgba(190, 220, 246, 0.38) !important;
   background: linear-gradient(112deg, #102b49 0%, #1b527d 60%, #293d76 100%) !important;
