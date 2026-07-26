@@ -4,6 +4,7 @@ import csv
 import hashlib
 import html
 import io
+import itertools
 import json
 import os
 import random
@@ -52,7 +53,7 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "30"))
 LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "10"))
-ANALYSIS_ENGINE_VERSION = "2026.07-stable"
+ANALYSIS_ENGINE_VERSION = "2026.07-route-split"
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 BACKTEST_SAMPLE_LIMIT = 24
@@ -288,7 +289,7 @@ def cached(key: str, loader, ttl_seconds: int | None = None):
 
 def cache_key_for_draws(prefix: str, game: str, limit: int, draws: list[dict[str, Any]]) -> str:
     latest = draws[0] if draws else {}
-    return f"{prefix}-{game}-{limit}-{latest.get('date', '')}-{latest.get('period', '')}"
+    return f"{prefix}-{ANALYSIS_ENGINE_VERSION}-{game}-{limit}-{latest.get('date', '')}-{latest.get('period', '')}"
 
 
 def fetch_text(url: str, timeout: int = 25) -> str:
@@ -1100,6 +1101,7 @@ def california_logic_scores(draws: list[dict[str, Any]], max_number: int = 39) -
     recent10 = ordered[:10]
     recent5 = ordered[:5]
     recent3 = ordered[:3]
+    recent20 = ordered[:20]
 
     def frequencies(rows: list[dict[str, Any]]) -> dict[int, int]:
         values = {number: 0 for number in range(1, max_number + 1)}
@@ -1111,6 +1113,7 @@ def california_logic_scores(draws: list[dict[str, Any]], max_number: int = 39) -
 
     recent5_frequency = frequencies(recent5)
     recent10_frequency = frequencies(recent10)
+    recent20_frequency = frequencies(recent20)
     recent3_signal = {number: 0 for number in range(1, max_number + 1)}
     edge_signal = {number: 0.0 for number in range(1, max_number + 1)}
     for draw_index, draw in enumerate(recent3):
@@ -1136,6 +1139,7 @@ def california_logic_scores(draws: list[dict[str, Any]], max_number: int = 39) -
 
     max_recent5 = max(recent5_frequency.values(), default=0) or 1
     max_recent10 = max(recent10_frequency.values(), default=0) or 1
+    max_recent20 = max(recent20_frequency.values(), default=0) or 1
     max_recent3 = max(recent3_signal.values(), default=0) or 1
     max_edge = max(edge_signal.values(), default=0) or 1
     scores: dict[int, float] = {}
@@ -1153,22 +1157,25 @@ def california_logic_scores(draws: list[dict[str, Any]], max_number: int = 39) -
 
         hot_score = recent5_frequency[number] / max_recent5
         ten_period_score = recent10_frequency[number] / max_recent10
+        twenty_period_score = recent20_frequency[number] / max_recent20
         recent_draw_score = recent3_signal[number] / max_recent3
         edge_score = edge_signal[number] / max_edge
         freshness_score = max(0.0, 1.0 - min(gap, 20) / 20)
         tail_freshness_score = max(0.0, 1.0 - min(tail_gap, 6) / 6)
         score = (
-            hot_score * 0.24
-            + ten_period_score * 0.18
-            + recent_draw_score * 0.22
-            + edge_score * 0.18
-            + freshness_score * 0.10
-            + tail_freshness_score * 0.08
+            hot_score * 0.17
+            + ten_period_score * 0.19
+            + twenty_period_score * 0.08
+            + recent_draw_score * 0.16
+            + edge_score * 0.24
+            + freshness_score * 0.09
+            + tail_freshness_score * 0.07
         )
+        # 長遺漏與長冷尾只降權，不硬排除，避免把隨機事件誤當成絕對規律。
         if number_blocked:
-            score -= 0.65
+            score -= 0.18
         if tail_blocked:
-            score -= 0.35
+            score -= 0.10
         scores[number] = round(score, 6)
 
     return {
@@ -1180,6 +1187,7 @@ def california_logic_scores(draws: list[dict[str, Any]], max_number: int = 39) -
         "blockedTails": sorted(blocked_tails),
         "recent5Frequency": recent5_frequency,
         "recent10Frequency": recent10_frequency,
+        "recent20Frequency": recent20_frequency,
         "recent3Signal": recent3_signal,
         "edgeSignal": edge_signal,
     }
@@ -1188,21 +1196,8 @@ def california_logic_scores(draws: list[dict[str, Any]], max_number: int = 39) -
 def california_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> list[int]:
     logic = california_logic_scores(draws, max_number=max_number)
     scores = logic["scores"]
-    gaps = logic["gaps"]
-    tail_gaps = logic["tailGaps"]
-
-    # Keep the requested exclusions whenever there are enough alternatives.
-    eligible = [
-        number
-        for number in range(1, max_number + 1)
-        if gaps.get(number, 0) < 20 and tail_gaps.get(number % 10, 0) < 4
-    ]
-    if len(eligible) < pick_count:
-        eligible = [number for number in range(1, max_number + 1) if gaps.get(number, 0) < 20]
-    if len(eligible) < pick_count:
-        eligible = list(range(1, max_number + 1))
-
-    ranked = sorted(eligible, key=lambda number: (-scores[number], number))
+    # 長遺漏與冷尾在分數中降權，但保留所有號碼作為低權重候選。
+    ranked = sorted(range(1, max_number + 1), key=lambda number: (-scores[number], number))
     return sorted(ranked[:pick_count])
 
 
@@ -1215,7 +1210,7 @@ def california_rolling_backtest(
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     distribution = {str(number): 0 for number in range(pick_count + 1)}
     rows = []
-    sample_size = min(BACKTEST_SAMPLE_LIMIT, max(0, len(ordered) - 10))
+    sample_size = min(36, max(0, len(ordered) - 10))
     for index in range(sample_size):
         target = ordered[index]
         training = ordered[index + 1 : index + 91]
@@ -1251,8 +1246,214 @@ def california_rolling_backtest(
         "bestHit": best_hit,
         "distribution": distribution,
         "recentRows": rows[:10],
-        "method": "天天樂專屬回測：先排除長期未開號碼與長冷尾數，再整合近10期熱度、前2-3期、鄰近邊號與近10期出現次數。",
+        "method": "天天樂專屬滾動回測：近3期邊號、近5/10期熱度、近20期背景與尾數新鮮度交叉；長遺漏只降權，不硬排除。",
     }
+
+
+TW539_VARIANTS = {
+    "cycle": {
+        "label": "539 遺漏週期",
+        "summary": "近 14 期熱度、近 36 期背景與遺漏週期交叉；再補上期鄰近與尾數訊號。",
+        "shape": False,
+        "weights": {
+            "heat": 0.15,
+            "recent": 0.09,
+            "trend": 0.06,
+            "gap": 0.28,
+            "neighbor": 0.08,
+            "tail": 0.06,
+            "pair": 0.08,
+            "drag": 0.07,
+            "repeatSignal": 0.05,
+            "interval": 0.08,
+        },
+    },
+    "cycle-shape": {
+        "label": "539 週期版路",
+        "summary": "以遺漏週期為主，加入近期常見的奇偶、區間、總和與分散形狀。",
+        "shape": True,
+        "weights": {
+            "heat": 0.15,
+            "recent": 0.09,
+            "trend": 0.06,
+            "gap": 0.28,
+            "neighbor": 0.08,
+            "tail": 0.06,
+            "pair": 0.08,
+            "drag": 0.07,
+            "repeatSignal": 0.05,
+            "interval": 0.08,
+        },
+    },
+    "recent": {
+        "label": "539 近期動能",
+        "summary": "提高近 14 期與近 36 期訊號，避免只看長期總頻率。",
+        "shape": False,
+        "weights": {
+            "heat": 0.14,
+            "recent": 0.27,
+            "trend": 0.17,
+            "gap": 0.06,
+            "neighbor": 0.06,
+            "tail": 0.04,
+            "pair": 0.05,
+            "drag": 0.08,
+            "repeatSignal": 0.05,
+            "interval": 0.08,
+        },
+    },
+}
+
+
+def tw539_logic_scores(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    variant: str = "cycle",
+) -> dict[str, Any]:
+    """539 專屬計分：短期、週期與版路分開計算，不沿用天天樂的硬篩選。"""
+    profile = pattern_profile(draws, max_number)
+    config = TW539_VARIANTS.get(variant, TW539_VARIANTS["cycle"])
+    weights = config["weights"]
+    scores = {
+        number: round(
+            sum(profile["numberScores"][number][feature] * weight for feature, weight in weights.items()),
+            6,
+        )
+        for number in range(1, max_number + 1)
+    }
+    ranked = sorted(scores, key=lambda number: (-scores[number], number))
+    return {
+        "profile": profile,
+        "scores": scores,
+        "ranked": ranked,
+        "candidatePool": ranked[: min(15, max_number)],
+        "variant": variant,
+        "label": config["label"],
+    }
+
+
+def tw539_shape_score(numbers: tuple[int, ...], profile: dict[str, Any], number_scores: dict[int, float]) -> float:
+    """把常見版路當成輕微加分，避免版路規則反過來主導號碼。"""
+    combo_model = {
+        "combo": {
+            "spread": 0.22,
+            "zone": 0.20,
+            "odd": 0.16,
+            "low": 0.10,
+            "sum": 0.16,
+            "tail": 0.06,
+            "repeat": 0.06,
+            "interval": 0.04,
+        }
+    }
+    individual = sum(number_scores[number] for number in numbers) / len(numbers)
+    shape = combo_pattern_score(list(numbers), profile, combo_model, max_number=39)
+    return individual * 0.84 + shape * 0.16
+
+
+def tw539_recommendation(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    variant: str = "cycle",
+) -> list[int]:
+    logic = tw539_logic_scores(draws, max_number=max_number, variant=variant)
+    scores = logic["scores"]
+    pool = logic["candidatePool"]
+    if TW539_VARIANTS.get(variant, TW539_VARIANTS["cycle"])["shape"] and len(pool) >= pick_count:
+        candidates = itertools.combinations(pool, pick_count)
+        best = max(
+            candidates,
+            key=lambda combo: (
+                tw539_shape_score(combo, logic["profile"], scores),
+                tuple(-number for number in combo),
+            ),
+        )
+        return list(best)
+    return sorted(pool[:pick_count])
+
+
+def tw539_rolling_backtest(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+    variant: str = "cycle",
+) -> dict[str, Any]:
+    ordered = sorted(draws, key=lambda item: (item["date"], item["period"]), reverse=True)
+    distribution = {str(number): 0 for number in range(pick_count + 1)}
+    rows = []
+    sample_size = min(36, max(0, len(ordered) - 25))
+    for index in range(sample_size):
+        target = ordered[index]
+        training = ordered[index + 1 : index + 91]
+        if len(training) < 20:
+            continue
+        pick = tw539_recommendation(training, max_number=max_number, pick_count=pick_count, variant=variant)
+        hits = len(set(pick) & set(target["numbers"]))
+        distribution[str(hits)] += 1
+        rows.append(
+            {
+                "period": target.get("period", ""),
+                "date": target.get("date", ""),
+                "pick": pick,
+                "actual": target["numbers"],
+                "hits": hits,
+            }
+        )
+    tested = len(rows)
+    hit_sum = sum(row["hits"] for row in rows)
+    one_plus = sum(1 for row in rows if row["hits"] >= 1)
+    two_plus = sum(1 for row in rows if row["hits"] >= 2)
+    three_plus = sum(1 for row in rows if row["hits"] >= 3)
+    best_hit = max((row["hits"] for row in rows), default=0)
+    config = TW539_VARIANTS.get(variant, TW539_VARIANTS["cycle"])
+    return {
+        "testedCount": tested,
+        "averageHit": round(hit_sum / tested, 2) if tested else 0,
+        "onePlusCount": one_plus,
+        "onePlusRate": round(one_plus / tested * 100, 1) if tested else 0,
+        "twoPlusCount": two_plus,
+        "twoPlusRate": round(two_plus / tested * 100, 1) if tested else 0,
+        "threePlusCount": three_plus,
+        "threePlusRate": round(three_plus / tested * 100, 1) if tested else 0,
+        "bestHit": best_hit,
+        "distribution": distribution,
+        "recentRows": rows[:10],
+        "method": f"539 專屬滾動回測：每次只用目標期以前資料，採用「{config['label']}」，不把未來開獎資料倒灌回模型。",
+    }
+
+
+def choose_tw539_strategy(
+    draws: list[dict[str, Any]],
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
+    results = []
+    for variant, config in TW539_VARIANTS.items():
+        backtest = tw539_rolling_backtest(draws, max_number=max_number, pick_count=pick_count, variant=variant)
+        quality = (
+            backtest["averageHit"] * 100
+            + backtest["onePlusRate"] * 0.95
+            + backtest["twoPlusRate"] * 1.55
+            + backtest["threePlusRate"] * 3.2
+            + backtest["bestHit"] * 14
+        )
+        results.append(
+            {
+                "id": variant,
+                "label": config["label"],
+                "quality": round(quality, 2),
+                "averageHit": backtest["averageHit"],
+                "onePlusRate": backtest["onePlusRate"],
+                "twoPlusRate": backtest["twoPlusRate"],
+                "threePlusRate": backtest["threePlusRate"],
+                "bestHit": backtest["bestHit"],
+                "testedCount": backtest["testedCount"],
+            }
+        )
+    results.sort(key=lambda item: (-item["quality"], -item["onePlusRate"], -item["averageHit"], item["id"]))
+    selected = results[0]["id"] if results else "cycle"
+    return selected, tw539_rolling_backtest(draws, max_number=max_number, pick_count=pick_count, variant=selected), results
 
 
 def analyze_california(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
@@ -1306,19 +1507,21 @@ def analyze_california(draws: list[dict[str, Any]], max_number: int = 39, pick_c
         ],
         "patterns": patterns,
         "strategy": {
+            "id": "ca-fantasy5-short-cycle",
             "label": "天天樂專屬整合邏輯",
-            "summary": "排除20期未開與長冷尾數，再整合近期熱號、前2-3期、鄰近邊號與近10期高頻號碼。",
+            "summary": "近3期邊號與熱度為主，交叉近5/10期頻率、近20期背景與尾數新鮮度。",
             "steps": [
-                "20期未開號碼優先排除",
-                "多期未見尾數優先排除",
-                "補進近10期熱號與近10期高頻號碼",
-                "補進前2-3期開獎號碼與鄰近邊號",
-                "依整合分數排序取最高5碼",
+                "近3期：抓開獎號碼周圍的邊號動能",
+                "近5/10期：抓短期熱號與連續出現訊號",
+                "近20期：確認短期熱度不是單一期噪音",
+                "20期以上未開與冷尾只降權，不硬排除",
+                "依天天樂專屬分數排序取最高5碼",
             ],
-            "excludedNumbers": logic["blockedNumbers"],
-            "excludedTails": logic["blockedTails"],
+            "downweightedNumbers": logic["blockedNumbers"],
+            "downweightedTails": logic["blockedTails"],
+            "candidatePool": sorted(logic["scores"], key=lambda number: (-logic["scores"][number], number))[:15],
         },
-        "note": "加州天天樂採用專屬短期邏輯：先排除20期未開與長冷尾數，再整合近期熱號、前2-3期、鄰近邊號及近10期高頻號碼；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
+        "note": "加州天天樂採用獨立短週期邏輯：近3期邊號、近5/10期熱度、近20期背景與尾數新鮮度交叉；長遺漏只降權，不代表必開或必不開。彩券每期仍是隨機事件，不能保證中獎。",
     }
 
 
@@ -1533,28 +1736,19 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
     hot = sorted(frequency, key=lambda n: (-frequency[n], n))[:10]
     cold = sorted(frequency, key=lambda n: (frequency[n], n))[:10]
     overdue = sorted(gaps, key=lambda n: (-gaps[n], n))[:10]
-
-    scored = []
-    max_freq = max(frequency.values()) or 1
-    max_gap = max(gaps.values()) or 1
-    for n in frequency:
-        score = (frequency[n] / max_freq) * 0.58 + (gaps[n] / max_gap) * 0.42
-        scored.append((score, n))
-    seed_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    selected_profile, backtest, model_results = choose_model_profile(draws, max_number=max_number, pick_count=pick_count)
-    recommendation = model_recommendation(
+    selected_variant, backtest, model_results = choose_tw539_strategy(
         draws,
         max_number=max_number,
         pick_count=pick_count,
-        seed_label=seed_label,
-        profile_name=selected_profile,
     )
-    recommendation_scores = recommendation_number_scores(
+    logic = tw539_logic_scores(draws, max_number=max_number, variant=selected_variant)
+    recommendation = tw539_recommendation(
         draws,
         max_number=max_number,
-        seed_label=seed_label,
-        profile_name=selected_profile,
+        pick_count=pick_count,
+        variant=selected_variant,
     )
+    recommendation_scores = logic["scores"]
     recommendation_roles = [
         {"number": number, "rank": rank, "score": round(recommendation_scores.get(number, 0), 4)}
         for rank, number in enumerate(
@@ -1562,7 +1756,9 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
             start=1,
         )
     ]
-    patterns = pattern_summary(draws, max_number, selected_profile)
+    patterns = pattern_summary(draws, max_number, f"tw539-{selected_variant}")
+    patterns["selectedProfile"] = f"tw539-{selected_variant}"
+    patterns["selectedLabel"] = TW539_VARIANTS.get(selected_variant, TW539_VARIANTS["cycle"])["label"]
 
     return {
         "drawCount": len(draws),
@@ -1575,7 +1771,21 @@ def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int =
         "backtest": backtest,
         "modelProfiles": model_results,
         "patterns": patterns,
-        "note": "這是用熱度、近期動能、遺漏週期、尾數區間、奇偶大小、總和版路、鄰近號與滾動回測做的統計參考；彩券每期仍是隨機事件，不代表可預測或保證中獎。",
+        "strategy": {
+            "id": f"tw539-{selected_variant}",
+            "label": TW539_VARIANTS.get(selected_variant, TW539_VARIANTS["cycle"])["label"],
+            "summary": TW539_VARIANTS.get(selected_variant, TW539_VARIANTS["cycle"])["summary"],
+            "steps": [
+                "近 14 期：抓短期熱度與近期動能",
+                "近 36 期：確認熱度是否只是短暫波動",
+                "遺漏週期：用軟性回補分數，不硬指定必開",
+                "上期鄰近、拖牌與尾數：只作輔助加分",
+                "用滾動回測比較路線，再產生本期 5 碼",
+            ],
+            "candidatePool": logic["candidatePool"],
+            "variant": selected_variant,
+        },
+        "note": "539 採用獨立的短期熱度、遺漏週期、鄰近號、尾數與版路輕量整合；回測只使用當時以前的資料。彩券每期仍是隨機事件，任何模型都不能保證命中。",
     }
 
 
@@ -1589,7 +1799,6 @@ def choose_best_analysis_window(
     ordered.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     candidates = [window for window in AUTO_WINDOW_CANDIDATES if window <= len(ordered)]
     rows = []
-    seed_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     for window in candidates:
         window_draws = ordered[:window]
         if game == "ca-fantasy5":
@@ -1598,21 +1807,19 @@ def choose_best_analysis_window(
             logic_scores = california_logic_scores(window_draws, max_number=max_number)["scores"]
             model_label = "天天樂專屬整合邏輯"
         else:
-            pick = model_recommendation(
+            variant, backtest, _ = choose_tw539_strategy(
                 window_draws,
                 max_number=max_number,
                 pick_count=pick_count,
-                seed_label=seed_label,
-                profile_name="balanced",
             )
-            backtest = rolling_backtest(window_draws, max_number=max_number, pick_count=pick_count, profile_name="balanced")
-            logic_scores = recommendation_number_scores(
+            pick = tw539_recommendation(
                 window_draws,
                 max_number=max_number,
-                seed_label=seed_label,
-                profile_name="balanced",
+                pick_count=pick_count,
+                variant=variant,
             )
-            model_label = MODEL_PROFILES["balanced"]["label"]
+            logic_scores = tw539_logic_scores(window_draws, max_number=max_number, variant=variant)["scores"]
+            model_label = TW539_VARIANTS.get(variant, TW539_VARIANTS["cycle"])["label"]
         if backtest.get("testedCount", 0) < 5:
             continue
         roles = [
@@ -1655,7 +1862,7 @@ def choose_best_analysis_window(
         "method": (
             "天天樂專屬邏輯比較多個分析窗口，依平均命中、2 中以上比例與最高命中綜合排序。"
             if game == "ca-fantasy5"
-            else "比較有足夠歷史樣本的多個分析窗口，依平均命中、2 中以上比例與最高命中綜合排序。"
+            else "539 專屬邏輯比較多個分析窗口，依至少 1 中、平均命中、2 中以上比例與最高命中綜合排序。"
         ),
     }
 
@@ -1671,7 +1878,7 @@ def analyze_with_stable_backtest(
     if current_backtest.get("testedCount") or len(backtest_draws) < BACKTEST_MIN_HISTORY:
         return analysis
 
-    selected_profile, fallback_backtest, model_results = choose_model_profile(
+    selected_profile, fallback_backtest, model_results = choose_tw539_strategy(
         backtest_draws[:BACKTEST_FALLBACK_LIMIT],
         max_number=max_number,
         pick_count=pick_count,
@@ -1682,7 +1889,8 @@ def analyze_with_stable_backtest(
     analysis["backtest"] = fallback_backtest
     analysis["modelProfiles"] = model_results
     analysis["patterns"]["selectedProfile"] = selected_profile
-    analysis["patterns"]["selectedLabel"] = MODEL_PROFILES.get(selected_profile, MODEL_PROFILES["balanced"])["label"]
+    analysis["patterns"]["selectedProfile"] = f"tw539-{selected_profile}"
+    analysis["patterns"]["selectedLabel"] = TW539_VARIANTS.get(selected_profile, TW539_VARIANTS["cycle"])["label"]
     analysis["backtest"]["method"] = (
         f"目前選擇近 {len(draws)} 期，短期樣本不足以單獨回測；"
         f"模型回測已自動改用近 {min(len(backtest_draws), BACKTEST_FALLBACK_LIMIT)} 期穩定樣本。"
