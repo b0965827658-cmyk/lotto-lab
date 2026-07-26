@@ -131,6 +131,7 @@ const els = {
   pickMeta: $("#pickMeta"),
   note: $("#analysisNote"),
   statsMatrix: $("#statsMatrix"),
+  statsInsight: $("#statsInsight"),
   history: $("#historyRows"),
   historyTails: $("#historyTailRows"),
   historyNumberLegend: $("#historyNumberLegend"),
@@ -360,7 +361,7 @@ function startCountdown() {
   state.countdownTimer = window.setInterval(renderCountdown, 1000);
 }
 
-function statsMatrixRows(items) {
+function statsRowsAndSets(items) {
   const sourceRows = Array.isArray(items) ? items : [];
   const rows = Array.from({ length: 39 }, (_, index) => sourceRows.find((item) => item.number === index + 1) || {
     number: index + 1,
@@ -372,6 +373,57 @@ function statsMatrixRows(items) {
   const overdueSet = new Set(gapRank.slice(0, Math.max(6, Math.ceil(rows.length * 0.2))).map((item) => item.number));
   const hotSet = new Set(countRank.slice(0, Math.max(8, Math.ceil(rows.length * 0.25))).map((item) => item.number));
   const coldSet = new Set(countRank.slice(-Math.max(8, Math.ceil(rows.length * 0.25))).map((item) => item.number));
+  const returnRows = rows
+    .filter((item) => item.gap >= 2 && item.gap <= Math.max(8, Math.ceil(rows.length * 0.35)) && item.count > 0)
+    .sort((a, b) => b.count - a.count || b.gap - a.gap || a.number - b.number)
+    .slice(0, 6);
+  const inactiveRows = countRank
+    .filter((item) => !overdueSet.has(item.number))
+    .slice(-6)
+    .sort((a, b) => a.count - b.count || b.gap - a.gap || a.number - b.number);
+  return { rows, overdueSet, hotSet, coldSet, gapRank, returnRows, inactiveRows };
+}
+
+function formatStatsNumbers(items, field = "number") {
+  return items.length ? items.map((item) => pad(item[field])).join("、") : "目前沒有符合條件的號碼";
+}
+
+function statsInsightMarkup(items) {
+  const { gapRank, returnRows, inactiveRows } = statsRowsAndSets(items);
+  const multiRows = gapRank.filter((item) => item.gap > 0).slice(0, 6);
+  const hotRows = [...(Array.isArray(items) ? items : [])]
+    .sort((a, b) => b.count - a.count || a.number - b.number)
+    .slice(0, 6);
+  return `
+    <div class="stats-insight-head">
+      <strong>冷熱號文字摘要</strong>
+      <span>依目前分析期數整理</span>
+    </div>
+    <div class="stats-insight-grid">
+      <div class="stats-insight-item stats-insight-item--return">
+        <strong>本期回補號</strong>
+        <span>${formatStatsNumbers(returnRows)}</span>
+      </div>
+      <div class="stats-insight-item stats-insight-item--hot">
+        <strong>近期熱號</strong>
+        <span>${formatStatsNumbers(hotRows)}</span>
+      </div>
+      <div class="stats-insight-item stats-insight-item--inactive">
+        <strong>不活躍號碼</strong>
+        <span>${formatStatsNumbers(inactiveRows)}</span>
+      </div>
+      <div class="stats-insight-item stats-insight-item--overdue">
+        <strong>多期未出</strong>
+        <span>${formatStatsNumbers(multiRows)}</span>
+      </div>
+    </div>
+    <p class="stats-insight-note">本期開獎號碼會在下方以藍色背景與「本期」標籤標示；文字摘要僅供統計參考。</p>
+  `;
+}
+
+function statsMatrixRows(items, latestNumbers = []) {
+  const { rows, overdueSet, hotSet, coldSet } = statsRowsAndSets(items);
+  const latestSet = new Set(latestNumbers);
 
   return rows
     .map((item) => {
@@ -383,10 +435,11 @@ function statsMatrixRows(items) {
         normal: "一般",
       }[status];
       const gapLabel = `未開 ${item.gap} 期`;
+      const isLatest = latestSet.has(item.number);
       return `
-        <div class="stats-cell stats-cell--${status}" title="${pad(item.number)}：${gapLabel}，${statusLabel}">
+        <div class="stats-cell stats-cell--${status} ${isLatest ? "stats-cell--latest" : ""}" title="${pad(item.number)}：${gapLabel}，${statusLabel}${isLatest ? "，本期開獎" : ""}">
           <span class="stats-cell-number">${pad(item.number)}</span>
-          <span class="stats-cell-detail"><strong>${gapLabel}</strong><small>${statusLabel}</small></span>
+          <span class="stats-cell-detail"><strong>${gapLabel}</strong><small>${statusLabel}</small>${isLatest ? '<em class="stats-latest-badge">本期</em>' : ""}</span>
         </div>
       `;
     })
@@ -1986,7 +2039,8 @@ function render(payload, companionPayload = null) {
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles);
-  if (els.statsMatrix) els.statsMatrix.innerHTML = statsMatrixRows(analysis.frequency);
+  if (els.statsInsight) els.statsInsight.innerHTML = statsInsightMarkup(analysis.frequency);
+  if (els.statsMatrix) els.statsMatrix.innerHTML = statsMatrixRows(analysis.frequency, latest?.numbers || []);
   renderHistory();
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderSavedPicks();

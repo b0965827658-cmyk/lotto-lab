@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=67" />
+    <link rel="stylesheet" href="/styles.css?v=68" />
   </head>
   <body>
     <main class="shell">
@@ -263,11 +263,15 @@
           <div class="stats-meta">
             <span id="drawCount">-</span>
             <div class="stats-legend" aria-label="顏色說明">
+              <span class="stats-key stats-key--latest">本期開獎</span>
               <span class="stats-key stats-key--overdue">最久未開</span>
               <span class="stats-key stats-key--hot">熱號</span>
               <span class="stats-key stats-key--cold">中冷號</span>
               <span class="stats-key stats-key--normal">一般</span>
             </div>
+          </div>
+          <div class="stats-insight" id="statsInsight" aria-live="polite">
+            <div class="stats-loading">正在整理冷熱號摘要...</div>
           </div>
           <div class="stats-matrix" id="statsMatrix">
             <div class="stats-loading">正在同步 01～39 冷熱統計...</div>
@@ -433,6 +437,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=63"></script>
+    <script src="/app.js?v=64"></script>
   </body>
 </html>
