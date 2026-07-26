@@ -1055,10 +1055,6 @@ select {
   margin-bottom: 14px;
 }
 
-.notify-band {
-  justify-content: flex-end;
-}
-
 .game-switcher {
   grid-column: 1 / -1;
   display: flex;
@@ -1080,6 +1076,20 @@ select {
 
 .game-switcher .segmented {
   width: min(430px, 100%);
+}
+
+.notify-panel {
+  grid-column: 1 / -1;
+}
+
+.notify-panel .notify-quick {
+  width: 100%;
+  margin-left: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.notify-panel .notify-quick .save-button {
+  width: 100%;
 }
 
 .page-tab {
