@@ -137,6 +137,7 @@ const els = {
   historyNumberLegend: $("#historyNumberLegend"),
   parityTailRows: $("#parityTailRows"),
   parityTailCount: $("#parityTailCount"),
+  parityTailInsight: $("#parityTailInsight"),
   drawCount: $("#drawCount"),
   plans: $("#planGrid"),
   savedForm: $("#savedForm"),
@@ -569,6 +570,92 @@ function parityTailRows(draws) {
     .join("");
 }
 
+function parityTailInsightMarkup(draws) {
+  const recent = (draws || [])
+    .filter((draw) => Array.isArray(draw.numbers) && draw.numbers.length)
+    .slice(0, 12);
+  if (!recent.length) {
+    return `<div class="parity-tail-insight-empty">資料累積後會顯示奇偶與尾數推薦。</div>`;
+  }
+
+  const tailCounts = Array.from({ length: 10 }, () => 0);
+  const tailLastSeen = Array.from({ length: 10 }, () => recent.length);
+  const splitCounts = new Map();
+
+  recent.forEach((draw, drawIndex) => {
+    const numbers = draw.numbers.map(Number).filter(Number.isInteger);
+    const odd = numbers.filter((number) => number % 2 === 1).length;
+    const even = numbers.length - odd;
+    const splitKey = `${odd}:${even}`;
+    splitCounts.set(splitKey, (splitCounts.get(splitKey) || 0) + 1);
+    numbers.forEach((number) => {
+      const tail = Math.abs(number) % 10;
+      tailCounts[tail] += 1;
+      tailLastSeen[tail] = Math.min(tailLastSeen[tail], drawIndex);
+    });
+  });
+
+  const tails = Array.from({ length: 10 }, (_, tail) => tail);
+  const hotTails = [...tails]
+    .sort((left, right) => tailCounts[right] - tailCounts[left] || tailLastSeen[left] - tailLastSeen[right] || left - right)
+    .slice(0, 3);
+  const coldTails = [...tails]
+    .sort((left, right) => tailCounts[left] - tailCounts[right] || tailLastSeen[right] - tailLastSeen[left] || left - right)
+    .slice(0, 3);
+  const recommendedTails = [...tails]
+    .sort((left, right) => {
+      const leftScore = tailCounts[left] * 2 + (recent.length - tailLastSeen[left]) * 0.35;
+      const rightScore = tailCounts[right] * 2 + (recent.length - tailLastSeen[right]) * 0.35;
+      return rightScore - leftScore || left - right;
+    })
+    .slice(0, 4);
+  const commonSplit = [...splitCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-Hant"))[0];
+  const [commonOdd, commonEven] = (commonSplit?.[0] || "-:-").split(":");
+  const commonSplitCount = commonSplit?.[1] || 0;
+
+  const tailChips = (items, tone) =>
+    items
+      .map(
+        (tail) =>
+          `<span class="parity-tail-chip parity-tail-chip--${tone}"><b>${tail}尾</b><small>${tailCounts[tail]} 顆</small></span>`,
+      )
+      .join("");
+
+  return `
+    <div class="parity-tail-insight-head">
+      <div>
+        <p class="label">近期結構推薦</p>
+        <strong>近 ${recent.length} 期奇偶與尾數摘要</strong>
+      </div>
+      <span class="count-pill">統計參考</span>
+    </div>
+    <div class="parity-tail-insight-grid">
+      <article class="parity-tail-insight-card parity-tail-insight-card--parity">
+        <span>奇偶推薦</span>
+        <strong>奇 ${commonOdd} ／ 偶 ${commonEven}</strong>
+        <small>近期出現 ${commonSplitCount} 期</small>
+      </article>
+      <article class="parity-tail-insight-card parity-tail-insight-card--hot">
+        <span>近期尾熱</span>
+        <div class="parity-tail-chips">${tailChips(hotTails, "hot")}</div>
+        <small>近期期數內出現顆數較多</small>
+      </article>
+      <article class="parity-tail-insight-card parity-tail-insight-card--cold">
+        <span>近期尾冷</span>
+        <div class="parity-tail-chips">${tailChips(coldTails, "cold")}</div>
+        <small>近期期數內出現顆數較少</small>
+      </article>
+      <article class="parity-tail-insight-card parity-tail-insight-card--focus">
+        <span>優先觀察尾數</span>
+        <div class="parity-tail-chips">${tailChips(recommendedTails, "focus")}</div>
+        <small>綜合出現次數與最近出現位置</small>
+      </article>
+    </div>
+    <p class="parity-tail-insight-note">以上依目前載入資料計算，推薦是統計觀察，不代表下一期必然開出。</p>
+  `;
+}
+
 function filteredHistory() {
   const keyword = state.historySearch.keyword.trim().toLowerCase();
   const number = Number(state.historySearch.number);
@@ -585,6 +672,7 @@ function renderHistory() {
   els.history.innerHTML = historyRows(rows);
   if (els.historyTails) els.historyTails.innerHTML = historyTailRows(rows);
   if (els.parityTailRows) els.parityTailRows.innerHTML = parityTailRows(rows);
+  if (els.parityTailInsight) els.parityTailInsight.innerHTML = parityTailInsightMarkup(state.displayHistory);
   els.historyCount.textContent = `${rows.length} / ${state.displayHistory.length} 期`;
   if (els.parityTailCount) els.parityTailCount.textContent = `${rows.length} 期`;
 }
