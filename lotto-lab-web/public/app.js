@@ -361,39 +361,64 @@ function startCountdown() {
   state.countdownTimer = window.setInterval(renderCountdown, 1000);
 }
 
-function statsRowsAndSets(items) {
+function statsRowsAndSets(items, analysis = state.analysis) {
   const sourceRows = Array.isArray(items) ? items : [];
   const rows = Array.from({ length: 39 }, (_, index) => sourceRows.find((item) => item.number === index + 1) || {
     number: index + 1,
     count: 0,
     gap: 0,
   });
+  const rowByNumber = new Map(rows.map((row) => [row.number, row]));
   const countRank = [...rows].sort((a, b) => b.count - a.count || a.number - b.number);
   const gapRank = [...rows].sort((a, b) => b.gap - a.gap || a.number - b.number);
-  const overdueSet = new Set(gapRank.slice(0, Math.max(6, Math.ceil(rows.length * 0.2))).map((item) => item.number));
-  const hotSet = new Set(countRank.slice(0, Math.max(8, Math.ceil(rows.length * 0.25))).map((item) => item.number));
-  const coldSet = new Set(countRank.slice(-Math.max(8, Math.ceil(rows.length * 0.25))).map((item) => item.number));
+  const mergeCanonicalRows = (key, fallbackRows) => {
+    const canonicalRows = Array.isArray(analysis?.[key]) ? analysis[key] : [];
+    const merged = canonicalRows
+      .map((item) => {
+        const number = Number(item?.number);
+        const row = rowByNumber.get(number);
+        return row ? { ...row, ...item, number } : null;
+      })
+      .filter(Boolean);
+    return merged.length ? merged : fallbackRows;
+  };
+  const hotRows = mergeCanonicalRows("hot", countRank.slice(0, 10));
+  const coldRows = mergeCanonicalRows("cold", [...countRank].reverse().slice(0, 10));
+  const overdueRows = mergeCanonicalRows("overdue", gapRank.slice(0, 10));
+  const overdueSet = new Set(overdueRows.map((item) => item.number));
+  const hotSet = new Set(hotRows.map((item) => item.number));
+  const coldSet = new Set(coldRows.map((item) => item.number));
+  const typicalCount = [...rows].sort((a, b) => a.count - b.count)[Math.floor(rows.length / 2)]?.count ?? 0;
   const returnRows = rows
-    .filter((item) => item.gap >= 2 && item.gap <= Math.max(8, Math.ceil(rows.length * 0.35)) && item.count > 0)
+    .filter(
+      (item) =>
+        item.gap >= 2 &&
+        item.gap <= Math.max(8, Math.ceil(rows.length * 0.35)) &&
+        item.count >= typicalCount &&
+        !overdueSet.has(item.number),
+    )
     .sort((a, b) => b.count - a.count || b.gap - a.gap || a.number - b.number)
     .slice(0, 6);
-  const inactiveRows = countRank
-    .filter((item) => !overdueSet.has(item.number))
-    .slice(-6)
-    .sort((a, b) => a.count - b.count || b.gap - a.gap || a.number - b.number);
-  return { rows, overdueSet, hotSet, coldSet, gapRank, returnRows, inactiveRows };
+  return {
+    rows,
+    overdueSet,
+    hotSet,
+    coldSet,
+    gapRank,
+    returnRows,
+    hotRows,
+    coldRows,
+    overdueRows,
+  };
 }
 
 function formatStatsNumbers(items, field = "number") {
   return items.length ? items.map((item) => pad(item[field])).join("、") : "目前沒有符合條件的號碼";
 }
 
-function statsInsightMarkup(items) {
-  const { gapRank, returnRows, inactiveRows } = statsRowsAndSets(items);
-  const multiRows = gapRank.filter((item) => item.gap > 0).slice(0, 6);
-  const hotRows = [...(Array.isArray(items) ? items : [])]
-    .sort((a, b) => b.count - a.count || a.number - b.number)
-    .slice(0, 6);
+function statsInsightMarkup(analysis) {
+  const items = analysis?.frequency || [];
+  const { returnRows, hotRows, coldRows, overdueRows } = statsRowsAndSets(items, analysis);
   return `
     <div class="stats-insight-head">
       <strong>冷熱號文字摘要</strong>
@@ -406,23 +431,23 @@ function statsInsightMarkup(items) {
       </div>
       <div class="stats-insight-item stats-insight-item--hot">
         <strong>近期熱號</strong>
-        <span>${formatStatsNumbers(hotRows)}</span>
+        <span>${formatStatsNumbers(hotRows.slice(0, 6))}</span>
       </div>
       <div class="stats-insight-item stats-insight-item--inactive">
-        <strong>不活躍號碼</strong>
-        <span>${formatStatsNumbers(inactiveRows)}</span>
+        <strong>不活躍號碼（冷號）</strong>
+        <span>${formatStatsNumbers(coldRows.slice(0, 6))}</span>
       </div>
       <div class="stats-insight-item stats-insight-item--overdue">
         <strong>多期未出</strong>
-        <span>${formatStatsNumbers(multiRows)}</span>
+        <span>${formatStatsNumbers(overdueRows.slice(0, 6))}</span>
       </div>
     </div>
-    <p class="stats-insight-note">本期開獎號碼會在下方以藍色背景與「本期」標籤標示；文字摘要僅供統計參考。</p>
+    <p class="stats-insight-note">熱號、冷號與多期未出直接採用目前分析資料；回補號是「近期曾出現、短期暫停」的觀察清單，僅供統計參考。</p>
   `;
 }
 
-function statsMatrixRows(items, latestNumbers = []) {
-  const { rows, overdueSet, hotSet, coldSet } = statsRowsAndSets(items);
+function statsMatrixRows(items, latestNumbers = [], analysis = state.analysis) {
+  const { rows, overdueSet, hotSet, coldSet } = statsRowsAndSets(items, analysis);
   const latestSet = new Set(latestNumbers);
 
   return rows
@@ -2039,8 +2064,8 @@ function render(payload, companionPayload = null) {
   els.note.textContent = analysis.note;
   renderModelBacktest(analysis.backtest, analysis.modelProfiles);
   renderPatterns(analysis.patterns, analysis.modelProfiles);
-  if (els.statsInsight) els.statsInsight.innerHTML = statsInsightMarkup(analysis.frequency);
-  if (els.statsMatrix) els.statsMatrix.innerHTML = statsMatrixRows(analysis.frequency, latest?.numbers || []);
+  if (els.statsInsight) els.statsInsight.innerHTML = statsInsightMarkup(analysis);
+  if (els.statsMatrix) els.statsMatrix.innerHTML = statsMatrixRows(analysis.frequency, latest?.numbers || [], analysis);
   renderHistory();
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderSavedPicks();
