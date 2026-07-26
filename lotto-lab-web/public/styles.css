@@ -1151,6 +1151,97 @@ select {
   gap: 14px;
 }
 
+.draw-card-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.draw-countdown {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid #d6e0ea;
+  border-radius: 12px;
+  background: #fbfcfe;
+  padding: 12px 16px;
+  box-shadow: 0 8px 18px rgba(16, 43, 73, 0.08);
+}
+
+.draw-countdown--tw539 {
+  border-color: #c8dceb;
+  background: linear-gradient(135deg, #f7fbff, #edf5fb);
+}
+
+.draw-countdown--ca {
+  border-color: #e4d4a5;
+  background: linear-gradient(135deg, #fffdf7, #fff7e3);
+}
+
+.draw-countdown-head,
+.draw-countdown-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.draw-countdown-head > div,
+.draw-countdown-meta > * {
+  min-width: 0;
+}
+
+.draw-countdown-kicker {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.draw-countdown-head strong {
+  display: block;
+  color: #1b527d;
+  font-size: clamp(24px, 3vw, 34px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.draw-countdown--ca .draw-countdown-head strong {
+  color: #986b0d;
+}
+
+.draw-countdown-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.draw-countdown-meta span,
+.draw-countdown-meta strong {
+  border: 1px solid #d6e0ea;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #1b527d;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.draw-countdown--ca .draw-countdown-meta span,
+.draw-countdown--ca .draw-countdown-meta strong {
+  border-color: #e6d6aa;
+  color: #8d6410;
+}
+
+.draw-countdown-meta small {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .analysis-overview {
   grid-column: 1 / -1;
   display: grid;
@@ -1159,6 +1250,7 @@ select {
 }
 
 .recommendation-brief-panel {
+  grid-column: 1 / -1;
   border-color: #d9b052;
   background: linear-gradient(145deg, #fffdf7 0%, #f5f8fb 100%);
 }

@@ -121,11 +121,16 @@ const els = {
   caPeriod: $("#caPeriod"),
   caDate: $("#caDate"),
   caBalls: $("#caBalls"),
-  countdownTime: $("#countdownTime"),
-  countdownBadge: $("#countdownBadge"),
-  countdownGame: $("#countdownGame"),
-  countdownDrawAt: $("#countdownDrawAt"),
-  countdownHint: $("#countdownHint"),
+  tw539CountdownTime: $("#tw539CountdownTime"),
+  tw539CountdownBadge: $("#tw539CountdownBadge"),
+  tw539CountdownGame: $("#tw539CountdownGame"),
+  tw539CountdownDrawAt: $("#tw539CountdownDrawAt"),
+  tw539CountdownHint: $("#tw539CountdownHint"),
+  caCountdownTime: $("#caCountdownTime"),
+  caCountdownBadge: $("#caCountdownBadge"),
+  caCountdownGame: $("#caCountdownGame"),
+  caCountdownDrawAt: $("#caCountdownDrawAt"),
+  caCountdownHint: $("#caCountdownHint"),
   recommendationBrief: $("#recommendationBrief"),
   note: $("#analysisNote"),
   statsMatrix: $("#statsMatrix"),
@@ -335,9 +340,10 @@ function formatCountdown(ms) {
   return days > 0 ? `${days}天 ${time}` : time;
 }
 
-function renderCountdown() {
-  if (!els.countdownTime) return;
-  const next = nextDrawForGame(state.game);
+function renderCountdownCard(game, prefix) {
+  const time = els[`${prefix}CountdownTime`];
+  if (!time) return;
+  const next = nextDrawForGame(game);
   const diff = next.at.getTime() - Date.now();
   const localDrawAt = new Intl.DateTimeFormat("zh-Hant-TW", {
     month: "2-digit",
@@ -347,11 +353,16 @@ function renderCountdown() {
     minute: "2-digit",
     hourCycle: "h23",
   }).format(next.at);
-  els.countdownTime.textContent = formatCountdown(diff);
-  els.countdownBadge.textContent = diff <= 0 ? "更新中" : "倒數";
-  els.countdownGame.textContent = next.gameName;
-  els.countdownDrawAt.textContent = `${localDrawAt} 開獎`;
-  els.countdownHint.textContent = `${next.localLabel}，${next.hint}`;
+  els[`${prefix}CountdownTime`].textContent = formatCountdown(diff);
+  els[`${prefix}CountdownBadge`].textContent = diff <= 0 ? "更新中" : "倒數";
+  els[`${prefix}CountdownGame`].textContent = next.gameName;
+  els[`${prefix}CountdownDrawAt`].textContent = `${localDrawAt} 開獎`;
+  els[`${prefix}CountdownHint`].textContent = `${next.localLabel}，${next.hint}`;
+}
+
+function renderCountdown() {
+  renderCountdownCard("tw539", "tw539");
+  renderCountdownCard("ca-fantasy5", "ca");
 }
 
 function startCountdown() {
