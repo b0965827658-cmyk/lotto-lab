@@ -426,7 +426,7 @@ function statsInsightMarkup(analysis) {
     </div>
     <div class="stats-insight-grid">
       <div class="stats-insight-item stats-insight-item--return">
-        <strong>本期回補號</strong>
+        <strong>短期回補觀察</strong>
         <span>${formatStatsNumbers(returnRows)}</span>
       </div>
       <div class="stats-insight-item stats-insight-item--hot">
@@ -442,7 +442,7 @@ function statsInsightMarkup(analysis) {
         <span>${formatStatsNumbers(overdueRows.slice(0, 6))}</span>
       </div>
     </div>
-    <p class="stats-insight-note">熱號、冷號與多期未出直接採用目前分析資料；回補號是「近期曾出現、短期暫停」的觀察清單，僅供統計參考。</p>
+    <p class="stats-insight-note">熱號、冷號與多期未出直接採用目前分析資料；短期回補觀察是「近期曾出現、短期暫停」的號碼清單，僅供統計參考，不代表下一期必定開出。</p>
   `;
 }
 
