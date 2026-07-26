@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=74" />
+    <link rel="stylesheet" href="/styles.css?v=75" />
   </head>
   <body>
     <main class="shell">
@@ -204,15 +204,6 @@
           <p class="analysis-meta" id="analysisMeta" aria-live="polite">等待資料驗證...</p>
         </article>
 
-        <article class="panel model-page-link" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看綜合模型最高分的 5 個號碼與推理摘要。">
-          <div>
-            <p class="label">邏輯推理</p>
-            <h2>綜合推理最高分 5 碼</h2>
-            <p class="fineprint">把熱度、遺漏、區間、尾數、版路與回測整合成一組，避免多組模式造成誤解。</p>
-          </div>
-          <button class="text-button" type="button" data-tab="model-pattern">查看推理</button>
-        </article>
-
         <section class="analysis-overview" aria-label="近期分析摘要">
         <article class="panel countdown-panel">
           <div class="panel-head compact">
@@ -229,26 +220,18 @@
           </div>
         </article>
 
-        <article class="panel pick-panel">
-          <p class="label">統計參考選號</p>
-          <div class="balls accent" id="pickBalls"></div>
-          <div id="keyNumbers" aria-label="主要號碼與副號碼"></div>
-          <div class="pick-meta" id="pickMeta"></div>
+        <article class="panel recommendation-brief-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">推薦依據</p>
+              <h2>近期結構摘要</h2>
+            </div>
+            <span class="count-pill">不重複列號</span>
+          </div>
+          <div class="recommendation-brief" id="recommendationBrief"></div>
           <p class="fineprint" id="analysisNote"></p>
         </article>
         </section>
-
-        <article class="panel mode-snapshot-panel" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看綜合模型最高分的 5 個號碼與推理摘要。">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">邏輯推理</p>
-              <h2>綜合模型最高分 5 碼</h2>
-            </div>
-            <span class="count-pill">單一結果</span>
-          </div>
-          <p class="fineprint">以下只顯示一組綜合推理結果；分數是依目前資料排序的統計參考，不代表實際機率或保證中獎。</p>
-          <div class="mode-snapshot-list" id="modeSnapshotList"></div>
-        </article>
 
         <article class="panel candidate-panel" data-tier="pro" data-lock-title="Pro 高分組合" data-lock-text="訂閱後可重新產生多組候選排序。">
           <div class="panel-head compact">

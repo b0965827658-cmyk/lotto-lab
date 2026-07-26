@@ -126,9 +126,7 @@ const els = {
   countdownGame: $("#countdownGame"),
   countdownDrawAt: $("#countdownDrawAt"),
   countdownHint: $("#countdownHint"),
-  pickBalls: $("#pickBalls"),
-  keyNumbers: $("#keyNumbers"),
-  pickMeta: $("#pickMeta"),
+  recommendationBrief: $("#recommendationBrief"),
   note: $("#analysisNote"),
   statsMatrix: $("#statsMatrix"),
   statsInsight: $("#statsInsight"),
@@ -1584,30 +1582,49 @@ function keyNumberMarkup(numbers) {
   `;
 }
 
-function renderReferencePick() {
+function renderRecommendationBrief() {
+  if (!els.recommendationBrief) return;
   const candidate = referenceCandidate();
   if (!candidate) {
-    els.pickBalls.innerHTML = "";
-    if (els.keyNumbers) els.keyNumbers.innerHTML = "";
-    els.pickMeta.innerHTML = "";
+    els.recommendationBrief.innerHTML = `<div class="recommendation-brief-empty">資料同步後會顯示本期分析重點。</div>`;
     return;
   }
+  const patterns = state.analysis?.patterns || {};
   const focus = FOCUS_PRESETS[state.analysisFocus] || FOCUS_PRESETS.balanced;
   const tailProfile = hotTailProfile();
   const shortCycle = shortCycleProfile();
-  els.pickBalls.innerHTML = balls(candidate.numbers);
-  if (els.keyNumbers) els.keyNumbers.innerHTML = keyNumberMarkup(candidate.numbers);
-  els.pickMeta.innerHTML = `
-    <span>${state.game === "ca-fantasy5" ? "天天樂專屬整合" : "綜合推理"}</span>
-    <span>模型最高分 5 碼</span>
-    <span>${focus.description}</span>
-    <span>熱尾 ${tailProfile.label}</span>
-    ${state.game === "ca-fantasy5" ? `<span>${shortCycle.label}</span>` : ""}
-    <span>分數 ${candidate.score.total}</span>
-    <span>邏輯 +${candidate.score.pattern || 0}</span>
-    <span>最高 ${candidate.backtest.bestHit} 中</span>
-    <span>3 中以上 ${candidate.backtest.profitableCount} 次</span>
-  `;
+  const odd = patterns.oddPatterns?.[0];
+  const intervals = (patterns.intervals || [])
+    .slice(0, 2)
+    .map((item) => `${item.label} ${item.rate}%`)
+    .join("、") || "資料累積中";
+  const sumRange = patterns.sumRange || {};
+  const sumText = sumRange.min && sumRange.max ? `${sumRange.min}～${sumRange.max}（中心 ${sumRange.center || "-"}）` : "資料累積中";
+  const items = [
+    { label: "目前主軸", value: focus.description, tone: "primary" },
+    { label: "近期熱尾", value: tailProfile.label || "資料累積中", tone: "hot" },
+    { label: "集中區間", value: intervals, tone: "range" },
+    { label: "奇偶重心", value: odd ? `${odd.odd} 奇 / ${odd.even} 偶` : "資料累積中", tone: "parity" },
+    { label: "總和帶", value: sumText, tone: "sum" },
+    {
+      label: "回測參考",
+      value: `近 ${candidate.backtest.testedCount || 0} 期 · 平均 ${candidate.backtest.averageHit ?? "-"} 中 · 最高 ${candidate.backtest.bestHit ?? "-"} 中`,
+      tone: "backtest",
+    },
+  ];
+  if (state.game === "ca-fantasy5" && shortCycle.label) {
+    items.splice(3, 0, { label: "近10期結構", value: shortCycle.label, tone: "cycle" });
+  }
+  els.recommendationBrief.innerHTML = items
+    .map(
+      (item) => `
+        <div class="recommendation-brief-item recommendation-brief-item--${item.tone}">
+          <span>${item.label}</span>
+          <strong>${item.value}</strong>
+        </div>
+      `,
+    )
+    .join("");
 }
 
 function savePick(numbers) {
@@ -1632,7 +1649,7 @@ function savePick(numbers) {
 
 function renderCandidates() {
   if (!isProPlan()) {
-    els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；目前會保留上方一組統計參考選號。</div>`;
+    els.candidates.innerHTML = `<div class="empty-state">高分組合排序屬於 Pro 訂閱版；目前會保留一組綜合推理參考。</div>`;
     return;
   }
   if (!state.analysis || !state.history.length) {
@@ -1770,7 +1787,7 @@ function renderModeSnapshots() {
 
 function renderModelOutput() {
   renderSavedPicks();
-  renderReferencePick();
+  renderRecommendationBrief();
   renderCandidates();
   renderModeSnapshots();
 }
@@ -2177,7 +2194,7 @@ function render(payload, companionPayload = null) {
   renderHistory();
   els.drawCount.textContent = `${analysis.drawCount} 期`;
   renderSavedPicks();
-  renderReferencePick();
+  renderRecommendationBrief();
   renderCandidates();
   renderModeSnapshots();
   const metadata = analysis?.metadata || {};
@@ -2649,7 +2666,7 @@ els.usePick.addEventListener("click", () => {
     return;
   }
   fillSavedSelection(numbers);
-  setStatus("已套用統計參考選號，確認後可儲存。");
+  setStatus("已套用綜合推理推薦，確認後可儲存。");
 });
 
 els.generate.addEventListener("click", () => {

@@ -1158,6 +1158,75 @@ select {
   gap: 14px;
 }
 
+.recommendation-brief-panel {
+  border-color: #d9b052;
+  background: linear-gradient(145deg, #fffdf7 0%, #f5f8fb 100%);
+}
+
+.recommendation-brief-panel .label {
+  color: #1b527d;
+}
+
+.recommendation-brief {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.recommendation-brief-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid #d9e3ec;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 10px 12px;
+}
+
+.recommendation-brief-item > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.recommendation-brief-item > strong {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.recommendation-brief-item--primary {
+  grid-column: 1 / -1;
+  border-color: rgba(27, 82, 125, 0.28);
+  background: #edf5fb;
+}
+
+.recommendation-brief-item--primary > strong,
+.recommendation-brief-item--hot > strong {
+  color: #1b527d;
+}
+
+.recommendation-brief-item--range > strong,
+.recommendation-brief-item--sum > strong {
+  color: #8d6410;
+}
+
+.recommendation-brief-item--backtest > strong {
+  color: #166a52;
+}
+
+.recommendation-brief-empty {
+  grid-column: 1 / -1;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  padding: 18px;
+  text-align: center;
+  font-weight: 900;
+}
+
 .draw-card {
   position: relative;
   isolation: isolate;
@@ -3544,6 +3613,14 @@ th {
 
   .analysis-overview {
     grid-template-columns: 1fr;
+  }
+
+  .recommendation-brief {
+    grid-template-columns: 1fr;
+  }
+
+  .recommendation-brief-item--primary {
+    grid-column: auto;
   }
 
   .draw-card,
