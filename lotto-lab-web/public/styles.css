@@ -1092,6 +1092,10 @@ select {
   width: 100%;
 }
 
+.tab-panel[data-tab-panel="latest"] .disclaimer-panel {
+  grid-column: span 2;
+}
+
 .page-tab {
   min-height: 44px;
   border: 0;
@@ -3438,6 +3442,10 @@ th {
   .candidate-panel {
     display: grid;
     grid-template-columns: 1fr;
+    grid-column: span 1;
+  }
+
+  .tab-panel[data-tab-panel="latest"] .disclaimer-panel {
     grid-column: span 1;
   }
 
