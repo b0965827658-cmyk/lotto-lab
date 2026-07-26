@@ -1051,6 +1051,37 @@ select {
   background: rgba(255, 255, 255, 0.78);
 }
 
+.latest-draws--top {
+  margin-bottom: 14px;
+}
+
+.notify-band {
+  justify-content: flex-end;
+}
+
+.game-switcher {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.game-switcher-label {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.game-switcher .segmented {
+  width: min(430px, 100%);
+}
+
 .page-tab {
   min-height: 44px;
   border: 0;
@@ -3332,6 +3363,16 @@ th {
 
   .control-band {
     flex-direction: column;
+  }
+
+  .game-switcher {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .game-switcher .segmented {
+    width: 100%;
   }
 
   .notify-quick {

@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=70" />
+    <link rel="stylesheet" href="/styles.css?v=71" />
   </head>
   <body>
     <main class="shell">
@@ -23,11 +23,43 @@
         <button id="refreshBtn" class="icon-button" title="重新整理" aria-label="重新整理">↻</button>
       </header>
 
-      <section class="control-band">
-        <div class="segmented" role="tablist" aria-label="彩種">
-          <button class="segment active" data-game="tw539">今彩 539</button>
-          <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
-        </div>
+      <section class="latest-draws latest-draws--top" aria-label="當期開獎號碼">
+        <article class="draw-card draw-card--tw539" data-watermark="539">
+          <div class="draw-card-content">
+            <div class="draw-card-head">
+              <div>
+                <p class="draw-kicker">當期開獎</p>
+                <h2>今彩 539</h2>
+              </div>
+              <span class="draw-badge">台灣彩券</span>
+            </div>
+            <div class="meta draw-meta">
+              <span id="tw539Period">期別 -</span>
+              <span id="tw539Date">日期 -</span>
+            </div>
+            <div class="balls draw-balls" id="tw539Balls"></div>
+          </div>
+        </article>
+
+        <article class="draw-card draw-card--ca" data-watermark="FANTASY 5">
+          <div class="draw-card-content">
+            <div class="draw-card-head">
+              <div>
+                <p class="draw-kicker">另一彩種當期開獎</p>
+                <h2>加州天天樂</h2>
+              </div>
+              <span class="draw-badge">California</span>
+            </div>
+            <div class="meta draw-meta">
+              <span id="caPeriod">期別 -</span>
+              <span id="caDate">日期 -</span>
+            </div>
+            <div class="balls draw-balls" id="caBalls"></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="control-band notify-band">
         <div class="notify-quick">
           <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
           <span id="notifyBadge" class="count-pill">未啟用</span>
@@ -39,6 +71,14 @@
       <section class="status" id="status" aria-live="polite">正在同步開獎資料與數據分析...</section>
 
       <section class="dashboard" id="dashboard" hidden>
+        <div class="game-switcher" aria-label="選擇彩種">
+          <span class="game-switcher-label">選擇彩種</span>
+          <div class="segmented" role="tablist" aria-label="彩種">
+            <button class="segment active" data-game="tw539">今彩 539</button>
+            <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
+          </div>
+        </div>
+
         <nav class="page-tabs" aria-label="功能分頁">
           <button class="page-tab active" type="button" data-tab="latest">最新開獎</button>
           <button class="page-tab" type="button" data-tab="history">歷史開獎</button>
@@ -51,42 +91,6 @@
         </nav>
 
         <div class="tab-panel active" data-tab-panel="latest">
-        <section class="latest-draws" aria-label="最新開獎雙彩種">
-          <article class="draw-card draw-card--tw539" data-watermark="539">
-            <div class="draw-card-content">
-              <div class="draw-card-head">
-                <div>
-                  <p class="draw-kicker">最新一期</p>
-                  <h2>今彩 539</h2>
-                </div>
-                <span class="draw-badge">台灣彩券</span>
-              </div>
-              <div class="meta draw-meta">
-                <span id="tw539Period">期別 -</span>
-                <span id="tw539Date">日期 -</span>
-              </div>
-              <div class="balls draw-balls" id="tw539Balls"></div>
-            </div>
-          </article>
-
-          <article class="draw-card draw-card--ca" data-watermark="FANTASY 5">
-            <div class="draw-card-content">
-              <div class="draw-card-head">
-                <div>
-                  <p class="draw-kicker">另一彩種最新一期</p>
-                  <h2>加州天天樂</h2>
-                </div>
-                <span class="draw-badge">California</span>
-              </div>
-              <div class="meta draw-meta">
-                <span id="caPeriod">期別 -</span>
-                <span id="caDate">日期 -</span>
-              </div>
-              <div class="balls draw-balls" id="caBalls"></div>
-            </div>
-          </article>
-        </section>
-
         <article class="panel saved-panel">
           <div class="panel-head compact">
             <div>
