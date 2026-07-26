@@ -399,6 +399,20 @@ function statsRowsAndSets(items, analysis = state.analysis) {
     )
     .sort((a, b) => b.count - a.count || b.gap - a.gap || a.number - b.number)
     .slice(0, 6);
+  const assignedNumbers = new Set();
+  const takeUnassigned = (candidates) =>
+    candidates.filter((item) => {
+      if (assignedNumbers.has(item.number)) return false;
+      assignedNumbers.add(item.number);
+      return true;
+    });
+  const summaryRows = {
+    overdue: takeUnassigned(overdueRows),
+    hot: takeUnassigned(hotRows),
+    cold: takeUnassigned(coldRows),
+    return: takeUnassigned(returnRows),
+  };
+  summaryRows.normal = rows.filter((item) => !assignedNumbers.has(item.number));
   return {
     rows,
     overdueSet,
@@ -409,6 +423,7 @@ function statsRowsAndSets(items, analysis = state.analysis) {
     hotRows,
     coldRows,
     overdueRows,
+    summaryRows,
   };
 }
 
@@ -418,7 +433,8 @@ function formatStatsNumbers(items, field = "number") {
 
 function statsInsightMarkup(analysis) {
   const items = analysis?.frequency || [];
-  const { returnRows, hotRows, coldRows, overdueRows } = statsRowsAndSets(items, analysis);
+  const { summaryRows } = statsRowsAndSets(items, analysis);
+  const categoryTitle = (label, rows) => `${label}（${rows.length}顆）`;
   return `
     <div class="stats-insight-head">
       <strong>冷熱號文字摘要</strong>
@@ -426,23 +442,27 @@ function statsInsightMarkup(analysis) {
     </div>
     <div class="stats-insight-grid">
       <div class="stats-insight-item stats-insight-item--return">
-        <strong>短期回補觀察</strong>
-        <span>${formatStatsNumbers(returnRows)}</span>
+        <strong>${categoryTitle("短期回補觀察", summaryRows.return)}</strong>
+        <span>${formatStatsNumbers(summaryRows.return)}</span>
       </div>
       <div class="stats-insight-item stats-insight-item--hot">
-        <strong>近期熱號</strong>
-        <span>${formatStatsNumbers(hotRows.slice(0, 6))}</span>
+        <strong>${categoryTitle("近期熱號", summaryRows.hot)}</strong>
+        <span>${formatStatsNumbers(summaryRows.hot)}</span>
       </div>
       <div class="stats-insight-item stats-insight-item--inactive">
-        <strong>不活躍號碼（冷號）</strong>
-        <span>${formatStatsNumbers(coldRows.slice(0, 6))}</span>
+        <strong>${categoryTitle("不活躍號碼（冷號）", summaryRows.cold)}</strong>
+        <span>${formatStatsNumbers(summaryRows.cold)}</span>
       </div>
       <div class="stats-insight-item stats-insight-item--overdue">
-        <strong>多期未出</strong>
-        <span>${formatStatsNumbers(overdueRows.slice(0, 6))}</span>
+        <strong>${categoryTitle("多期未出", summaryRows.overdue)}</strong>
+        <span>${formatStatsNumbers(summaryRows.overdue)}</span>
+      </div>
+      <div class="stats-insight-item stats-insight-item--normal">
+        <strong>${categoryTitle("一般號碼", summaryRows.normal)}</strong>
+        <span>${formatStatsNumbers(summaryRows.normal)}</span>
       </div>
     </div>
-    <p class="stats-insight-note">熱號、冷號與多期未出直接採用目前分析資料；短期回補觀察是「近期曾出現、短期暫停」的號碼清單，僅供統計參考，不代表下一期必定開出。</p>
+    <p class="stats-insight-note">五類依序分配且不重複：多期未出、近期熱號、中冷號、短期回補觀察，最後其餘歸入一般號碼；合計固定涵蓋 01～39，僅供統計參考。</p>
   `;
 }
 

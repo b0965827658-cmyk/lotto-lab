@@ -426,7 +426,7 @@ input:focus-visible {
 
 .stats-insight-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -470,6 +470,11 @@ input:focus-visible {
 .stats-insight-item--overdue {
   color: #078b55;
   background: #f0fbf5;
+}
+
+.stats-insight-item--normal {
+  color: #1e6d9d;
+  background: #f1f7fb;
 }
 
 .stats-insight-note {
