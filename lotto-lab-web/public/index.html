@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=70" />
+    <link rel="stylesheet" href="/styles.css?v=71" />
   </head>
   <body>
     <main class="shell">
@@ -28,12 +28,42 @@
           <button class="segment active" data-game="tw539">今彩 539</button>
           <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
         </div>
-        <div class="notify-quick">
-          <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
-          <span id="notifyBadge" class="count-pill">未啟用</span>
-          <button id="notifyTestBtn" class="text-button notify-test" type="button" hidden>測試</button>
-          <p class="fineprint" id="notifyText">開啟後，有新一期開獎時可收到通知。</p>
-        </div>
+      </section>
+
+      <section class="latest-draws latest-draws--top" aria-label="當期開獎號碼">
+        <article class="draw-card draw-card--tw539" data-watermark="539">
+          <div class="draw-card-content">
+            <div class="draw-card-head">
+              <div>
+                <p class="draw-kicker">當期開獎</p>
+                <h2>今彩 539</h2>
+              </div>
+              <span class="draw-badge">台灣彩券</span>
+            </div>
+            <div class="meta draw-meta">
+              <span id="tw539Period">期別 -</span>
+              <span id="tw539Date">日期 -</span>
+            </div>
+            <div class="balls draw-balls" id="tw539Balls"></div>
+          </div>
+        </article>
+
+        <article class="draw-card draw-card--ca" data-watermark="FANTASY 5">
+          <div class="draw-card-content">
+            <div class="draw-card-head">
+              <div>
+                <p class="draw-kicker">另一彩種當期開獎</p>
+                <h2>加州天天樂</h2>
+              </div>
+              <span class="draw-badge">California</span>
+            </div>
+            <div class="meta draw-meta">
+              <span id="caPeriod">期別 -</span>
+              <span id="caDate">日期 -</span>
+            </div>
+            <div class="balls draw-balls" id="caBalls"></div>
+          </div>
+        </article>
       </section>
 
       <section class="status" id="status" aria-live="polite">正在同步開獎資料與數據分析...</section>
@@ -51,42 +81,6 @@
         </nav>
 
         <div class="tab-panel active" data-tab-panel="latest">
-        <section class="latest-draws" aria-label="最新開獎雙彩種">
-          <article class="draw-card draw-card--tw539" data-watermark="539">
-            <div class="draw-card-content">
-              <div class="draw-card-head">
-                <div>
-                  <p class="draw-kicker">最新一期</p>
-                  <h2>今彩 539</h2>
-                </div>
-                <span class="draw-badge">台灣彩券</span>
-              </div>
-              <div class="meta draw-meta">
-                <span id="tw539Period">期別 -</span>
-                <span id="tw539Date">日期 -</span>
-              </div>
-              <div class="balls draw-balls" id="tw539Balls"></div>
-            </div>
-          </article>
-
-          <article class="draw-card draw-card--ca" data-watermark="FANTASY 5">
-            <div class="draw-card-content">
-              <div class="draw-card-head">
-                <div>
-                  <p class="draw-kicker">另一彩種最新一期</p>
-                  <h2>加州天天樂</h2>
-                </div>
-                <span class="draw-badge">California</span>
-              </div>
-              <div class="meta draw-meta">
-                <span id="caPeriod">期別 -</span>
-                <span id="caDate">日期 -</span>
-              </div>
-              <div class="balls draw-balls" id="caBalls"></div>
-            </div>
-          </article>
-        </section>
-
         <article class="panel saved-panel">
           <div class="panel-head compact">
             <div>
@@ -105,6 +99,21 @@
           </form>
           <p class="fineprint saved-notice">直接點選 1～39 號球，可選 1 顆到最多 39 顆；開獎後會自動對獎。</p>
           <div class="saved-list" id="savedList"></div>
+        </article>
+
+        <article class="panel notify-panel" aria-label="開獎通知設定">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">通知設定</p>
+              <h2>開獎通知</h2>
+            </div>
+            <span id="notifyBadge" class="count-pill">未啟用</span>
+          </div>
+          <div class="notify-quick">
+            <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
+            <button id="notifyTestBtn" class="text-button notify-test" type="button" hidden>測試</button>
+            <p class="fineprint" id="notifyText">開啟後，有新一期開獎時可收到通知。</p>
+          </div>
         </article>
 
         <article class="panel wide disclaimer-panel">

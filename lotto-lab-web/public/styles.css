@@ -391,6 +391,25 @@ input:focus-visible {
   }
 }
 
+/* Keep the live draw cards visible above every feature tab. */
+.latest-draws--top {
+  margin-bottom: 14px;
+}
+
+.notify-panel {
+  grid-column: 1 / -1;
+}
+
+.notify-panel .notify-quick {
+  width: 100%;
+  margin-left: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.notify-panel .notify-quick .save-button {
+  width: 100%;
+}
+
 /* Cold/hot summary and current-draw markers. */
 .stats-key--latest {
   color: #1e6d9d !important;
