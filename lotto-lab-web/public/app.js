@@ -150,6 +150,7 @@ const els = {
   modelInputs: Array.from(document.querySelectorAll("[data-weight]")),
   focusButtons: Array.from(document.querySelectorAll("[data-focus]")),
   modelSummary: $("#modelSummary"),
+  analysisMeta: $("#analysisMeta"),
   limitCustom: $("#limitCustom"),
   applyLimit: $("#applyLimitBtn"),
   autoWindow: $("#autoWindowBtn"),
@@ -634,6 +635,22 @@ function writeCachedPayload(cacheKey, payload) {
 function drawKey(draw) {
   if (!draw) return "";
   return `${draw.name || state.game}|${draw.period || ""}|${draw.date || ""}|${(draw.numbers || []).join(".")}`;
+}
+
+function isValidDraw(draw) {
+  if (!draw || !/^20\d{2}-\d{2}-\d{2}$/.test(String(draw.date || "")) || !String(draw.period || "").trim()) return false;
+  const numbers = Array.isArray(draw.numbers) ? draw.numbers.map(Number) : [];
+  return numbers.length === 5 && new Set(numbers).size === 5 && numbers.every((number) => Number.isInteger(number) && number >= 1 && number <= 39);
+}
+
+function validateLotteryPayload(payload) {
+  if (!payload?.ok) {
+    throw new Error(payload?.error || "資料讀取失敗");
+  }
+  if (!isValidDraw(payload.latest)) {
+    throw new Error("開獎資料驗證失敗，暫不更新畫面。請稍後再試。");
+  }
+  return payload;
 }
 
 function readLastSeenDraw() {
@@ -1953,7 +1970,7 @@ function renderLatestDraws() {
 }
 
 function render(payload, companionPayload = null) {
-  const { latest, history, analysis, updatedAt } = payload;
+  const { latest, history, analysis, dataStatus, updatedAt } = payload;
   state.latest = latest;
   state.latestByGame = {
     ...state.latestByGame,
@@ -1976,7 +1993,15 @@ function render(payload, companionPayload = null) {
   renderReferencePick();
   renderCandidates();
   renderModeSnapshots();
-  setStatus(`已更新：${updatedAt.replace("T", " ")}`);
+  const metadata = analysis?.metadata || {};
+  const generatedAt = metadata.generatedAt ? new Date(metadata.generatedAt).toLocaleString("zh-TW", { hour12: false }) : "-";
+  const historyCount = dataStatus?.historyCount || history.length || 0;
+  const validationText = dataStatus?.validated === false ? "資料待確認" : "資料已驗證";
+  if (els.analysisMeta) {
+    els.analysisMeta.textContent = `版本 ${metadata.engineVersion || "stable"} · ${metadata.analysisLimit || historyCount} 期 · ${validationText} · 回應於 ${generatedAt}`;
+  }
+  const updatedText = updatedAt ? updatedAt.replace("T", " ") : "-";
+  setStatus(`${validationText} · 最新第 ${latest.period || "-"} 期 · 已更新：${updatedText}`);
 }
 
 function renderPlans(subscription) {
@@ -2236,11 +2261,12 @@ async function load(options = {}) {
   if (!silent) els.refresh.disabled = true;
   try {
     const previousSeen = readLastSeenDraw()[state.game] || "";
-    const [payload, companionPayload] = await Promise.all([
+    const [rawPayload, rawCompanionPayload] = await Promise.all([
       fetchJsonWithTimeout(`/api/lottery?game=${state.game}&limit=${state.limit}&t=${Date.now()}`),
       fetchJsonWithTimeout(`/api/lottery?game=${companionGame}&limit=10&t=${Date.now()}`).catch(() => null),
     ]);
-    if (!payload.ok) throw new Error(payload.error || "資料讀取失敗");
+    const payload = validateLotteryPayload(rawPayload);
+    const companionPayload = rawCompanionPayload?.ok && isValidDraw(rawCompanionPayload.latest) ? rawCompanionPayload : null;
     if (requestId !== state.requestId) return;
     writeCachedPayload(cacheKey, payload);
     if (companionPayload?.ok) writeCachedPayload(companionCacheKey, companionPayload);
@@ -2273,7 +2299,7 @@ async function refreshLatestOnly() {
     let activeGameChanged = false;
     let newestActive = null;
     for (const payload of payloads) {
-      if (!payload?.ok || !payload.latest) continue;
+      if (!payload?.ok || !isValidDraw(payload.latest)) continue;
       const game = payload.game || payload.latest.game;
       if (!game) continue;
       const previous = state.latestByGame[game];

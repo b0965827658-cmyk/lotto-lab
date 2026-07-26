@@ -52,6 +52,7 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "30"))
 LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "10"))
+ANALYSIS_ENGINE_VERSION = "2026.07-stable"
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 BACKTEST_SAMPLE_LIMIT = 24
@@ -346,15 +347,37 @@ def same_draw(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return left.get("date") == right.get("date") and normalize_numbers(left.get("numbers", [])) == normalize_numbers(right.get("numbers", []))
 
 
+def validate_draw(draw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one draw and reject malformed source rows before analysis."""
+    if not isinstance(draw, dict):
+        raise ValueError("開獎資料格式不正確")
+    numbers = [int(number) for number in draw.get("numbers", [])]
+    date = str(draw.get("date", "")).strip()
+    period = str(draw.get("period", "")).strip()
+    if len(numbers) != 5 or len(set(numbers)) != 5 or any(number < 1 or number > 39 for number in numbers):
+        raise ValueError("開獎號碼數量或範圍不正確")
+    if not re.fullmatch(r"20\d{2}-\d{2}-\d{2}", date) or not period:
+        raise ValueError("開獎期別或日期格式不正確")
+    normalized = dict(draw)
+    normalized["date"] = date
+    normalized["period"] = period
+    normalized["numbers"] = normalize_numbers(numbers)
+    return normalized
+
+
 def dedupe_draws(draws: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Remove repeated source rows without changing the order of the draws."""
     unique = []
     seen = set()
     for draw in draws:
-        numbers = tuple(normalize_numbers(draw.get("numbers", [])))
-        date = draw.get("date", "")
-        period = draw.get("period", "")
-        key = (draw.get("game", ""), date, numbers) if date else (draw.get("game", ""), period, numbers)
+        try:
+            draw = validate_draw(draw)
+        except (TypeError, ValueError):
+            continue
+        numbers = tuple(draw["numbers"])
+        date = draw["date"]
+        period = draw["period"]
+        key = (draw.get("game", ""), date, numbers)
         if key in seen:
             continue
         seen.add(key)
@@ -441,6 +464,7 @@ def taiwan_latest() -> dict[str, Any]:
                 "source": "台灣彩券 LastNumber API",
                 "sourceUrl": TAIWAN_LAST_URL,
             }
+            official = validate_draw(official)
         except Exception:
             official = None
 
@@ -640,8 +664,7 @@ def parse_california_history(source_html: str) -> list[dict[str, Any]]:
                     "sourceUrl": CALIFORNIA_FANTASY5_URL,
                 }
             )
-    dedup = {item["period"]: item for item in parsed}
-    values = list(dedup.values())
+    values = dedupe_draws(parsed)
     values.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
     return values
 
@@ -1668,6 +1691,33 @@ def analyze_with_stable_backtest(
     return analysis
 
 
+def data_health(game: str, latest: dict[str, Any] | None, history: list[dict[str, Any]]) -> dict[str, Any]:
+    valid_latest = False
+    if latest:
+        try:
+            validate_draw(latest)
+            valid_latest = True
+        except (TypeError, ValueError):
+            valid_latest = False
+    return {
+        "game": game,
+        "validated": valid_latest and bool(history),
+        "latestPeriod": latest.get("period", "") if latest else "",
+        "latestDate": latest.get("date", "") if latest else "",
+        "historyCount": len(history),
+        "message": "資料已驗證" if valid_latest and history else "資料不足，暫不更新分析",
+    }
+
+
+def analysis_metadata(limit: int, data_status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "engineVersion": ANALYSIS_ENGINE_VERSION,
+        "analysisLimit": limit,
+        "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "dataValidated": bool(data_status.get("validated")),
+    }
+
+
 def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, Any]:
     if game == "tw539":
         latest = taiwan_latest()
@@ -1678,7 +1728,9 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
         analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
-        payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis}
+        status = data_health(game, latest, draws)
+        analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
+        payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="tw539")
         return payload
@@ -1690,7 +1742,10 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
         analysis = cached(analysis_key, lambda: analyze_california_with_stable_backtest(draws, history))
-        payload = {"latest": public_draw(history[0]), "history": public_draws(draws), "analysis": analysis}
+        latest = history[0]
+        status = data_health(game, latest, draws)
+        analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
+        payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="ca-fantasy5")
         return payload
@@ -1797,7 +1852,15 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
                 latest = taiwan_latest() if game == "tw539" else california_latest()
-                self.send_json({"ok": True, "game": game, "latest": public_draw(latest), "updatedAt": datetime.now().isoformat(timespec="seconds")})
+                self.send_json(
+                    {
+                        "ok": True,
+                        "game": game,
+                        "latest": public_draw(latest),
+                        "dataStatus": data_health(game, latest, [latest]),
+                        "updatedAt": datetime.now().isoformat(timespec="seconds"),
+                    }
+                )
             except ValueError as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
             except Exception as exc:

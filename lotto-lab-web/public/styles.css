@@ -442,6 +442,14 @@ body {
   vertical-align: middle !important;
 }
 
+.analysis-meta {
+  margin: 8px 0 0 !important;
+  color: #647487 !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  line-height: 1.5 !important;
+}
+
 .topbar {
   border-color: rgba(190, 220, 246, 0.38) !important;
   background: linear-gradient(112deg, #102b49 0%, #1b527d 60%, #293d76 100%) !important;
