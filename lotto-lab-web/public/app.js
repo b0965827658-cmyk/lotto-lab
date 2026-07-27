@@ -2311,8 +2311,16 @@ function updateNotificationUi() {
 
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
-  if (state.serviceWorkerRegistration) return state.serviceWorkerRegistration;
-  state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js");
+  if (!state.serviceWorkerRegistration) {
+    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=71", {
+      updateViaCache: "none",
+    });
+  }
+  try {
+    await state.serviceWorkerRegistration.update();
+  } catch {
+    // A cached registration can still display notifications while offline.
+  }
   return state.serviceWorkerRegistration;
 }
 
@@ -2323,6 +2331,11 @@ async function syncPushSubscription() {
   }
   const registration = await getServiceWorkerRegistration();
   state.pushSubscription = await registration.pushManager.getSubscription();
+  if (state.pushSubscription && Notification.permission === "granted") {
+    // Render instances can restart and lose the local subscription record.
+    // Re-registering an existing browser subscription makes the next push reliable.
+    await postSubscription("subscribe", state.pushSubscription).catch(() => {});
+  }
   updateNotificationUi();
 }
 
@@ -2333,7 +2346,7 @@ async function postSubscription(action, subscription) {
     body: JSON.stringify({ action, subscription, game: state.game }),
   });
   const payload = await response.json();
-  if (!payload.ok) throw new Error(payload.error || "通知訂閱失敗");
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "通知訂閱失敗");
   state.notifications.subscriberCount = payload.subscriberCount || state.notifications.subscriberCount || 0;
   return payload;
 }
@@ -2355,10 +2368,13 @@ async function enableNotifications() {
     await showLocalTestNotification("開獎通知已允許", "正式群發待設定推播金鑰；目前可在開站時接收本機提醒。");
     return;
   }
-  state.pushSubscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(state.notifications.publicKey),
-  });
+  state.pushSubscription = await registration.pushManager.getSubscription();
+  if (!state.pushSubscription) {
+    state.pushSubscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(state.notifications.publicKey),
+    });
+  }
   await postSubscription("subscribe", state.pushSubscription);
   updateNotificationUi();
   setStatus("已開啟開獎通知。");
@@ -2403,7 +2419,8 @@ async function showLocalTestNotification(title = "摘星狙擊手開獎通知", 
     }
   }
   const registration = await getServiceWorkerRegistration();
-  await registration.showNotification(title, {
+  const readyRegistration = await navigator.serviceWorker.ready.catch(() => registration);
+  await readyRegistration.showNotification(title, {
     body,
     icon: "/icon-192.png",
     badge: "/icon-192.png",

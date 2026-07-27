@@ -77,7 +77,7 @@ NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
 SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", ROOT / "data" / "push_subscriptions.json"))
 NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", ROOT / "data" / "notify_state.json"))
 AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
-AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "60"))
+AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "30"))
 AUTO_NOTIFY_GAMES = [
     game.strip()
     for game in os.environ.get("LOTTO_AUTO_NOTIFY_GAMES", "tw539,ca-fantasy5").split(",")
@@ -243,7 +243,9 @@ def notify_latest_game(game: str) -> dict[str, Any]:
         return {"ok": False, "game": game, "error": "尚未設定完整推播金鑰"}
     if not load_push_subscriptions():
         return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": 0, "skipped": True, "message": "目前沒有訂閱用戶"}
-    lottery = build_payload(game, 90)["latest"]
+    # Notifications must not wait for the expensive model/backtest pipeline.
+    # Read only the latest draw so the background loop can finish promptly.
+    lottery = taiwan_latest() if game == "tw539" else california_latest()
     if already_notified(game, lottery):
         return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": len(load_push_subscriptions()), "skipped": True, "message": "這一期已通知過"}
     message = latest_notification_message(game, lottery)
@@ -274,7 +276,7 @@ def auto_notify_loop() -> None:
                             )
         except Exception as exc:
             print(f"auto notify error: {exc}")
-        time.sleep(max(60, AUTO_NOTIFY_INTERVAL_SECONDS))
+        time.sleep(max(30, AUTO_NOTIFY_INTERVAL_SECONDS))
 
 
 def cached(key: str, loader, ttl_seconds: int | None = None):
@@ -2047,7 +2049,7 @@ class Handler(SimpleHTTPRequestHandler):
                         "supported": bool(PUSH_PUBLIC_KEY),
                         "serverReady": push_server_ready(),
                         "autoNotify": AUTO_NOTIFY_ENABLED,
-                        "autoNotifyIntervalSeconds": max(60, AUTO_NOTIFY_INTERVAL_SECONDS),
+                        "autoNotifyIntervalSeconds": max(30, AUTO_NOTIFY_INTERVAL_SECONDS),
                         "autoNotifyGames": AUTO_NOTIFY_GAMES,
                         "publicKey": PUSH_PUBLIC_KEY,
                         "subscriberCount": len(load_push_subscriptions()),
@@ -2206,7 +2208,7 @@ def main():
     server = ThreadingHTTPServer((host, port), Handler)
     if AUTO_NOTIFY_ENABLED:
         threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
-        print(f"auto notify enabled every {max(60, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
+        print(f"auto notify enabled every {max(30, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
     print(f"摘星狙擊手 running at http://{host}:{port}")
     server.serve_forever()
 

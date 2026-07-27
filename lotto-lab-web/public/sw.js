@@ -1,9 +1,9 @@
-const CACHE_NAME = "lotto-lab-v70";
+const CACHE_NAME = "lotto-lab-v71";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css",
-  "/app.js",
+  "/styles.css?v=76",
+  "/app.js?v=70",
   "/manifest.webmanifest",
   "/icon.svg",
 ];
@@ -66,6 +66,9 @@ self.addEventListener("push", (event) => {
     icon: payload.icon || "/icon-192.png",
     badge: payload.badge || "/icon-192.png",
     tag: payload.tag || "lotto-lab-latest",
+    renotify: true,
+    requireInteraction: true,
+    timestamp: Date.now(),
     data: {
       url: payload.url || "/",
     },
