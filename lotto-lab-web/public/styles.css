@@ -391,6 +391,125 @@ input:focus-visible {
   }
 }
 
+.deep-sniper-block {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid #d8b75e;
+  border-radius: 14px;
+  background: #f7f9fc;
+  box-shadow: 0 10px 24px rgba(23, 54, 84, 0.08);
+}
+
+.deep-sniper-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.deep-sniper-head h3 {
+  margin: 3px 0 0;
+  color: #174b78;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.deep-sniper-head .label {
+  margin: 0;
+  color: #b57800;
+}
+
+.deep-sniper-badge {
+  flex: 0 0 auto;
+  border: 1px solid #e2a31d;
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: #8d6100;
+  background: #fff7dd;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.deep-sniper-balls {
+  justify-content: flex-start;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #c7d9e9;
+  border-radius: 12px;
+  background: #eaf2f9;
+}
+
+.deep-sniper-balls .ball {
+  border-color: #f7d477;
+  background: #e2a31d;
+  color: #1f2a38;
+  box-shadow: 0 4px 0 rgba(126, 87, 0, 0.2);
+}
+
+.deep-sniper-meta {
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
+.deep-sniper-meta span,
+.deep-sniper-meta small {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border: 1px solid #d1dde8;
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #52687d;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.deep-sniper-meta .deep-sniper-status {
+  border-color: #9bbbd4;
+  color: #1d5f8e;
+  background: #edf6fc;
+}
+
+.deep-sniper-meta small {
+  border: 0;
+  padding-left: 0;
+  color: #718092;
+  background: transparent;
+}
+
+@media (max-width: 480px) {
+  .deep-sniper-block {
+    padding: 14px;
+  }
+
+  .deep-sniper-head {
+    display: block;
+  }
+
+  .deep-sniper-head h3 {
+    font-size: 19px;
+  }
+
+  .deep-sniper-badge {
+    display: inline-flex;
+    margin-top: 10px;
+  }
+
+  .deep-sniper-balls {
+    gap: 6px;
+    padding: 9px 6px;
+  }
+
+  .deep-sniper-balls .ball {
+    width: 47px;
+    height: 47px;
+    flex-basis: 47px;
+    font-size: 17px;
+  }
+}
+
 /* Cold/hot summary and current-draw markers. */
 .stats-key--latest {
   color: #1e6d9d !important;

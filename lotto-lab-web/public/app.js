@@ -181,6 +181,10 @@ const els = {
   patternRepeat: $("#patternRepeat"),
   patternGrid: $("#patternGrid"),
   patternLines: $("#patternLines"),
+  deepSniperBlock: $(".deep-sniper-block"),
+  deepSniperBadge: $("#deepSniperBadge"),
+  deepSniperBalls: $("#deepSniperBalls"),
+  deepSniperMeta: $("#deepSniperMeta"),
   notifyBadge: $("#notifyBadge"),
   notifyText: $("#notifyText"),
   notifyToggle: $("#notifyToggleBtn"),
@@ -2046,6 +2050,33 @@ function renderPatternDetails(patterns, profiles = []) {
   `;
 }
 
+function renderDeepSniper() {
+  if (!els.deepSniperBalls || !els.deepSniperMeta) return;
+  const deep = state.analysis || {};
+  const numbers = Array.isArray(deep.deepSniperRecommendation) ? deep.deepSniperRecommendation : [];
+  if (numbers.length !== 5) {
+    els.deepSniperBalls.innerHTML = "";
+    els.deepSniperMeta.innerHTML = "<span>資料累積中，深度分析尚未完成。</span>";
+    if (els.deepSniperBadge) els.deepSniperBadge.textContent = "分析準備中";
+    return;
+  }
+  const nextAt = deep.deepSniperNextAt ? new Date(deep.deepSniperNextAt) : null;
+  const nextText = nextAt && !Number.isNaN(nextAt.getTime())
+    ? nextAt.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })
+    : "下一個 8 小時週期";
+  const windows = Array.isArray(deep.deepSniperWindows) ? deep.deepSniperWindows : [];
+  els.deepSniperBalls.innerHTML = balls(numbers);
+  if (els.deepSniperBadge) {
+    els.deepSniperBadge.textContent = `${Number(deep.deepSniperWindowHours || 8)} 小時內固定`;
+  }
+  els.deepSniperMeta.innerHTML = `
+    <span class="deep-sniper-status">${deep.deepSniperStatus || "8 小時深度分析已完成"}</span>
+    <span>交叉視窗：${windows.length ? windows.map((window) => `近 ${window} 期`).join("、") : "資料累積中"}</span>
+    <span>下次重算：${nextText}</span>
+    <small>僅供統計參考，不代表保證中獎。</small>
+  `;
+}
+
 function renderPatterns(patterns) {
   if (!els.patternModel || !els.patternGrid || !els.patternLines) return;
   const numbers = [...(state.analysis?.recommendation || [])];
@@ -2054,6 +2085,7 @@ function renderPatterns(patterns) {
     els.patternRepeat.textContent = "資料不足";
     els.patternGrid.innerHTML = `<div class="empty-state">資料累積後會顯示綜合推理 5 碼。</div>`;
     els.patternLines.innerHTML = "";
+    renderDeepSniper();
     return;
   }
   const backtest = state.analysis?.backtest || {};
@@ -2098,6 +2130,7 @@ function renderPatterns(patterns) {
       <strong>近 ${backtest.testedCount || 0} 期 · 平均 ${backtest.averageHit ?? "-"} 中 · 最高 ${backtest.bestHit ?? "-"} 中</strong>
     </div>
   `;
+  renderDeepSniper();
 }
 
 function renderSavedPicks() {
