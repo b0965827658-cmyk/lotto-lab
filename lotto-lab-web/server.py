@@ -54,6 +54,11 @@ USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "30"))
 LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "10"))
 ANALYSIS_ENGINE_VERSION = "2026.07-route-split"
+DEEP_ANALYSIS_WINDOW_SECONDS = max(
+    60,
+    int(os.environ.get("LOTTO_DEEP_ANALYSIS_WINDOW_SECONDS", str(8 * 60 * 60))),
+)
+DEEP_ANALYSIS_WINDOWS = (14, 36, 90, 180, 365)
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 BACKTEST_SAMPLE_LIMIT = 24
@@ -1069,6 +1074,84 @@ def model_recommendation(
     return list(best)
 
 
+def deep_analysis_slot(now: float | None = None) -> tuple[int, int]:
+    """Return the shared eight-hour analysis slot boundaries."""
+    timestamp = float(time.time() if now is None else now)
+    start = int(timestamp // DEEP_ANALYSIS_WINDOW_SECONDS) * DEEP_ANALYSIS_WINDOW_SECONDS
+    return start, start + DEEP_ANALYSIS_WINDOW_SECONDS
+
+
+def deep_sniper_analysis(
+    draws: list[dict[str, Any]],
+    game: str,
+    max_number: int = 39,
+    pick_count: int = 5,
+) -> dict[str, Any]:
+    """Cross-check several history windows and publish one deterministic five-number set."""
+    ordered = sorted(draws, key=lambda item: (item.get("date", ""), item.get("period", "")), reverse=True)
+    available = [window for window in DEEP_ANALYSIS_WINDOWS if window <= len(ordered)]
+    if not available and ordered:
+        available = [len(ordered)]
+    if not available:
+        return {"numbers": [], "windowsUsed": [], "windowPicks": [], "method": "資料不足"}
+
+    configured_weights = {14: 0.30, 36: 0.25, 90: 0.20, 180: 0.15, 365: 0.10}
+    total_weight = sum(configured_weights.get(window, 0.10) for window in available) or 1
+    aggregate = {number: 0.0 for number in range(1, max_number + 1)}
+    window_picks = []
+
+    for window in available:
+        window_draws = ordered[:window]
+        weight = configured_weights.get(window, 0.10) / total_weight
+        if game == "ca-fantasy5":
+            pick = california_recommendation(window_draws, max_number=max_number, pick_count=pick_count)
+            logic = california_logic_scores(window_draws, max_number=max_number)
+            label = "天天樂專屬整合邏輯"
+        else:
+            variant, _, _ = choose_tw539_strategy(window_draws, max_number=max_number, pick_count=pick_count)
+            pick = tw539_recommendation(
+                window_draws,
+                max_number=max_number,
+                pick_count=pick_count,
+                variant=variant,
+            )
+            logic = tw539_logic_scores(window_draws, max_number=max_number, variant=variant)
+            label = TW539_VARIANTS.get(variant, TW539_VARIANTS["cycle"])["label"]
+
+        scores = logic.get("scores", {})
+        if scores:
+            low = min(scores.values())
+            high = max(scores.values())
+            spread = high - low or 1
+            for number in aggregate:
+                aggregate[number] += weight * ((scores.get(number, low) - low) / spread)
+        for rank, number in enumerate(pick, start=1):
+            aggregate[number] += weight * ((pick_count - rank + 1) / pick_count) * 0.45
+        window_picks.append({"limit": window, "numbers": sorted(pick), "label": label})
+
+    pool = sorted(aggregate, key=lambda number: (-aggregate[number], number))[: min(16, max_number)]
+    if len(pool) < pick_count:
+        numbers = sorted(pool)
+    else:
+        candidates = itertools.combinations(pool, pick_count)
+        numbers = sorted(
+            max(
+                candidates,
+                key=lambda combo: (
+                    sum(aggregate[number] for number in combo) / pick_count
+                    + combo_spread_score(list(combo), max_number) * 0.16,
+                    tuple(-number for number in combo),
+                ),
+            )
+        )
+    return {
+        "numbers": numbers,
+        "windowsUsed": available,
+        "windowPicks": window_picks,
+        "method": "多視窗交叉：近期熱度、遺漏、區間、尾數與滾動回測訊號綜合排序。",
+    }
+
+
 def classic_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5, seed_label: str = "") -> list[int]:
     number_scores = recommendation_number_scores(
         draws,
@@ -1928,6 +2011,39 @@ def analysis_metadata(limit: int, data_status: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def attach_deep_sniper_analysis(
+    game: str,
+    analysis: dict[str, Any],
+    latest: dict[str, Any],
+    history: list[dict[str, Any]],
+) -> dict[str, Any]:
+    slot_start, slot_end = deep_analysis_slot()
+    key = f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:deep-8h-{slot_start}"
+    deep = cached(
+        f"deep-sniper-{ANALYSIS_ENGINE_VERSION}-{key}",
+        lambda: deep_sniper_analysis(history, game=game, max_number=39, pick_count=5),
+        ttl_seconds=DEEP_ANALYSIS_WINDOW_SECONDS + 60,
+    )
+    return {
+        **analysis,
+        "deepSniperRecommendation": deep.get("numbers", []),
+        "deepSniperSnapshot": {
+            "key": key,
+            "status": "published" if len(deep.get("numbers", [])) == 5 else "unavailable",
+            "profile": "deep-8h",
+            "source": "deterministic-shared-slot",
+        },
+        "deepSniperWindowHours": round(DEEP_ANALYSIS_WINDOW_SECONDS / 3600, 2),
+        "deepSniperSlotStartedAt": datetime.fromtimestamp(slot_start, timezone.utc).isoformat(timespec="seconds"),
+        "deepSniperNextAt": datetime.fromtimestamp(slot_end, timezone.utc).isoformat(timespec="seconds"),
+        "deepSniperAnalysisLimit": min(len(history), max(DEEP_ANALYSIS_WINDOWS)),
+        "deepSniperWindows": deep.get("windowsUsed", []),
+        "deepSniperWindowPicks": deep.get("windowPicks", []),
+        "deepSniperMethod": deep.get("method", "多視窗交叉分析"),
+        "deepSniperStatus": "8 小時深度分析已完成；新一期開出時立即重算。",
+    }
+
+
 def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, Any]:
     if game == "tw539":
         latest = taiwan_latest()
@@ -1940,6 +2056,7 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
         status = data_health(game, latest, draws)
         analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
+        analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
         payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="tw539")
@@ -1955,6 +2072,7 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         latest = history[0]
         status = data_health(game, latest, draws)
         analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
+        analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
         payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="ca-fantasy5")
