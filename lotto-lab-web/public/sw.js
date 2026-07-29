@@ -1,11 +1,15 @@
-const CACHE_NAME = "lotto-lab-v72";
+const CACHE_NAME = "lotto-lab-v95";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/styles.css?v=77",
-  "/app.js?v=71",
-  "/manifest.webmanifest",
-  "/icon.svg",
+  "/app.js?v=89",
+  "/game-bg-tw539.jpg?v=1",
+  "/game-bg-fantasy5.jpg?v=1",
+  "/manifest.webmanifest?v=45",
+  "/logo-sniper-star.svg?v=45",
+  "/logo-sniper-star-192.png?v=45",
+  "/logo-sniper-star-512.png?v=45",
 ];
 
 self.addEventListener("install", (event) => {
@@ -63,12 +67,9 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "摘星狙擊手開獎通知";
   const options = {
     body: payload.body || "最新開獎已更新。",
-    icon: payload.icon || "/icon-192.png",
-    badge: payload.badge || "/icon-192.png",
+    icon: payload.icon || "/logo-sniper-star-192.png?v=45",
+    badge: payload.badge || "/logo-sniper-star-192.png?v=45",
     tag: payload.tag || "lotto-lab-latest",
-    renotify: true,
-    requireInteraction: true,
-    timestamp: Date.now(),
     data: {
       url: payload.url || "/",
     },

@@ -3,351 +3,113 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#102b49" />
+    <meta name="theme-color" content="#166a52" />
+    <meta name="application-name" content="摘星狙擊手" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="摘星狙擊手" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>摘星狙擊手</title>
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest?v=47" />
+    <link rel="icon" href="/logo-sniper-star.svg?v=47" type="image/svg+xml" />
+    <link rel="icon" href="/logo-sniper-star-192.png?v=47" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/logo-sniper-star-192.png?v=47" />
     <link rel="stylesheet" href="/styles.css?v=77" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">摘星狙擊手</p>
-          <h1>開獎號碼與統計選號</h1>
+        <div class="mini-brand">
+          <img class="brand-logo" src="/logo-sniper-star-192.png?v=47" alt="" width="44" height="44" />
+          <strong>摘星狙擊手</strong>
+          <span class="target-badge"><span class="target-dot"></span>39 TARGET</span>
         </div>
         <button id="refreshBtn" class="icon-button" title="重新整理" aria-label="重新整理">↻</button>
       </header>
 
-      <section class="latest-draws latest-draws--top" aria-label="當期開獎號碼">
-        <div class="draw-card-stack draw-card-stack--tw539">
-          <article class="draw-countdown draw-countdown--tw539" aria-label="今彩 539 下次開獎">
-            <div class="draw-countdown-head">
-              <div>
-                <p class="draw-countdown-kicker">下次開獎</p>
-                <strong id="tw539CountdownTime">--:--:--</strong>
-              </div>
-              <span id="tw539CountdownBadge" class="count-pill">倒數</span>
-            </div>
-            <div class="draw-countdown-meta">
-              <span id="tw539CountdownGame">今彩 539</span>
-              <strong id="tw539CountdownDrawAt">-</strong>
-              <small id="tw539CountdownHint">台灣週一至週六 20:30</small>
-            </div>
-          </article>
-
-          <article class="draw-card draw-card--tw539" data-watermark="539">
-            <div class="draw-card-content">
-              <div class="draw-card-head">
-                <div>
-                  <p class="draw-kicker">當期開獎</p>
-                  <h2>今彩 539</h2>
-                </div>
-                <span class="draw-badge">台灣彩券</span>
-              </div>
-              <div class="meta draw-meta">
-                <span id="tw539Period">期別 -</span>
-                <span id="tw539Date">日期 -</span>
-              </div>
-              <div class="balls draw-balls" id="tw539Balls"></div>
-            </div>
-          </article>
-        </div>
-
-        <div class="draw-card-stack draw-card-stack--ca">
-          <article class="draw-countdown draw-countdown--ca" aria-label="加州天天樂下次開獎">
-            <div class="draw-countdown-head">
-              <div>
-                <p class="draw-countdown-kicker">下次開獎</p>
-                <strong id="caCountdownTime">--:--:--</strong>
-              </div>
-              <span id="caCountdownBadge" class="count-pill">倒數</span>
-            </div>
-            <div class="draw-countdown-meta">
-              <span id="caCountdownGame">加州天天樂</span>
-              <strong id="caCountdownDrawAt">-</strong>
-              <small id="caCountdownHint">加州每日 18:30 後</small>
-            </div>
-          </article>
-
-          <article class="draw-card draw-card--ca" data-watermark="FANTASY 5">
-            <div class="draw-card-content">
-              <div class="draw-card-head">
-                <div>
-                  <p class="draw-kicker">另一彩種當期開獎</p>
-                  <h2>加州天天樂</h2>
-                </div>
-                <span class="draw-badge">California</span>
-              </div>
-              <div class="meta draw-meta">
-                <span id="caPeriod">期別 -</span>
-                <span id="caDate">日期 -</span>
-              </div>
-              <div class="balls draw-balls" id="caBalls"></div>
-            </div>
-          </article>
+      <section class="control-band">
+        <div class="segmented" role="tablist" aria-label="彩種">
+          <button class="segment active" data-game="tw539">今彩 539</button>
+          <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
         </div>
       </section>
 
-      <section class="status" id="status" aria-live="polite">正在同步開獎資料與數據分析...</section>
+      <section class="status" id="status">數據分析中...</section>
 
       <section class="dashboard" id="dashboard" hidden>
-        <div class="game-switcher" aria-label="選擇彩種">
-          <span class="game-switcher-label">選擇彩種</span>
-          <div class="segmented" role="tablist" aria-label="彩種">
-            <button class="segment active" data-game="tw539">今彩 539</button>
-            <button class="segment" data-game="ca-fantasy5">加州天天樂</button>
-          </div>
-        </div>
-
         <nav class="page-tabs" aria-label="功能分頁">
-          <button class="page-tab active" type="button" data-tab="latest">開獎通知與免責</button>
-          <button class="page-tab" type="button" data-tab="history">歷史開獎</button>
-          <button class="page-tab" type="button" data-tab="stats">冷熱號</button>
-          <button class="page-tab" type="button" data-tab="parity-tail">奇偶尾數</button>
-          <button class="page-tab" type="button" data-tab="model">自訂邏輯推理</button>
-          <button class="page-tab" type="button" data-tab="model-pattern">狙擊手推薦</button>
-          <button class="page-tab" type="button" data-tab="backtest">模型回測</button>
+          <button class="page-tab active" type="button" data-tab="latest">最新開獎</button>
+          <button class="page-tab" type="button" data-tab="recent">近期號碼</button>
+          <button class="page-tab" type="button" data-tab="history">紀錄查詢</button>
+          <button class="page-tab" type="button" data-tab="model">邏輯推理</button>
+          <button class="page-tab" type="button" data-tab="sniper">五星狙擊手</button>
           <button class="page-tab" type="button" data-tab="subscription">升級訂閱</button>
         </nav>
 
         <div class="tab-panel active" data-tab-panel="latest">
-        <article class="panel saved-panel">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">我的號碼</p>
-              <h2>自動對最新一期</h2>
-            </div>
-            <button id="usePickBtn" class="text-button">套用參考</button>
-          </div>
-          <form class="saved-form" id="savedForm">
-            <div class="saved-number-picker" id="savedNumberPicker" role="group" aria-label="自動對號 1 到 39"></div>
-            <div class="saved-picker-toolbar">
-              <span id="savedSelectionMeta" class="saved-selection-meta">已選 0 顆，請點選號碼球</span>
-              <button id="clearSavedNumbers" class="text-button" type="button" disabled>清除選擇</button>
-            </div>
-            <button class="save-button" type="submit">儲存這組號碼</button>
-          </form>
-          <p class="fineprint saved-notice">直接點選 1～39 號球，可選 1 顆到最多 39 顆；開獎後會自動對獎。</p>
-          <div class="saved-list" id="savedList"></div>
-        </article>
-
-        <article class="panel wide disclaimer-panel">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">使用提醒</p>
-              <h2>免責聲明</h2>
-            </div>
-            <span class="count-pill">重要</span>
-          </div>
-          <div class="disclaimer-grid">
-            <p>本服務提供的選號、版路、回測與統計內容，僅供資料分析與娛樂參考，不保證中獎，也不構成投注、投資或財務建議。</p>
-            <p>開獎號碼與期別會盡量以官方資料及公開來源校對；若資料來源延遲、改版或異常，仍以台灣彩券與 California Lottery 官方公告為準。</p>
-            <p>使用者應自行判斷投注風險，理性投注，避免超出可負擔範圍。本服務不代售彩券，也不處理兌獎、投注或獎金相關事務。</p>
+        <article class="panel latest-panel">
+          <div class="latest-draw-grid">
+            <section class="latest-draw-card">
+              <div class="panel-head compact">
+                <div>
+                  <p class="label">最新一期</p>
+                  <h2 id="gameName">-</h2>
+                </div>
+              </div>
+              <div class="meta">
+                <span id="period">期別 -</span>
+                <span id="date">日期 -</span>
+              </div>
+              <div class="balls" id="latestBalls"></div>
+            </section>
+            <section class="latest-draw-card latest-secondary-card">
+              <div class="panel-head compact">
+                <div>
+                  <p class="label">另一彩種最新一期</p>
+                  <h2 id="secondaryGameName">-</h2>
+                </div>
+              </div>
+              <div class="meta">
+                <span id="secondaryPeriod">期別 -</span>
+                <span id="secondaryDate">日期 -</span>
+              </div>
+              <div class="balls" id="secondaryLatestBalls"></div>
+              <p class="latest-sync-note" id="secondaryLatestStatus">同步中...</p>
+            </section>
           </div>
         </article>
 
-        <article class="panel notify-panel" aria-label="開獎通知設定">
+        <article class="panel countdown-panel">
           <div class="panel-head compact">
             <div>
-              <p class="label">通知設定</p>
-              <h2>開獎通知</h2>
+              <p class="label">下次開獎</p>
+              <h2 id="countdownTime">--:--:--</h2>
             </div>
-            <span id="notifyBadge" class="count-pill">未啟用</span>
+            <span id="countdownBadge" class="count-pill">預估</span>
           </div>
-          <div class="notify-quick">
-            <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
-            <button id="notifyTestBtn" class="text-button notify-test" type="button" hidden>測試</button>
-            <p class="fineprint" id="notifyText">開啟後，有新一期開獎時可收到通知。</p>
+          <div class="countdown-meta">
+            <span id="countdownGame">-</span>
+            <strong id="countdownDrawAt">-</strong>
+            <small id="countdownHint">依各彩種開獎時間估算。</small>
           </div>
         </article>
-        </div>
 
-        <div class="tab-panel" data-tab-panel="model">
-        <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 模型設定" data-lock-text="訂閱後可切換板路模式並調整權重。">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">模型設定</p>
-              <h2>調整偏好</h2>
-            </div>
-            <button id="resetModelBtn" class="text-button">重設</button>
-          </div>
-          <div class="model-period-controls">
-          <label class="select-wrap model-period-control">
-            分析資料期數
-            <select id="limitSelect">
-              <option value="7">近 7 期</option>
-              <option value="10">近 10 期</option>
-              <option value="14">近 14 期</option>
-              <option value="20">近 20 期</option>
-              <option value="21">近 21 期</option>
-              <option value="28">近 28 期</option>
-              <option value="35">近 35 期</option>
-              <option value="36">近 36 期</option>
-              <option value="60">60 期</option>
-              <option value="90" selected>90 期</option>
-              <option value="120">120 期</option>
-              <option value="180">180 期</option>
-              <option value="365">365 期</option>
-            </select>
-          </label>
-          <label class="select-wrap model-custom-period">
-            自訂 1～365 期
-            <input id="limitCustom" type="number" min="1" max="365" value="90" inputmode="numeric" />
-          </label>
-          <button id="applyLimitBtn" class="text-button" type="button">套用期數</button>
-          <button id="autoWindowBtn" class="text-button highlight-button" type="button">自動找最佳期數</button>
-          </div>
-          <div class="best-window-box" id="bestWindowBox" hidden></div>
-          <div class="model-controls" id="modelControls">
-            <div class="focus-controls" id="focusControls" aria-label="分析重點">
-              <button type="button" class="focus-chip active" data-focus="balanced">綜合</button>
-              <button type="button" class="focus-chip" data-focus="classic">熱遺</button>
-              <button type="button" class="focus-chip" data-focus="hot">追熱</button>
-              <button type="button" class="focus-chip" data-focus="overdue">追冷</button>
-              <button type="button" class="focus-chip" data-focus="interval">區間</button>
-              <button type="button" class="focus-chip" data-focus="pattern">邏輯整合</button>
-              <button type="button" class="focus-chip" data-focus="backtest">回測</button>
-            </div>
-            <label class="range-row">
-              <span>熱度</span>
-              <input type="range" min="0" max="60" value="30" data-weight="heat" />
-              <strong id="heatWeight">30</strong>
-            </label>
-            <label class="range-row">
-              <span>遺漏</span>
-              <input type="range" min="0" max="60" value="25" data-weight="overdue" />
-              <strong id="overdueWeight">25</strong>
-            </label>
-            <label class="range-row">
-              <span>分散</span>
-              <input type="range" min="0" max="60" value="25" data-weight="spread" />
-              <strong id="spreadWeight">25</strong>
-            </label>
-            <label class="range-row">
-              <span>回測</span>
-              <input type="range" min="0" max="60" value="20" data-weight="backtest" />
-              <strong id="backtestWeight">20</strong>
-            </label>
-          </div>
-          <p class="fineprint" id="modelSummary">目前模型：熱度 30%、遺漏 25%、分散 25%、回測 20%。</p>
-          <p class="analysis-meta" id="analysisMeta" aria-live="polite">等待資料驗證...</p>
-        </article>
-
-        <section class="analysis-overview" aria-label="近期分析摘要">
-        <article class="panel recommendation-brief-panel">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">推薦依據</p>
-              <h2>近期結構摘要</h2>
-            </div>
-            <span class="count-pill">不重複列號</span>
-          </div>
-          <div class="recommendation-brief" id="recommendationBrief"></div>
+        <article class="panel pick-panel" data-tier="pro" data-lock-title="Pro 統計參考選號" data-lock-text="訂閱後可查看依核心邏輯產生的統計參考選號。">
+          <p class="label">統計參考選號</p>
+          <div class="balls accent" id="pickBalls"></div>
+          <div class="pick-meta" id="pickMeta"></div>
           <p class="fineprint" id="analysisNote"></p>
         </article>
-        </section>
 
-        <article class="panel candidate-panel" data-tier="pro" data-lock-title="Pro 高分組合" data-lock-text="訂閱後可重新產生多組候選排序。">
+        <article class="panel flagship-panel" data-tier="flagship" data-lock-title="量化旗艦版專屬" data-lock-text="升級後可查看每期的核心摘星五碼與保存的推理紀錄。">
           <div class="panel-head compact">
             <div>
-              <p class="label">高分組合</p>
-              <h2>候選排序</h2>
+              <p class="label">摘星狙擊手｜量化旗艦版</p>
+              <h2>核心推理五碼</h2>
             </div>
-            <button id="generateBtn" class="text-button">重新產生</button>
+            <span class="flagship-fixed-label">近期熱度＋長期熱度＋遺漏平衡＋區間分布</span>
           </div>
-          <p class="fineprint">依追蹤分數排序，保留隨機性；這是分析候選，不是中獎保證。</p>
-          <div class="candidate-list" id="candidateList"></div>
-        </article>
-        </div>
-
-        <div class="tab-panel" data-tab-panel="stats">
-        <article class="panel stats-intro">
-          <p class="label">近期統計</p>
-          <h2>01～39 冷熱與遺漏</h2>
-          <p class="fineprint">完整列出每個號碼距離上次開出的期數，並用顏色標示目前位置。</p>
-        </article>
-        <article class="panel stats-overview">
-          <div class="stats-meta">
-            <span id="drawCount">-</span>
-            <div class="stats-legend" aria-label="顏色說明">
-              <span class="stats-key stats-key--latest">本期開獎</span>
-              <span class="stats-key stats-key--overdue">最久未開</span>
-              <span class="stats-key stats-key--hot">熱號</span>
-              <span class="stats-key stats-key--cold">中冷號</span>
-              <span class="stats-key stats-key--normal">一般</span>
-            </div>
-          </div>
-          <div class="stats-insight" id="statsInsight" aria-live="polite">
-            <div class="stats-loading">正在整理冷熱號摘要...</div>
-          </div>
-          <div class="stats-matrix" id="statsMatrix">
-            <div class="stats-loading">正在同步 01～39 冷熱統計...</div>
-          </div>
-        </article>
-        </div>
-
-        <div class="tab-panel" data-tab-panel="parity-tail">
-        <article class="panel parity-tail-panel">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">結構分析</p>
-              <h2>奇偶尾數</h2>
-            </div>
-            <span id="parityTailCount" class="count-pill">-</span>
-          </div>
-          <p class="fineprint">每期整理奇數、偶數、總和與 0～9 尾數顆數，方便快速觀察尾數分布。</p>
-          <div class="parity-tail-legend" aria-label="奇偶尾數說明">
-            <span class="parity-key parity-key--odd">奇數</span>
-            <span class="parity-key parity-key--even">偶數</span>
-            <span class="parity-key parity-key--sum">總和</span>
-            <span class="parity-key parity-key--tail">尾數 0～9</span>
-          </div>
-          <div class="parity-tail-insight" id="parityTailInsight" aria-live="polite">
-            <div class="stats-loading">正在整理奇偶與尾數推薦...</div>
-          </div>
-          <div class="parity-tail-table-wrap">
-            <table class="parity-tail-table">
-              <thead>
-                <tr>
-                  <th>開獎日期</th>
-                  <th>期別</th>
-                  <th>奇數</th>
-                  <th>偶數</th>
-                  <th>總和</th>
-                  <th>0尾</th>
-                  <th>1尾</th>
-                  <th>2尾</th>
-                  <th>3尾</th>
-                  <th>4尾</th>
-                  <th>5尾</th>
-                  <th>6尾</th>
-                  <th>7尾</th>
-                  <th>8尾</th>
-                  <th>9尾</th>
-                </tr>
-              </thead>
-              <tbody id="parityTailRows"></tbody>
-            </table>
-          </div>
-        </article>
-        </div>
-
-        <div class="tab-panel" data-tab-panel="model-pattern">
-        <article class="panel pattern-panel logic-panel" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看綜合模型最高分的 5 個號碼與推理摘要。">
-          <div class="panel-head compact">
-            <div>
-              <p class="label">邏輯推理</p>
-              <h2 id="patternModel">綜合推理最高分 5 碼</h2>
-            </div>
-            <span id="patternRepeat" class="count-pill">-</span>
-          </div>
-          <div class="pattern-grid" id="patternGrid"></div>
-          <div class="pattern-lines" id="patternLines"></div>
+          <div class="balls flagship-balls" id="flagshipBalls" aria-label="旗艦摘星五碼五芒星配置"></div>
+          <div class="pick-meta flagship-meta" id="flagshipMeta"></div>
           <section class="deep-sniper-block" aria-labelledby="deepSniperTitle">
             <div class="deep-sniper-head">
               <div>
@@ -359,15 +121,42 @@
             <div class="balls deep-sniper-balls" id="deepSniperBalls" aria-label="狙擊手最完整的分析推理五碼"></div>
             <div class="pick-meta deep-sniper-meta" id="deepSniperMeta"></div>
           </section>
+          <div class="adaptive-pick-block" hidden>
+            <div class="adaptive-pick-head">
+              <div>
+                <p class="label">自適應集成</p>
+                <strong>自適應集成五碼</strong>
+              </div>
+              <span class="adaptive-badge">獨立推理</span>
+            </div>
+            <div class="balls adaptive-balls" id="adaptiveBalls" aria-label="自適應集成五碼"></div>
+            <div class="pick-meta adaptive-meta" id="adaptiveMeta"></div>
+          </div>
         </article>
-        </div>
 
-        <div class="tab-panel" data-tab-panel="backtest">
-        <article class="panel backtest-panel" data-tier="pro" data-lock-title="Pro 模型回測" data-lock-text="訂閱後可查看近期命中表現與模型排名。">
+        <article class="panel backtest-panel" data-tier="pro" data-lock-title="Pro 回測驗證" data-lock-text="訂閱後可查看近期命中表現與邏輯排名。">
           <div class="panel-head compact">
             <div>
-              <p class="label">模型回測</p>
+              <p class="label">回測驗證</p>
               <h2>最近表現</h2>
+            </div>
+            <div class="backtest-tools" aria-label="回測期數設定">
+              <label for="backtestLimitSelect">回測</label>
+              <select id="backtestLimitSelect">
+                <option value="7">7 期</option>
+                <option value="14">14 期</option>
+                <option value="21">21 期</option>
+                <option value="24">24 期</option>
+                <option value="28">28 期</option>
+                <option value="35">35 期</option>
+                <option value="60">60 期</option>
+                <option value="90">90 期</option>
+                <option value="180">180 期</option>
+                <option value="365">365 期</option>
+                <option value="custom">自訂</option>
+              </select>
+              <input id="backtestLimitInput" type="number" min="7" max="365" step="1" inputmode="numeric" aria-label="自訂回測期數" />
+              <button id="backtestLimitApply" class="text-button" type="button">套用</button>
             </div>
             <span id="backtestBadge" class="count-pill">-</span>
           </div>
@@ -388,23 +177,231 @@
           <div class="backtest-recent" id="backtestRecent"></div>
           <p class="fineprint" id="backtestMethod"></p>
         </article>
+
+        <article class="panel pattern-panel" data-tier="pro" data-lock-title="Pro 版路分析" data-lock-text="訂閱後可查看區間、尾數、拖牌與連莊推理。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">版路分析</p>
+              <h2 id="patternModel">-</h2>
+            </div>
+            <span id="patternRepeat" class="count-pill">-</span>
+          </div>
+          <div class="pattern-grid" id="patternGrid"></div>
+          <div class="pattern-lines" id="patternLines"></div>
+        </article>
+
+        <article class="panel saved-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">我的號碼</p>
+              <h2>自動對最新一期</h2>
+            </div>
+            <button id="usePickBtn" class="text-button">套用參考</button>
+          </div>
+          <form class="saved-form" id="savedForm">
+            <div class="saved-number-picker" id="savedNumberPicker" role="group" aria-label="自選追蹤號碼 1 到 39"></div>
+            <div class="saved-picker-toolbar">
+              <span id="savedSelectionMeta" class="saved-selection-meta">已選 0 顆</span>
+              <button id="clearSavedNumbers" class="text-button" type="button">清除選擇</button>
+            </div>
+            <button class="save-button" type="submit">儲存這組號碼</button>
+          </form>
+          <p class="fineprint saved-notice">直接點選 1～39 號球，可選 1 顆到最多 39 顆；每天 00:00（台灣時間）重置當日對獎狀態，已儲存號碼會保留。</p>
+          <div class="saved-list" id="savedList"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head compact">
+            <p class="label">熱號</p>
+            <span id="drawCount">-</span>
+          </div>
+          <div class="rank-list" id="hotList"></div>
+        </article>
+
+        <article class="panel">
+          <p class="label">冷號</p>
+          <div class="rank-list" id="coldList"></div>
+        </article>
+
+        <article class="panel">
+          <p class="label">最久未開</p>
+          <div class="rank-list" id="overdueList"></div>
+        </article>
+
+        <article class="panel wide disclaimer-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">使用提醒</p>
+              <h2>免責聲明</h2>
+            </div>
+            <span class="count-pill">重要</span>
+          </div>
+          <div class="disclaimer-grid">
+            <p>本服務提供的選號、版路、回測與統計內容，僅供資料分析與娛樂參考，不保證中獎，也不構成投注、投資或財務建議。</p>
+            <p>開獎號碼與期別會盡量以官方資料及公開來源校對；若資料來源延遲、改版或異常，仍以台灣彩券與 California Lottery 官方公告為準。</p>
+            <p>使用者應自行判斷投注風險，理性投注，避免超出可負擔範圍。本服務不代售彩券，也不處理兌獎、投注或獎金相關事務。</p>
+          </div>
+          <div class="disclaimer-notify">
+            <div class="notify-quick">
+              <button id="notifyToggleBtn" class="save-button" type="button">開啟通知</button>
+              <span id="notifyBadge" class="count-pill">未啟用</span>
+              <button id="notifyTestBtn" class="text-button notify-test" type="button" hidden>測試</button>
+              <p class="fineprint" id="notifyText">開啟後，有新一期開獎時可收到通知。</p>
+            </div>
+          </div>
+        </article>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="sniper"></div>
+
+        <div class="tab-panel" data-tab-panel="model">
+        <article class="panel model-panel" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看核心分析說明與回測結果。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">邏輯推理設定</p>
+              <h2>調整偏好</h2>
+            </div>
+            <button id="resetModelBtn" class="text-button" hidden>重設</button>
+          </div>
+          <div class="model-window-control">
+            <label class="select-wrap" for="limitSelect">
+              <span>分析資料期數</span>
+              <select id="limitSelect">
+                <option value="10">近 10 期</option>
+                <option value="20">近 20 期</option>
+                <option value="36">近 36 期</option>
+                <option value="60">60 期</option>
+                <option value="90" selected>90 期</option>
+                <option value="120">120 期</option>
+                <option value="180">180 期</option>
+                <option value="365">365 期</option>
+              </select>
+            </label>
+            <span class="model-window-note">邏輯推理、近期號碼與參考統計共用此資料範圍</span>
+          </div>
+          <div class="core-logic-summary" aria-label="核心分析邏輯">
+            <div class="core-logic-item">
+              <strong>1. 近期熱度 45%</strong>
+              <span>近 10／20／36 期，越近期的資料權重越高。</span>
+            </div>
+            <div class="core-logic-item">
+              <strong>2. 長期熱度 20%</strong>
+              <span>用較長期分布避免只追單一短期熱門號碼。</span>
+            </div>
+            <div class="core-logic-item">
+              <strong>3. 遺漏平衡 15%</strong>
+              <span>不盲追剛開，也不因超過 25 期未開就硬追。</span>
+            </div>
+            <div class="core-logic-item">
+              <strong>4. 區間分布 20%</strong>
+              <span>讓 01～39 的號碼分布保持合理，不把號碼擠在同一段。</span>
+            </div>
+          </div>
+          <p class="fineprint" id="modelSummary">所有方案共用這套核心分析；回測只用來檢查表現，不再反覆改寫推薦號碼。</p>
+        </article>
+
+        <article class="panel core-candidate-panel" data-tier="flagship" data-lock-title="旗艦核心候選 15 碼" data-lock-text="升級量化旗艦版後，可查看依核心分析排序的 15 碼候選池，並自行組合 5 碼。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">會員自選池</p>
+              <h2>核心候選 15 碼</h2>
+            </div>
+            <span class="count-pill">邏輯分數排序</span>
+          </div>
+          <p class="fineprint">沿用近期熱度、長期熱度、遺漏平衡與區間分布，列出分數較高的 15 碼供會員自行選擇；不是保證中獎清單。</p>
+          <div class="core-candidate-balls" id="coreCandidateBalls" aria-label="核心候選 15 碼"></div>
+          <div class="core-candidate-footer">
+            <span id="coreCandidateMeta" class="core-candidate-meta">已選 0／5</span>
+            <button id="coreCandidateSave" class="text-button" type="button" disabled>儲存這組 5 碼</button>
+          </div>
+        </article>
+
+        <article class="panel tail-analysis-panel" data-tier="flagship" data-lock-title="旗艦尾數焦點 5 碼" data-lock-text="升級量化旗艦版後，可查看近 10、20、36 期的獨立尾數動能與參考號碼。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">獨立分析模組</p>
+              <h2>尾數焦點 5 碼</h2>
+            </div>
+            <span id="tailAnalysisBadge" class="count-pill">獨立 · 近36期逐期 +1／-1</span>
+          </div>
+          <div class="tail-analysis-summary" id="tailAnalysisSummary"></div>
+          <div class="tail-analysis-grid">
+            <div class="tail-analysis-block">
+              <span class="tail-analysis-label">優先尾數</span>
+              <div class="tail-pill-list" id="tailHotList"></div>
+            </div>
+            <div class="tail-analysis-block">
+              <span class="tail-analysis-label">0～9 尾數分數</span>
+              <div class="tail-pill-list" id="tailAvoidList"></div>
+            </div>
+          </div>
+          <div class="tail-recommendation">
+            <div class="tail-recommendation-head">
+              <div>
+                <span class="tail-analysis-label">尾數推理參考</span>
+                <strong>尾數焦點五碼</strong>
+              </div>
+              <span class="tail-recommendation-mark">獨立計算</span>
+            </div>
+            <div class="balls tail-recommendation-balls" id="tailRecommendationBalls"></div>
+            <div class="pick-meta tail-analysis-meta" id="tailAnalysisMeta"></div>
+          </div>
+          <p class="fineprint" id="tailAnalysisNote"></p>
+        </article>
+
+        <article class="panel flagship-history-panel" data-tier="flagship" data-lock-title="旗艦分析紀錄" data-lock-text="升級量化旗艦版後，可查看每期保存的五碼與完整推理摘要。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">量化旗艦版</p>
+              <h2>旗艦分析紀錄</h2>
+            </div>
+            <button id="flagshipHistoryRefresh" class="text-button" type="button">重新載入</button>
+          </div>
+          <p class="fineprint">每期保存核心五碼與當時的四項推理摘要；下一期開獎後會自動補上命中結果，命中號碼會以勾號與綠色標記顯示。</p>
+          <div class="flagship-marker-legend" aria-label="歷史標記圖例">
+            <span><i class="flagship-marker-swatch marker-hit"></i>命中號碼（勾號）</span>
+            <span><i class="flagship-marker-swatch marker-return"></i>20 期以上未出後回補</span>
+            <span><i class="flagship-marker-swatch marker-repeat"></i>連莊</span>
+            <span><i class="flagship-marker-swatch marker-consecutive"></i>連號</span>
+          </div>
+          <div id="flagshipHistoryList" class="flagship-history-list"></div>
+        </article>
+
+        <article class="panel mode-snapshot-panel" data-tier="pro" hidden data-lock-title="Pro 模式版路" data-lock-text="訂閱後可查看每個模式各自產生的候選組合。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">模式版路</p>
+              <h2>各模式快照</h2>
+            </div>
+            <span class="count-pill">含區間</span>
+          </div>
+          <p class="fineprint">每個邏輯模式各自產生一組，保留最高命中與 3 中以上次數；點卡片可切換到該模式。</p>
+          <div class="mode-snapshot-list" id="modeSnapshotList"></div>
+        </article>
+
+        <article class="panel candidate-panel" data-tier="pro" data-lock-title="Pro 高分組合" data-lock-text="訂閱後可重新產生多組候選排序。">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">高分組合</p>
+              <h2>候選排序</h2>
+            </div>
+            <button id="generateBtn" class="text-button">重新產生</button>
+          </div>
+          <p class="fineprint">依追蹤分數排序，保留隨機性；這是分析候選，不是中獎保證。</p>
+          <div class="candidate-list" id="candidateList"></div>
+        </article>
         </div>
 
         <div class="tab-panel" data-tab-panel="history">
-        <article class="panel wide">
+        <article class="panel wide history-query-panel">
           <div class="panel-head compact">
             <div>
               <p class="label">歷史開獎</p>
               <h2>紀錄查詢</h2>
             </div>
-            <span id="historyCount" class="count-pill">-</span>
+            <span class="count-pill">跨年篩選</span>
           </div>
-          <div class="history-legend" id="historyNumberLegend" aria-label="歷史號碼顏色說明">
-            <span><i class="legend-ball legend-ball--base"></i>一般開獎</span>
-            <span><i class="legend-ball legend-ball--repeat"></i>連莊</span>
-            <span><i class="legend-ball legend-ball--consecutive"></i>連號</span>
-            <span><i class="legend-ball legend-ball--both"></i>連莊＋連號</span>
-          </div>
+          <p class="fineprint">設定年份或指定號碼後查詢歷史紀錄；查詢完成會自動切換到「近期號碼」查看結果。</p>
           <div class="history-search">
             <label>
               起始年
@@ -426,26 +423,36 @@
             <button id="clearHistorySearch" class="text-button">清除</button>
           </div>
           <p class="fineprint" id="historyScope">目前顯示本次載入的分析期數。</p>
-          <div class="history-view-tabs" role="tablist" aria-label="歷史紀錄分類">
-            <button class="history-view-tab active" type="button" role="tab" aria-selected="true" data-history-view="numbers">號碼紀錄</button>
-            <button class="history-view-tab" type="button" role="tab" aria-selected="false" data-history-view="tails">尾數統計</button>
-          </div>
-          <div class="history-view-panel" data-history-view-panel="numbers">
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>開獎日期</th>
-                    <th>期別</th>
-                    <th>開獎號碼</th>
-                  </tr>
-                </thead>
-                <tbody id="historyRows"></tbody>
-              </table>
+        </article>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="recent">
+        <article class="panel wide recent-draws-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="label">近期開獎</p>
+              <h2>近期號碼</h2>
             </div>
+            <span id="historyCount" class="count-pill">-</span>
           </div>
-          <div class="history-view-panel" data-history-view-panel="tails" hidden>
-            <div class="history-tail-records" id="historyTailRows"></div>
+          <p class="fineprint" id="recentScope">目前使用近 90 期分析；短期可切換近 10、20、36 期。</p>
+          <div class="history-marker-legend" aria-label="號碼顏色說明">
+            <span><i class="flagship-marker-swatch marker-return"></i>20 期以上未出後回補</span>
+            <span><i class="flagship-marker-swatch marker-repeat"></i>連莊</span>
+            <span><i class="flagship-marker-swatch marker-consecutive"></i>連號</span>
+          </div>
+          <p class="history-marker-note">顏色只代表歷史條件標記，不代表預測或保證中獎。</p>
+          <div class="table-wrap">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>期別</th>
+                  <th>號碼</th>
+                </tr>
+              </thead>
+              <tbody id="historyRows"></tbody>
+            </table>
           </div>
         </article>
         </div>
@@ -454,15 +461,15 @@
         <article class="panel subscription-panel">
           <div>
             <p class="label">訂閱方案</p>
-            <h2>Pro 統計分析</h2>
-            <p class="fineprint">解鎖進階模型、跨年紀錄與高分組合。</p>
+            <h2>Pro 統計分析與量化旗艦版</h2>
+            <p class="fineprint">Pro 解鎖進階邏輯推理；量化旗艦版再提供五星狙擊手專區的旗艦 5 碼、核心候選與尾數焦點。</p>
+            <p class="subscription-disclaimer">本訂閱附加功能僅用於輔助提高中獎機率與統計參考，並非百發百中，也不保證中獎。請理性投注，賽事每天有，祝您中獎。</p>
           </div>
           <div class="plan-grid" id="planGrid"></div>
-          <p class="subscription-disclaimer">本訂閱附加功能僅輔助整理統計與提高選號參考，不代表百發百中。請理性投注，祝您中獎。</p>
         </article>
         </div>
       </section>
     </main>
-    <script src="/app.js?v=71"></script>
+    <script src="/app.js?v=89"></script>
   </body>
 </html>
