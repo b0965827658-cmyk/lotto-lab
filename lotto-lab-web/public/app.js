@@ -1889,7 +1889,7 @@ function renderModelBacktest(backtest, profiles = []) {
         <div class="model-rank ${index === 0 ? "best" : ""}">
           <div>
             <strong>${profile.label}</strong>
-            <span>均中 ${profile.averageHit} · 摸邊 ${profile.onePlusRate ?? 0}% · 2中+ ${profile.twoPlusRate ?? 0}%</span>
+            <span>均中 ${profile.averageHit ?? profile.allHistoryAverageHit ?? 0} · 摸邊 ${profile.hitRate ?? profile.onePlusRate ?? 0}% · 近100期 ${profile.recent100AverageHit ?? "-"} · ${profile.status || "active"}</span>
           </div>
           <em>${profile.bestHit} 中</em>
         </div>
@@ -2017,6 +2017,17 @@ function renderModelBacktest(backtest, profiles = []) {
     .join("");
   if (validationHtml || ranking || warning || coverageHtml) {
     els.backtestRecent.insertAdjacentHTML("afterbegin", `${coverageHtml}${validationHtml}${warning}<div class="model-rank-list">${ranking}</div>`);
+  }
+  const automl = state.analysis?.automl;
+  const monitoring = state.analysis?.monitoring || backtest.monitoring || {};
+  if (automl || monitoring.warning) {
+    els.backtestRecent.insertAdjacentHTML(
+      "afterbegin",
+      `<div class="backtest-warning ${monitoring.warning ? "is-alert" : ""}">
+        ${monitoring.warning ? "最近20期低於歷史平均20%，模型標記為需要重新訓練。" : `AutoML 已啟用：每 ${automl?.retrainEvery || 100} 期依滾動回測重新檢查投票權重。`}
+        ${automl?.qualified ? "目前已達1000期資格門檻。" : "目前仍顯示為觀察模型，資料累積滿1000期後才升格。"}
+      </div>`,
+    );
   }
   rememberModelSnapshots();
 }
@@ -2222,6 +2233,7 @@ function renderPatterns(patterns) {
   const backtest = state.analysis?.backtest || {};
   const tiers = state.analysis?.candidateTiers || {};
   const top5 = Array.isArray(tiers.top5) && tiers.top5.length >= 5 ? tiers.top5.slice(0, 5) : pool.slice(0, 5);
+  const backup5 = Array.isArray(tiers.backup5) && tiers.backup5.length >= 5 ? tiers.backup5.slice(0, 5) : pool.slice(5, 10);
   const top10 = Array.isArray(tiers.top10) && tiers.top10.length >= 10 ? tiers.top10.slice(0, 10) : pool.slice(0, 10);
   const full15 = Array.isArray(tiers.full15) && tiers.full15.length >= 15 ? tiers.full15.slice(0, 15) : pool.slice(0, 15);
   const details = Array.isArray(state.analysis?.candidateDetails) ? state.analysis.candidateDetails.slice(0, 15) : [];
@@ -2230,25 +2242,37 @@ function renderPatterns(patterns) {
   const intervals = (patterns?.intervals || []).slice(0, 2).map((item) => `${item.label} ${item.rate}%`).join("、") || "資料累積中";
   const strategy = state.analysis?.strategy || null;
   const strategySteps = strategy?.steps?.join(" ・ ") || "";
+  const ensemble = state.analysis?.ensemble || {};
+  const modelWeights = Object.entries(ensemble.voteWeights || state.analysis?.modelWeights || {})
+    .map(([key, value]) => `${key} ${Math.round(Number(value) * 100)}%`)
+    .join("、");
+  const scoreByNumber = new Map(details.map((item) => [Number(item.number), item]));
+  const detailLine = (numbers) => numbers.map((number) => {
+    const item = scoreByNumber.get(Number(number));
+    return `<span class="candidate-score-chip"><b>${pad(number)}</b><small>${item ? `${item.score}分 · 信心 ${item.confidence}%` : "候選池"}</small></span>`;
+  }).join("");
   els.patternModel.textContent = "核心候選 15 碼";
-  els.patternRepeat.textContent = `${profile} · 統計候選池`;
+  els.patternRepeat.textContent = `${profile} · 多模型集成`;
   els.patternGrid.innerHTML = `
     <div class="core-candidate-hero">
       <div class="core-candidate-heading">
-        <span>近期結構交叉篩選</span>
-        <strong>先看前 5 碼，再從完整 15 碼自行搭配</strong>
+        <span>近期結構交叉篩選 · ${ensemble.modelConsistency ?? "-"}% 模型一致性</span>
+        <strong>以候選 15 碼覆蓋率為主，再分層呈現核心與備選</strong>
       </div>
       <div class="core-candidate-tier">
-        <div class="core-candidate-tier-head"><span>第一層</span><strong>最有機率 5 顆</strong></div>
+        <div class="core-candidate-tier-head"><span>★★★★★</span><strong>最推薦 5 顆</strong></div>
         <div class="core-candidate-pool">${coreCandidateBalls(top5, "core")}</div>
+        <div class="candidate-score-line">${detailLine(top5)}</div>
       </div>
       <div class="core-candidate-tier">
-        <div class="core-candidate-tier-head"><span>第二層</span><strong>候選 10 顆</strong></div>
-        <div class="core-candidate-pool">${coreCandidateBalls(top10, "support")}</div>
+        <div class="core-candidate-tier-head"><span>★★★★☆</span><strong>備選 5 顆</strong></div>
+        <div class="core-candidate-pool">${coreCandidateBalls(backup5, "support")}</div>
+        <div class="candidate-score-line">${detailLine(backup5)}</div>
       </div>
       <div class="core-candidate-tier">
-        <div class="core-candidate-tier-head"><span>第三層</span><strong>完整 15 顆候選池</strong></div>
+        <div class="core-candidate-tier-head"><span>★★★☆☆</span><strong>完整 15 顆候選池</strong></div>
         <div class="core-candidate-pool">${coreCandidateBalls(full15)}</div>
+        <div class="candidate-score-line">${detailLine(full15)}</div>
       </div>
       <div class="core-candidate-legend">
         <span><i class="core-candidate-swatch is-core"></i>第一層核心 5 碼</span>
@@ -2268,6 +2292,14 @@ function renderPatterns(patterns) {
               .join("")}
           </div>`
         : ""}
+      <div class="ensemble-summary">
+        <span>整體信心 ${ensemble.overallConfidence ?? "-"}%</span>
+        <span>預估和值 ${ensemble.estimatedSum ?? "-"}</span>
+        <span>跨度 ${ensemble.estimatedSpan ?? "-"}</span>
+        <span>奇數 ${ensemble.estimatedOddEven ?? "-"} 顆</span>
+        <span>小號 ${ensemble.estimatedSmallLarge ?? "-"} 顆</span>
+        <span>投票權重 ${modelWeights || "資料累積中"}</span>
+      </div>
       <em>依近期熱度、遺漏、區間、尾數與回測資料交叉整理；這是候選池，不代表實際機率或保證中獎。</em>
     </div>
   `;
@@ -2294,8 +2326,11 @@ function renderPatterns(patterns) {
     </div>
     <div class="logic-reason-card">
       <span>歷史回測參考</span>
-      <strong>近 ${backtest.testedCount || 0} 期 · 平均 ${backtest.averageHit ?? "-"} 中 · 最高 ${backtest.bestHit ?? "-"} 中</strong>
+      <strong>滾動 ${backtest.testedCount || 0} 期 · 15碼至少1中 ${backtest.tierMetrics?.["15"]?.hitRate ?? "-"}% · 5碼平均 ${backtest.averageHit ?? "-"} 中</strong>
     </div>
+    ${(state.analysis?.leastRecommended || []).length
+      ? `<div class="logic-reason-card"><span>本期較不推薦10碼</span><strong>${state.analysis.leastRecommended.map((item) => `${pad(item.number)}（${item.reason}）`).join("、")}</strong></div>`
+      : ""}
   `;
   renderDeepSniper();
   if (els.deepSniperBlock) els.deepSniperBlock.hidden = true;
@@ -2513,7 +2548,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (!state.serviceWorkerRegistration) {
-    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=78", {
+    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=79", {
       updateViaCache: "none",
     });
   }

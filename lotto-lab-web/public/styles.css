@@ -2792,6 +2792,53 @@ body[data-plan="free"] .pro-required {
   margin: 0 auto;
 }
 
+.candidate-score-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.candidate-score-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  border: 1px solid rgba(39, 104, 145, 0.16);
+  border-radius: 999px;
+  background: #f7fafc;
+  color: #315d7b;
+  padding: 4px 7px;
+}
+
+.candidate-score-chip b {
+  font-size: 12px;
+}
+
+.candidate-score-chip small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.ensemble-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  border-top: 1px solid rgba(39, 104, 145, 0.16);
+  padding-top: 10px;
+}
+
+.ensemble-summary span {
+  border-radius: 999px;
+  background: #e8f1f7;
+  color: #315d7b;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
 .core-candidate-ball {
   display: inline-grid;
   place-items: center;
