@@ -520,6 +520,11 @@ input:focus-visible {
     font-size: 16px;
   }
 
+  .pattern-grid .core-candidate-ball {
+    font-size: 16px !important;
+    font-weight: 950 !important;
+  }
+
   .deep-sniper-block {
     padding: 14px;
   }
@@ -2778,14 +2783,34 @@ body[data-plan="free"] .pro-required {
   box-shadow: inset 0 -7px 10px rgba(0, 0, 0, 0.16), 0 3px 0 rgba(28, 75, 116, 0.16);
 }
 
+/* The pattern grid has generic span rules; keep candidate numbers centered in their balls. */
+.pattern-grid .core-candidate-ball {
+  display: grid;
+  place-items: center;
+  align-items: center;
+  justify-items: center;
+  align-content: center;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-size: 18px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+  text-align: center;
+  vertical-align: middle;
+}
+
 .core-candidate-ball.is-core {
   border-color: #ffe4a1;
   background: linear-gradient(145deg, #f7ca54 0%, #d68f0e 78%);
-  color: #1e2a31;
+  color: #1e2a31 !important;
 }
 
 .core-candidate-ball.is-support {
   background: linear-gradient(145deg, #4d9bc4 0%, #1e5f8d 78%);
+  color: #ffffff !important;
 }
 
 .core-candidate-legend {
