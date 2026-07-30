@@ -1902,6 +1902,61 @@ function renderModelBacktest(backtest, profiles = []) {
     threePlusRate === 0
       ? `<div class="backtest-warning">最近 ${backtest.testedCount} 期沒有 3 中以上，這時候先看摸邊率和 2 中以上，比只盯 3 中更準。</div>`
       : "";
+  const tierMetrics = backtest.tierMetrics || {};
+  const tierMetric = (key, label) => {
+    const metric = tierMetrics[key] || {};
+    return `
+      <div class="backtest-coverage-card">
+        <strong>${label}</strong>
+        <span>至少 1 中 ${metric.hitRate ?? 0}%</span>
+        <em>平均 ${metric.averageHit ?? 0} 顆 · 2 中以上 ${metric.twoPlusRate ?? 0}%</em>
+      </div>
+    `;
+  };
+  const weightLabels = {
+    recent30: "近30期",
+    recent100: "近100期",
+    recent300: "近300期",
+    omission: "遺漏值",
+    returnRate: "回補率",
+    repeatRate: "連莊率",
+    tailBalance: "尾數平衡",
+    oddBalance: "奇偶比例",
+    sizeBalance: "大小比例",
+    rangeBalance: "區間比例",
+    sumFit: "和值",
+    spanFit: "跨度",
+    acFit: "AC值",
+    sameTailFit: "同尾率",
+    consecutiveFit: "連號率",
+    previousRepeatFit: "上期重複率",
+  };
+  const impactRows = Object.entries(backtest.weightImpact || {})
+    .sort(([, a], [, b]) => Number(b.averageHit15Impact || 0) - Number(a.averageHit15Impact || 0))
+    .slice(0, 6);
+  const coverageHtml = `
+    <div class="backtest-coverage">
+      <div class="backtest-coverage-head">
+        <strong>候選池命中統計</strong>
+        <span>滾動 ${backtest.testedCount} 期 · 每次以前 300 期學習</span>
+      </div>
+      <div class="backtest-coverage-grid">
+        ${tierMetric("5", "第一層 5 碼")}
+        ${tierMetric("10", "第二層 10 碼")}
+        ${tierMetric("15", "第三層 15 碼")}
+      </div>
+      ${impactRows.length
+        ? `<div class="backtest-impact">
+            <strong>權重影響（移除該項後，15碼平均命中變化）</strong>
+            <div class="backtest-impact-list">
+              ${impactRows
+                .map(([key, item]) => `<span>${weightLabels[key] || key} ${Number(item.averageHit15Impact || 0) >= 0 ? "+" : ""}${item.averageHit15Impact || 0} 顆 · 權重 ${item.learnedWeight || 0}%</span>`)
+                .join("")}
+            </div>
+          </div>`
+        : ""}
+    </div>
+  `;
   const validationRows = validationRowsForLatest();
   const validationHtml = validationRows.length
     ? `
@@ -1960,8 +2015,8 @@ function renderModelBacktest(backtest, profiles = []) {
       `,
     )
     .join("");
-  if (validationHtml || ranking || warning) {
-    els.backtestRecent.insertAdjacentHTML("afterbegin", `${validationHtml}${warning}<div class="model-rank-list">${ranking}</div>`);
+  if (validationHtml || ranking || warning || coverageHtml) {
+    els.backtestRecent.insertAdjacentHTML("afterbegin", `${coverageHtml}${validationHtml}${warning}<div class="model-rank-list">${ranking}</div>`);
   }
   rememberModelSnapshots();
 }
@@ -2118,6 +2173,7 @@ function renderDeepSniper() {
 
 function coreCandidatePool() {
   const analysis = state.analysis || {};
+  const tierPool = Array.isArray(analysis.candidateTiers?.full15) ? analysis.candidateTiers.full15 : [];
   const strategyPool = Array.isArray(analysis.strategy?.candidatePool) ? analysis.strategy.candidatePool : [];
   const recommendation = Array.isArray(analysis.recommendation) ? analysis.recommendation : [];
   const frequencyRows = Array.isArray(analysis.frequency) ? analysis.frequency : [];
@@ -2129,18 +2185,24 @@ function coreCandidatePool() {
         Number(a.number) - Number(b.number),
     )
     .map((row) => row.number);
-  const normalized = [...strategyPool, ...recommendation, ...frequencyPool]
+  const normalized = [...tierPool, ...strategyPool, ...recommendation, ...frequencyPool]
     .map(Number)
     .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39);
   const unique = [...new Set(normalized)];
   return unique.length >= 15 ? unique.slice(0, 15) : unique;
 }
 
-function coreCandidateBalls(numbers) {
+function coreCandidateBalls(numbers, tone = "mixed") {
+  const details = new Map((state.analysis?.candidateDetails || []).map((item) => [Number(item.number), item]));
   return numbers
     .map(
-      (number, index) =>
-        `<span class="core-candidate-ball ${index < 5 ? "is-core" : "is-support"}" title="第 ${index + 1} 候選" aria-label="第 ${index + 1} 候選 ${pad(number)} 號">${pad(number)}</span>`,
+      (number, index) => {
+        const detail = details.get(Number(number));
+        const toneClass = tone === "core" ? "is-core" : tone === "support" ? "is-support" : index < 5 ? "is-core" : "is-support";
+        const reason = detail?.reason ? `：${detail.reason}` : "";
+        const score = detail?.score != null ? ` · ${detail.score}分` : "";
+        return `<span class="core-candidate-ball ${toneClass}" title="${pad(number)}號${score}${reason}" aria-label="${pad(number)}號${score}${reason}">${pad(number)}</span>`;
+      },
     )
     .join("");
 }
@@ -2158,6 +2220,11 @@ function renderPatterns(patterns) {
     return;
   }
   const backtest = state.analysis?.backtest || {};
+  const tiers = state.analysis?.candidateTiers || {};
+  const top5 = Array.isArray(tiers.top5) && tiers.top5.length >= 5 ? tiers.top5.slice(0, 5) : pool.slice(0, 5);
+  const top10 = Array.isArray(tiers.top10) && tiers.top10.length >= 10 ? tiers.top10.slice(0, 10) : pool.slice(0, 10);
+  const full15 = Array.isArray(tiers.full15) && tiers.full15.length >= 15 ? tiers.full15.slice(0, 15) : pool.slice(0, 15);
+  const details = Array.isArray(state.analysis?.candidateDetails) ? state.analysis.candidateDetails.slice(0, 15) : [];
   const profile = patterns?.selectedLabel || "綜合模型";
   const tails = (patterns?.tails || []).slice(0, 3).map((item) => `${item.tail}尾 ${item.count}次`).join("、") || "資料累積中";
   const intervals = (patterns?.intervals || []).slice(0, 2).map((item) => `${item.label} ${item.rate}%`).join("、") || "資料累積中";
@@ -2171,11 +2238,36 @@ function renderPatterns(patterns) {
         <span>近期結構交叉篩選</span>
         <strong>先看前 5 碼，再從完整 15 碼自行搭配</strong>
       </div>
-      <div class="core-candidate-pool">${coreCandidateBalls(pool)}</div>
-      <div class="core-candidate-legend">
-        <span><i class="core-candidate-swatch is-core"></i>核心排序前 5 碼</span>
-        <span><i class="core-candidate-swatch is-support"></i>交叉候選 10 碼</span>
+      <div class="core-candidate-tier">
+        <div class="core-candidate-tier-head"><span>第一層</span><strong>最有機率 5 顆</strong></div>
+        <div class="core-candidate-pool">${coreCandidateBalls(top5, "core")}</div>
       </div>
+      <div class="core-candidate-tier">
+        <div class="core-candidate-tier-head"><span>第二層</span><strong>候選 10 顆</strong></div>
+        <div class="core-candidate-pool">${coreCandidateBalls(top10, "support")}</div>
+      </div>
+      <div class="core-candidate-tier">
+        <div class="core-candidate-tier-head"><span>第三層</span><strong>完整 15 顆候選池</strong></div>
+        <div class="core-candidate-pool">${coreCandidateBalls(full15)}</div>
+      </div>
+      <div class="core-candidate-legend">
+        <span><i class="core-candidate-swatch is-core"></i>第一層核心 5 碼</span>
+        <span><i class="core-candidate-swatch is-support"></i>其餘候選碼</span>
+      </div>
+      ${details.length
+        ? `<div class="candidate-detail-grid">
+            ${details
+              .map(
+                (item) => `
+                  <div class="candidate-detail-card">
+                    <div><strong>${pad(item.number)} 號</strong><span>第 ${item.rank} 位 · ${item.score} 分</span></div>
+                    <p>${item.reason || "綜合權重與結構平衡入選"}</p>
+                  </div>
+                `,
+              )
+              .join("")}
+          </div>`
+        : ""}
       <em>依近期熱度、遺漏、區間、尾數與回測資料交叉整理；這是候選池，不代表實際機率或保證中獎。</em>
     </div>
   `;
@@ -2421,7 +2513,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (!state.serviceWorkerRegistration) {
-    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=77", {
+    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=78", {
       updateViaCache: "none",
     });
   }
