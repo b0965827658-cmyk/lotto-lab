@@ -2541,7 +2541,9 @@ MODEL_MIN_QUALIFY_HISTORY = 1000
 MODEL_RETRAIN_EVERY = 100
 MODEL_STATE_FILE = Path(os.environ.get("LOTTO_MODEL_STATE_FILE", ROOT / "data" / "model_state.json"))
 MODEL_PREDICTIONS_FILE = Path(os.environ.get("LOTTO_PREDICTIONS_FILE", ROOT / "data" / "prediction_history.json"))
+MODEL_BACKTEST_CACHE_FILE = Path(os.environ.get("LOTTO_BACKTEST_CACHE_FILE", ROOT / "data" / "multimodel_backtest_cache.json"))
 MODEL_STATE_LOCK = threading.Lock()
+MODEL_BACKTEST_JOBS: set[str] = set()
 MODEL_NAMES = ("bayesian", "logistic", "boosted", "markov")
 MODEL_LABELS = {
     "bayesian": "Bayesian 機率平滑",
@@ -2897,7 +2899,7 @@ def _mm_model_weights(game: str, profiles: list[dict[str, Any]]) -> dict[str, fl
     return {name: round(raw.get(name, default[name]) / total, 6) for name in MODEL_NAMES}
 
 
-def _mm_roll_backtest(rows: list[dict[str, Any]], game: str, max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+def _mm_roll_backtest_full(rows: list[dict[str, Any]], game: str, max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
     ordered = _mm_rows(rows, max_number=max_number, limit=MODEL_EVAL_WINDOW + MODEL_TRAIN_WINDOW)
     if len(ordered) < 2:
         return {"testedCount": 0, "method": "資料不足，尚未開始滾動回測。", "distribution": {}, "tierMetrics": {}}
@@ -2942,6 +2944,75 @@ def _mm_roll_backtest(rows: list[dict[str, Any]], game: str, max_number: int = 3
     recent20 = ensemble15[-20:]
     historical_average = sum(ensemble15) / max(1, len(ensemble15))
     return {"testedCount": tested, "trainWindow": MODEL_TRAIN_WINDOW, "sourceWindow": len(ordered), "qualificationHistory": len(ordered), "qualifiedForPromotion": len(ordered) >= MODEL_MIN_QUALIFY_HISTORY, "averageHit": round(sum(ensemble_hits[5]) / max(1, tested), 3), "onePlusRate": round(sum(value >= 1 for value in ensemble_hits[5]) / max(1, tested) * 100, 2), "twoPlusRate": round(sum(value >= 2 for value in ensemble_hits[5]) / max(1, tested) * 100, 2), "threePlusRate": round(sum(value >= 3 for value in ensemble_hits[5]) / max(1, tested) * 100, 2), "bestHit": max(ensemble_hits[5] or [0]), "distribution": distribution, "tierMetrics": {str(tier): tier_metrics(tier) for tier in (5, 10, 15)}, "modelProfiles": profiles, "recentRows": recent_rows, "monitoring": {"recent20AverageHit": round(sum(recent20) / max(1, len(recent20)), 3), "historicalAverageHit": round(historical_average, 3), "warning": bool(len(recent20) >= 20 and sum(recent20) / 20 < historical_average * 0.8)}, "weightImpact": {name: {"averageHit15Impact": round(sum(ensemble_hits[15]) / max(1, tested) - sum(model_hits[name]) / max(1, tested), 3)} for name in MODEL_NAMES}, "method": f"{game} 獨立滾動回測：每個目標期只使用之前最多5,000期，至少以前300期訓練，從第{start + 1}筆一路測到最新資料；候選池目標為15碼覆蓋率。"}
+
+
+def _mm_backtest_signature(rows: list[dict[str, Any]], game: str, max_number: int = 39) -> str:
+    ordered = _mm_rows(rows, max_number=max_number, limit=MODEL_TRAIN_WINDOW + MODEL_EVAL_WINDOW)
+    if not ordered:
+        return f"{game}:{MODEL_ENGINE_VERSION}:empty"
+    return f"{game}:{MODEL_ENGINE_VERSION}:{len(ordered)}:{ordered[0]['period']}:{ordered[-1]['period']}"
+
+
+def _mm_load_backtest_cache(signature: str) -> dict[str, Any] | None:
+    cache = _mm_json_load(MODEL_BACKTEST_CACHE_FILE, {})
+    if not isinstance(cache, dict):
+        return None
+    item = cache.get(signature)
+    return item if isinstance(item, dict) and item.get("testedCount", 0) else None
+
+
+def _mm_save_backtest_cache(signature: str, result: dict[str, Any]) -> None:
+    cache = _mm_json_load(MODEL_BACKTEST_CACHE_FILE, {})
+    if not isinstance(cache, dict):
+        cache = {}
+    cache[signature] = result
+    # A signature is tied to the latest source period. Keep a small history so
+    # a restart can reuse recent results without growing the runtime database.
+    keys = list(cache)[-8:]
+    _mm_json_save(MODEL_BACKTEST_CACHE_FILE, {key: cache[key] for key in keys})
+
+
+def _mm_start_backtest_job(rows: list[dict[str, Any]], game: str, signature: str, max_number: int, pick_count: int) -> None:
+    with MODEL_STATE_LOCK:
+        if signature in MODEL_BACKTEST_JOBS:
+            return
+        MODEL_BACKTEST_JOBS.add(signature)
+
+    def run() -> None:
+        try:
+            result = _mm_roll_backtest_full(rows, game, max_number, pick_count)
+            _mm_save_backtest_cache(signature, result)
+        except Exception as exc:
+            print(f"multimodel backtest error ({game}): {exc}")
+        finally:
+            with MODEL_STATE_LOCK:
+                MODEL_BACKTEST_JOBS.discard(signature)
+
+    threading.Thread(target=run, name=f"multimodel-backtest-{game}", daemon=True).start()
+
+
+def _mm_roll_backtest(rows: list[dict[str, Any]], game: str, max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    """Return cached full results immediately and warm a full result in background.
+
+    The public API must remain responsive while the 700-target qualification
+    run is being computed. A short rolling preview is used only until the
+    complete result is persisted; it is never presented as fully qualified.
+    """
+    ordered = _mm_rows(rows, max_number=max_number, limit=MODEL_TRAIN_WINDOW + MODEL_EVAL_WINDOW)
+    signature = _mm_backtest_signature(ordered, game, max_number)
+    cached_result = _mm_load_backtest_cache(signature)
+    if cached_result:
+        return {**cached_result, "cacheStatus": "complete", "cacheSignature": signature}
+    _mm_start_backtest_job(ordered, game, signature, max_number, pick_count)
+    preview_size = min(len(ordered), MODEL_TRAIN_WINDOW + 40)
+    preview = _mm_roll_backtest_full(ordered[-preview_size:], game, max_number, pick_count)
+    preview["sourceWindow"] = len(ordered)
+    preview["qualificationHistory"] = len(ordered)
+    preview["qualifiedForPromotion"] = False
+    preview["cacheStatus"] = "warming"
+    preview["cacheSignature"] = signature
+    preview["method"] = "完整滾動回測正在背景建立；目前先顯示短期預覽，完成後自動換成完整結果。"
+    return preview
 
 
 def _mm_json_load(path: Path, fallback: Any) -> Any:
