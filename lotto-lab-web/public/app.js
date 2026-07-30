@@ -2421,7 +2421,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (!state.serviceWorkerRegistration) {
-    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=76", {
+    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=77", {
       updateViaCache: "none",
     });
   }
