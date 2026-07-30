@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import csv
@@ -6,6 +7,7 @@ import html
 import io
 import itertools
 import json
+import math
 import os
 import random
 import re
@@ -53,7 +55,7 @@ CALIFORNIA_FANTASY5_URL = "https://sc888.net/index.php?s=%2FLotteryFan%2Findex"
 USER_AGENT = "Mozilla/5.0 LottoLab/0.1"
 CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_CACHE_TTL_SECONDS", "30"))
 LATEST_CACHE_TTL_SECONDS = int(os.environ.get("LOTTO_LATEST_CACHE_TTL_SECONDS", "10"))
-ANALYSIS_ENGINE_VERSION = "2026.07-route-split"
+ANALYSIS_ENGINE_VERSION = "2026.07-multimodel-candidate-pool-v1"
 DEEP_ANALYSIS_WINDOW_SECONDS = max(
     60,
     int(os.environ.get("LOTTO_DEEP_ANALYSIS_WINDOW_SECONDS", str(8 * 60 * 60))),
@@ -62,6 +64,9 @@ DEEP_ANALYSIS_WINDOWS = (14, 36, 90, 180, 365)
 BACKTEST_FALLBACK_LIMIT = 90
 BACKTEST_MIN_HISTORY = 36
 BACKTEST_SAMPLE_LIMIT = 24
+MODEL_539_WINDOW = 300
+BACKTEST_539_WINDOW = 500
+BACKTEST_539_MIN_TRAIN = 300
 AUTO_WINDOW_CANDIDATES = (36, 60, 90, 120, 180, 240, 300, 365)
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "5000"))
@@ -571,7 +576,10 @@ def bundled_taiwan_history() -> list[dict[str, Any]]:
 
 def taiwan_history(limit: int = 180) -> list[dict[str, Any]]:
     fast_history = pilio_taiwan_history(limit)
-    if len(fast_history) >= min(limit, 20):
+    # The public screen may only show a short window, but the 539 engine needs
+    # a real 300/500-draw context.  Prefer the bundled official-history file
+    # for larger requests so the model is not silently limited to eight pages.
+    if limit <= 180 and len(fast_history) >= min(limit, 20):
         return dedupe_draws(fast_history)[:limit]
     bundled = bundled_taiwan_history()
     if bundled:
@@ -1541,6 +1549,549 @@ def choose_tw539_strategy(
     return selected, tw539_rolling_backtest(draws, max_number=max_number, pick_count=pick_count, variant=selected), results
 
 
+MODEL_539_FEATURE_KEYS = (
+    "recent30",
+    "recent100",
+    "recent300",
+    "omission",
+    "returnRate",
+    "repeatRate",
+    "tailBalance",
+    "oddBalance",
+    "sizeBalance",
+    "rangeBalance",
+    "sumFit",
+    "spanFit",
+    "acFit",
+    "sameTailFit",
+    "consecutiveFit",
+    "previousRepeatFit",
+)
+
+MODEL_539_DEFAULT_WEIGHTS = {
+    "recent30": 0.22,
+    "recent100": 0.16,
+    "recent300": 0.08,
+    "omission": 0.12,
+    "returnRate": 0.08,
+    "repeatRate": 0.05,
+    "tailBalance": 0.07,
+    "oddBalance": 0.05,
+    "sizeBalance": 0.05,
+    "rangeBalance": 0.07,
+    "sumFit": 0.03,
+    "spanFit": 0.02,
+    "acFit": 0.02,
+    "sameTailFit": 0.03,
+    "consecutiveFit": 0.03,
+    "previousRepeatFit": 0.02,
+}
+
+
+def _539_ordered(draws: list[dict[str, Any]], limit: int | None = None) -> list[dict[str, Any]]:
+    rows = list(draws or [])
+    rows.sort(key=lambda item: (item.get("date", ""), item.get("period", "")))
+    if limit:
+        rows = rows[-limit:]
+    return rows
+
+
+def _539_clamp(value: float, minimum: float = -1.0, maximum: float = 1.0) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def _539_ac_value(numbers: list[int]) -> int:
+    values = sorted(numbers)
+    differences = {right - left for index, left in enumerate(values) for right in values[index + 1 :]}
+    return max(0, len(differences) - max(0, len(values) - 1))
+
+
+def _539_draw_shape(numbers: list[int]) -> dict[str, Any]:
+    values = sorted(numbers)
+    tails = [number % 10 for number in values]
+    return {
+        "odd": sum(number % 2 for number in values),
+        "small": sum(number <= 19 for number in values),
+        "zones": [
+            sum(1 for number in values if 1 <= number <= 13),
+            sum(1 for number in values if 14 <= number <= 26),
+            sum(1 for number in values if 27 <= number <= 39),
+        ],
+        "sum": sum(values),
+        "span": values[-1] - values[0] if values else 0,
+        "ac": _539_ac_value(values),
+        "sameTail": sum(tails.count(tail) - 1 for tail in set(tails)),
+        "consecutive": sum(right - left == 1 for left, right in zip(values, values[1:])),
+    }
+
+
+def _539_average_shapes(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    shapes = [_539_draw_shape(draw["numbers"]) for draw in rows]
+    count = len(shapes) or 1
+    return {
+        "odd": round(sum(shape["odd"] for shape in shapes) / count, 3),
+        "small": round(sum(shape["small"] for shape in shapes) / count, 3),
+        "zones": [round(sum(shape["zones"][index] for shape in shapes) / count, 3) for index in range(3)],
+        "sum": round(sum(shape["sum"] for shape in shapes) / count, 3),
+        "span": round(sum(shape["span"] for shape in shapes) / count, 3),
+        "ac": round(sum(shape["ac"] for shape in shapes) / count, 3),
+        "sameTail": round(sum(shape["sameTail"] for shape in shapes) / count, 3),
+        "consecutive": round(sum(shape["consecutive"] for shape in shapes) / count, 3),
+    }
+
+
+def _539_rate_features(rows: list[dict[str, Any]], max_number: int) -> tuple[dict[int, dict[str, float]], dict[str, Any]]:
+    """Build per-number signals from a newest-first 300-draw context.
+
+    The signals intentionally mix frequency and counter-signals.  A number is
+    never promoted solely because it is hot, and a long omission is not a hard
+    inclusion rule.
+    """
+    newest = sorted(rows, key=lambda item: (item.get("date", ""), item.get("period", "")), reverse=True)[:MODEL_539_WINDOW]
+    chronological = list(reversed(newest))
+    total = len(chronological)
+    windows = {30: newest[:30], 100: newest[:100], 300: newest[:300]}
+    frequencies = {
+        window: {number: 0 for number in range(1, max_number + 1)}
+        for window in windows
+    }
+    for window, window_rows in windows.items():
+        for draw in window_rows:
+            for number in draw.get("numbers", []):
+                if number in frequencies[window]:
+                    frequencies[window][number] += 1
+
+    def normalized_rates(window: int) -> dict[int, float]:
+        rates = {number: safe_divide(frequencies[window][number], max(1, len(windows[window]))) for number in range(1, max_number + 1)}
+        low = min(rates.values(), default=0.0)
+        high = max(rates.values(), default=1.0)
+        spread = high - low or 1.0
+        return {number: round((rates[number] - low) / spread, 6) for number in rates}
+
+    recent30 = normalized_rates(30)
+    recent100 = normalized_rates(100)
+    recent300 = normalized_rates(300)
+    gaps = {number: len(newest) for number in range(1, max_number + 1)}
+    occurrences: dict[int, list[int]] = {number: [] for number in range(1, max_number + 1)}
+    for index, draw in enumerate(newest):
+        for number in draw.get("numbers", []):
+            if number in gaps:
+                gaps[number] = index
+                occurrences[number].append(index)
+
+    repeat_count = {number: 0 for number in range(1, max_number + 1)}
+    repeat_total = {number: 0 for number in range(1, max_number + 1)}
+    for newer, older in zip(newest, newest[1:]):
+        newer_numbers = set(newer.get("numbers", []))
+        older_numbers = set(older.get("numbers", []))
+        for number in older_numbers:
+            repeat_total[number] += 1
+            if number in newer_numbers:
+                repeat_count[number] += 1
+
+    runs = {number: 0 for number in range(1, max_number + 1)}
+    for draw in newest:
+        present = set(draw.get("numbers", []))
+        for number in runs:
+            if runs[number] == 0 and number in present:
+                runs[number] += 1
+            elif runs[number] > 0 and number in present:
+                runs[number] += 1
+            elif runs[number] > 0:
+                # The leading run has ended; retain it and skip further draws.
+                runs[number] = -runs[number]
+    runs = {number: max(0, -value if value < 0 else value) for number, value in runs.items()}
+
+    return_events = {number: 0 for number in range(1, max_number + 1)}
+    for number, seen_indices in occurrences.items():
+        for current, previous in zip(seen_indices, seen_indices[1:]):
+            gap = current - previous - 1
+            if 8 <= gap <= 15:
+                return_events[number] += 1
+    return_rates = {
+        number: safe_divide(return_events[number], max(1, len(occurrences[number]) - 1))
+        for number in range(1, max_number + 1)
+    }
+
+    previous_overlap = [
+        len(set(newer.get("numbers", [])) & set(older.get("numbers", [])))
+        for newer, older in zip(newest, newest[1:])
+    ]
+
+    tail_counts = {tail: 0 for tail in range(10)}
+    for draw in newest[:30]:
+        for number in draw.get("numbers", []):
+            tail_counts[number % 10] += 1
+    tail_expected = safe_divide(5 * min(30, total), 10)
+    odd_average = safe_divide(sum(sum(number % 2 for number in draw.get("numbers", [])) for draw in newest), max(1, total))
+    small_average = safe_divide(sum(sum(number <= 19 for number in draw.get("numbers", [])) for draw in newest), max(1, total))
+    shape_average = _539_average_shapes(newest)
+    recent_shape = _539_average_shapes(newest[:30])
+    recent_odd_average = recent_shape["odd"]
+    recent_small_average = recent_shape["small"]
+    range_averages = shape_average["zones"]
+
+    features: dict[int, dict[str, float]] = {}
+    for number in range(1, max_number + 1):
+        gap = gaps[number]
+        omission = (
+            1.0 if 8 <= gap <= 15 else
+            0.55 if 5 <= gap < 8 else
+            0.15 if gap < 5 else
+            max(-0.9, 0.45 - (gap - 15) * 0.07)
+        )
+        run_penalty = -min(1.0, max(0, runs[number] - 1) / 3)
+        tail_balance = _539_clamp((tail_expected - tail_counts[number % 10]) / max(3.0, tail_expected))
+        odd_direction = 1 if number % 2 else -1
+        size_direction = 1 if number <= 19 else -1
+        zone_index = 0 if number <= 13 else 1 if number <= 26 else 2
+        zone_deficit = _539_clamp((range_averages[zone_index] - recent_shape["zones"][zone_index]) / 2.0)
+        # The category balance is added again while building the 15-number pool.
+        odd_balance = _539_clamp((odd_average - recent_odd_average) * odd_direction / 2.5)
+        size_balance = _539_clamp((small_average - recent_small_average) * size_direction / 2.5)
+        expected_number = safe_divide(shape_average["sum"], 5)
+        sum_fit = max(0.0, 1.0 - abs(number - expected_number) / 20.0)
+        span_fit = _539_clamp((abs(number - (max_number + 1) / 2) - shape_average["span"] / 2) / 20.0)
+        repeat_rate = safe_divide(repeat_count[number], max(1, repeat_total[number]))
+        features[number] = {
+            "recent30": recent30[number],
+            "recent100": recent100[number],
+            "recent300": recent300[number],
+            "omission": round(omission, 6),
+            "returnRate": round(return_rates[number], 6),
+            "repeatRate": round(repeat_rate, 6),
+            "tailBalance": round(tail_balance, 6),
+            "oddBalance": round(odd_balance, 6),
+            "sizeBalance": round(size_balance, 6),
+            "rangeBalance": round(zone_deficit, 6),
+            "sumFit": round(sum_fit, 6),
+            "spanFit": round(max(0.0, span_fit), 6),
+            "acFit": round(closeness(shape_average["ac"], 4.0, 4.0), 6),
+            "sameTailFit": round(tail_balance, 6),
+            "consecutiveFit": round(run_penalty, 6),
+            "previousRepeatFit": round(_539_clamp(repeat_rate + run_penalty), 6),
+        }
+
+    metrics = {
+        "drawCount": total,
+        "windowWeights": {"近30期": 0.50, "近100期": 0.30, "近300期": 0.20},
+        "frequency": {str(window): frequencies[window] for window in windows},
+        "omission": {str(number): gaps[number] for number in gaps},
+        "returnRate": {str(number): round(return_rates[number] * 100, 1) for number in return_rates},
+        "consecutiveRun": {str(number): runs[number] for number in runs},
+        "repeatRate": {str(number): round(safe_divide(repeat_count[number], max(1, repeat_total[number])) * 100, 1) for number in repeat_count},
+        "tailDistribution": tail_counts,
+        "oddAverage": round(odd_average, 3),
+        "smallAverage": round(small_average, 3),
+        "rangeAverage": range_averages,
+        "shapeAverage": shape_average,
+        "evenAverage": round(5 - odd_average, 3),
+        "largeAverage": round(5 - small_average, 3),
+        "sumAverage": shape_average["sum"],
+        "spanAverage": shape_average["span"],
+        "acAverage": shape_average["ac"],
+        "sameTailAverage": shape_average["sameTail"],
+        "consecutiveAverage": shape_average["consecutive"],
+        "previousRepeatRate": round(safe_divide(sum(previous_overlap), max(1, len(previous_overlap) * 5)) * 100, 1),
+        "weightedFeatureKeys": list(MODEL_539_FEATURE_KEYS),
+        "weightedFeatureAverages": {
+            key: round(safe_divide(sum(features[number][key] for number in features), max(1, len(features))), 4)
+            for key in MODEL_539_FEATURE_KEYS
+        },
+    }
+    return features, metrics
+
+
+def _539_rank(features: dict[int, dict[str, float]], weights: dict[str, float]) -> list[int]:
+    return sorted(
+        features,
+        key=lambda number: (
+            -sum(features[number].get(key, 0.0) * weights.get(key, 0.0) for key in MODEL_539_FEATURE_KEYS),
+            number,
+        ),
+    )
+
+
+def _539_learn_weights(draws: list[dict[str, Any]], max_updates: int = 48) -> tuple[dict[str, float], dict[str, Any]]:
+    """Online outcome update: reward features carried by actual hits.
+
+    This is intentionally small and explainable.  It learns from prior draws
+    only, then the learned weights are used for the next candidate pool.
+    """
+    weights = dict(MODEL_539_DEFAULT_WEIGHTS)
+    ordered = _539_ordered(draws, 500)
+    if len(ordered) < 40:
+        return weights, {"sampleCount": 0, "updates": 0, "status": "資料累積中"}
+    start = max(30, len(ordered) - max_updates - 1)
+    updates = 0
+    for target_index in range(start, len(ordered) - 1):
+        context = ordered[:target_index][-MODEL_539_WINDOW:]
+        if len(context) < 30:
+            continue
+        features, _ = _539_rate_features(context, 39)
+        ranking = _539_rank(features, weights)
+        actual = set(ordered[target_index]["numbers"])
+        negatives = [number for number in ranking[:15] if number not in actual]
+        if not negatives:
+            continue
+        for key in MODEL_539_FEATURE_KEYS:
+            positive = safe_divide(sum(features[number][key] for number in actual), len(actual))
+            negative = safe_divide(sum(features[number][key] for number in negatives), len(negatives))
+            weights[key] = _539_clamp(weights[key] + 0.18 * (positive - negative), 0.005, 0.75)
+        updates += 1
+    total_weight = sum(weights.values()) or 1.0
+    weights = {key: round(value / total_weight, 6) for key, value in weights.items()}
+    # Keep the requested time hierarchy visible even after online learning:
+    # recent 30 remains above recent 100, which remains above recent 300.
+    weights["recent100"] = max(weights["recent100"], weights["recent300"] + 0.004)
+    weights["recent30"] = max(
+        weights["recent30"],
+        weights["recent100"] + 0.004,
+        weights["recent300"] + 0.008,
+    )
+    total_weight = sum(weights.values()) or 1.0
+    weights = {key: round(value / total_weight, 6) for key, value in weights.items()}
+    return weights, {"sampleCount": min(max_updates, max(0, len(ordered) - start - 1)), "updates": updates, "status": "已依命中結果自動調權"}
+
+
+def _539_pool_balance(selected: list[int], number: int, metrics: dict[str, Any], pool_size: int = 15) -> float:
+    values = selected + [number]
+    tail_count = sum(1 for value in values if value % 10 == number % 10)
+    tail_target = max(1.0, pool_size / 10)
+    odd_target = metrics.get("oddAverage", 2.5) * pool_size / 5
+    small_target = metrics.get("smallAverage", 2.5) * pool_size / 5
+    odd_count = sum(value % 2 for value in values)
+    small_count = sum(value <= 19 for value in values)
+    zone_index = 0 if number <= 13 else 1 if number <= 26 else 2
+    zone_target = metrics.get("rangeAverage", [pool_size / 3] * 3)[zone_index] * pool_size / 5
+    zone_count = sum(1 for value in values if (0 if value <= 13 else 1 if value <= 26 else 2) == zone_index)
+    return (
+        _539_clamp((tail_target - tail_count) / 2.5) * 0.12
+        + _539_clamp((odd_target - odd_count) / 5) * 0.08
+        + _539_clamp((small_target - small_count) / 5) * 0.08
+        + _539_clamp((zone_target - zone_count) / 4) * 0.12
+    )
+
+
+def _539_candidate_model(draws: list[dict[str, Any]], weights: dict[str, float] | None = None) -> dict[str, Any]:
+    context = _539_ordered(draws, MODEL_539_WINDOW)
+    features, metrics = _539_rate_features(context, 39)
+    weights = weights or MODEL_539_DEFAULT_WEIGHTS
+    base_scores = {
+        number: sum(features[number].get(key, 0.0) * weights.get(key, 0.0) for key in MODEL_539_FEATURE_KEYS)
+        for number in features
+    }
+    selected: list[int] = []
+    remaining = set(features)
+    while remaining and len(selected) < 15:
+        choice = max(
+            remaining,
+            key=lambda number: (
+                base_scores[number] + _539_pool_balance(selected, number, metrics),
+                base_scores[number],
+                -number,
+            ),
+        )
+        selected.append(choice)
+        remaining.remove(choice)
+    details = []
+    for index, number in enumerate(selected):
+        signal = features[number]
+        reasons = []
+        if signal["recent30"] >= 0.72:
+            reasons.append("近30期熱度高")
+        elif signal["recent100"] >= 0.65:
+            reasons.append("近100期有穩定頻率")
+        if 8 <= metrics["omission"].get(str(number), 0) <= 15:
+            reasons.append("遺漏8～15期，回補條件適中")
+        elif metrics["omission"].get(str(number), 0) > 15:
+            reasons.append("長遺漏僅保留低權重候選")
+        if signal["tailBalance"] > 0.25:
+            reasons.append(f"{number % 10}尾可平衡尾數")
+        if metrics["consecutiveRun"].get(str(number), 0) >= 2:
+            reasons.append("連續出現2期以上，已降權")
+        if signal["returnRate"] >= 0.25:
+            reasons.append("歷史回補率較佳")
+        if not reasons:
+            reasons.append("綜合權重與區間平衡入選")
+        details.append(
+            {
+                "number": number,
+                "rank": index + 1,
+                "tier": 1 if index < 5 else 2 if index < 10 else 3,
+                "score": round((base_scores[number] + _539_pool_balance(selected[:index], number, metrics)) * 100, 2),
+                "reasons": reasons[:4],
+                "reason": "、".join(reasons[:4]),
+                "signals": {key: round(signal.get(key, 0.0), 4) for key in MODEL_539_FEATURE_KEYS},
+            }
+        )
+    return {
+        "full15": selected,
+        "top10": selected[:10],
+        "top5": selected[:5],
+        "details": details,
+        "features": features,
+        "metrics": metrics,
+        "weights": weights,
+    }
+
+
+def _539_metric_summary(rows: list[dict[str, Any]], key: str) -> dict[str, float]:
+    if not rows:
+        return {"hitRate": 0, "averageHit": 0, "twoPlusRate": 0}
+    hits = [int(row[f"hits{key}"]) for row in rows]
+    return {
+        "hitRate": round(sum(hit >= 1 for hit in hits) / len(hits) * 100, 1),
+        "averageHit": round(sum(hits) / len(hits), 2),
+        "twoPlusRate": round(sum(hit >= 2 for hit in hits) / len(hits) * 100, 1),
+    }
+
+
+def _539_rolling_backtest(draws: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
+    ordered = _539_ordered(draws, BACKTEST_539_WINDOW)
+    snapshots = []
+    rows = []
+    start = max(BACKTEST_539_MIN_TRAIN, len(ordered) - BACKTEST_539_WINDOW)
+    for target_index in range(start, len(ordered)):
+        training = ordered[:target_index]
+        context = training[-MODEL_539_WINDOW:]
+        if len(context) < 30:
+            continue
+        # The live model learns from a longer recent sample.  Rolling
+        # backtesting repeats this step hundreds of times, so use a compact
+        # recent update at each node while keeping the full 300-draw context
+        # and every target draw strictly out of the features.
+        weights, _ = _539_learn_weights(training[-BACKTEST_539_WINDOW:], max_updates=8)
+        model = _539_candidate_model(context, weights)
+        actual = set(ordered[target_index]["numbers"])
+        row = {
+            "period": ordered[target_index].get("period", ""),
+            "date": ordered[target_index].get("date", ""),
+            "pick": model["top5"],
+            "candidate10": model["top10"],
+            "candidate15": model["full15"],
+            "actual": sorted(actual),
+            "hits5": len(set(model["top5"]) & actual),
+            "hits10": len(set(model["top10"]) & actual),
+            "hits15": len(set(model["full15"]) & actual),
+        }
+        row["hits"] = row["hits5"]
+        rows.append(row)
+        snapshots.append((model["features"], weights, actual))
+
+    tier5 = _539_metric_summary(rows, "5")
+    tier10 = _539_metric_summary(rows, "10")
+    tier15 = _539_metric_summary(rows, "15")
+    distribution = {str(number): 0 for number in range(6)}
+    for row in rows:
+        distribution[str(row["hits5"])] += 1
+    weight_impact = {}
+    for key in MODEL_539_FEATURE_KEYS:
+        ablated_rows = []
+        for features, weights, actual in snapshots:
+            reduced = dict(weights)
+            reduced[key] = 0.0
+            ranking = _539_rank(features, reduced)
+            ablated_rows.append({"hits15": len(set(ranking[:15]) & actual)})
+        ablated = _539_metric_summary(ablated_rows, "15")
+        weight_impact[key] = {
+            "learnedWeight": round((snapshots[-1][1].get(key, 0.0) if snapshots else 0.0) * 100, 2),
+            "averageHit15Impact": round(tier15["averageHit"] - ablated["averageHit"], 3),
+            "hitRate15Impact": round(tier15["hitRate"] - ablated["hitRate"], 2),
+        }
+    latest_rows = list(reversed(rows[-12:]))
+    return {
+        "testedCount": len(rows),
+        "trainingWindow": 300,
+        "sourceWindow": min(len(ordered), BACKTEST_539_WINDOW),
+        "averageHit": tier5["averageHit"],
+        "onePlusCount": sum(row["hits5"] >= 1 for row in rows),
+        "onePlusRate": tier5["hitRate"],
+        "twoPlusCount": sum(row["hits5"] >= 2 for row in rows),
+        "twoPlusRate": tier5["twoPlusRate"],
+        "threePlusCount": sum(row["hits5"] >= 3 for row in rows),
+        "threePlusRate": round(sum(row["hits5"] >= 3 for row in rows) / len(rows) * 100, 1) if rows else 0,
+        "bestHit": max((row["hits5"] for row in rows), default=0),
+        "distribution": distribution,
+        "recentRows": latest_rows,
+        "tierMetrics": {"5": tier5, "10": tier10, "15": tier15},
+        "hitRate5": tier5["hitRate"],
+        "hitRate10": tier10["hitRate"],
+        "hitRate15": tier15["hitRate"],
+        "averageHit5": tier5["averageHit"],
+        "averageHit10": tier10["averageHit"],
+        "averageHit15": tier15["averageHit"],
+        "weightImpact": weight_impact,
+        "learningUpdatesPerStep": 8,
+        "method": "539 滾動回測：近500期資料，每次以前300期建立候選池，再逐期向前測到最新；15碼、10碼、5碼分開統計，未使用目標期之後資料。",
+    }
+
+
+def _analyze_539_candidate_model(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    source_rows = _539_ordered(draws, BACKTEST_539_WINDOW)
+    context = source_rows[-MODEL_539_WINDOW:]
+    weights, learning = _539_learn_weights(source_rows, max_updates=48)
+    model = _539_candidate_model(context, weights)
+    backtest = _539_rolling_backtest(source_rows, max_number=max_number)
+    stats = number_stats(list(reversed(context)), max_number)
+    frequency = stats["frequency"]
+    gaps = stats["gaps"]
+    hot = sorted(frequency, key=lambda number: (-frequency[number], number))[:10]
+    cold = sorted(frequency, key=lambda number: (frequency[number], number))[:10]
+    overdue = sorted(gaps, key=lambda number: (-gaps[number], number))[:10]
+    patterns = pattern_summary(list(reversed(context)), max_number, "539-adaptive-300")
+    details_by_number = {item["number"]: item for item in model["details"]}
+    recommendation_roles = [
+        {"number": number, "rank": rank, "score": details_by_number.get(number, {}).get("score", 0)}
+        for rank, number in enumerate(model["top5"], start=1)
+    ]
+    quality = round(backtest["averageHit15"] * 100 + backtest["hitRate15"] * 0.35 + backtest["hitRate10"] * 0.25 + backtest["hitRate5"] * 0.2, 2)
+    return {
+        "drawCount": len(source_rows),
+        "selectedDrawCount": len(context),
+        "hot": [{"number": number, "count": frequency[number]} for number in hot],
+        "cold": [{"number": number, "count": frequency[number]} for number in cold],
+        "overdue": [{"number": number, "gap": gaps[number]} for number in overdue],
+        "frequency": [{"number": number, "count": frequency[number], "gap": gaps[number]} for number in frequency],
+        "recommendation": model["top5"],
+        "recommendationRoles": recommendation_roles,
+        "candidateTiers": {"top5": model["top5"], "top10": model["top10"], "full15": model["full15"]},
+        "candidateDetails": model["details"],
+        "modelWeights": model["weights"],
+        "weightLearning": learning,
+        "analysisMetrics": model["metrics"],
+        "backtest": backtest,
+        "modelProfiles": [{
+            "id": "539-adaptive-300",
+            "label": "539 300期自適應候選池",
+            "quality": quality,
+            "averageHit": backtest["averageHit5"],
+            "onePlusRate": backtest["hitRate5"],
+            "twoPlusRate": backtest["twoPlusRate"],
+            "threePlusRate": backtest["threePlusRate"],
+            "bestHit": backtest["bestHit"],
+            "testedCount": backtest["testedCount"],
+            "candidate15HitRate": backtest["hitRate15"],
+        }],
+        "patterns": patterns,
+        "strategy": {
+            "id": "539-adaptive-300",
+            "label": "539 自適應 15 碼候選池",
+            "summary": "以候選池覆蓋率為目標：近30期最重、近100期次重、近300期作背景，再以遺漏、回補、尾數與結構平衡修正。",
+            "steps": [
+                "近30期權重最高，近100期次高，近300期最低",
+                "熱號、冷號、遺漏與回補率一起計分，不單追熱",
+                "連莊2期以上自動降權，尾數過度集中時重新平衡",
+                "校正奇偶、大小、三區、和值、跨度、AC、同尾、連號與上期重複",
+                "以近500期滾動回測結果自動調整各項權重",
+            ],
+            "candidatePool": model["full15"],
+            "variant": "adaptive-300",
+        },
+        "note": "本模型目標是提高15碼候選池的歷史覆蓋率，不是宣稱預測確定開出的號碼。每期更新後會依回測命中結果重新學習權重；彩券仍是隨機事件，不能保證中獎。",
+    }
+
+
 def analyze_california(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
     stats = number_stats(draws, max_number)
     frequency = stats["frequency"]
@@ -1952,35 +2503,561 @@ def choose_best_analysis_window(
     }
 
 
+def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    """Public 539 entry point: optimize the candidate pool, not one exact pick."""
+    return _analyze_539_candidate_model(draws, max_number=max_number, pick_count=pick_count)
+
+
 def analyze_with_stable_backtest(
     draws: list[dict[str, Any]],
     backtest_draws: list[dict[str, Any]],
     max_number: int = 39,
     pick_count: int = 5,
 ) -> dict[str, Any]:
-    analysis = analyze(draws, max_number=max_number, pick_count=pick_count)
-    current_backtest = analysis.get("backtest", {})
-    if current_backtest.get("testedCount") or len(backtest_draws) < BACKTEST_MIN_HISTORY:
-        return analysis
+    # The selected display window remains a UI preference.  The 539 engine
+    # always trains from the latest 300 and validates on the latest 500.
+    training_rows = backtest_draws[:BACKTEST_539_WINDOW] or draws
+    analysis = _analyze_539_candidate_model(training_rows, max_number=max_number, pick_count=pick_count)
+    analysis["selectedDrawCount"] = len(draws)
+    return analysis
 
-    selected_profile, fallback_backtest, model_results = choose_tw539_strategy(
-        backtest_draws[:BACKTEST_FALLBACK_LIMIT],
-        max_number=max_number,
-        pick_count=pick_count,
-    )
-    if not fallback_backtest.get("testedCount"):
-        return analysis
 
-    analysis["backtest"] = fallback_backtest
-    analysis["modelProfiles"] = model_results
-    analysis["patterns"]["selectedProfile"] = selected_profile
-    analysis["patterns"]["selectedProfile"] = f"tw539-{selected_profile}"
-    analysis["patterns"]["selectedLabel"] = TW539_VARIANTS.get(selected_profile, TW539_VARIANTS["cycle"])["label"]
-    analysis["backtest"]["method"] = (
-        f"目前選擇近 {len(draws)} 期，短期樣本不足以單獨回測；"
-        f"模型回測已自動改用近 {min(len(backtest_draws), BACKTEST_FALLBACK_LIMIT)} 期穩定樣本。"
-        f"{fallback_backtest.get('method', '')}"
-    )
+# ---------------------------------------------------------------------------
+# Independent multi-model candidate-pool engine
+# ---------------------------------------------------------------------------
+# The production path below deliberately avoids random sampling.  Lottery
+# draws are sparse observations, so Random Forest/XGBoost/Monte Carlo/GA are
+# not added just to make the model list look impressive.  The active models
+# are deterministic and can be audited against the same rolling backtest.
+MODEL_ENGINE_VERSION = "2026.07-multimodel-candidate-pool-v1"
+MODEL_WINDOWS = (30, 100, 300, 1000, 5000)
+MODEL_ANALYSIS_DATA_WINDOW = 5000
+MODEL_TRAIN_WINDOW = 300
+# Keep the rolling source at 1,000 draws (300 train + 700 targets).  This
+# gives a genuine 1,000-draw qualification sample while keeping first-load
+# latency reasonable on the small Render instance.
+MODEL_EVAL_WINDOW = 700
+MODEL_MIN_QUALIFY_HISTORY = 1000
+MODEL_RETRAIN_EVERY = 100
+MODEL_STATE_FILE = Path(os.environ.get("LOTTO_MODEL_STATE_FILE", ROOT / "data" / "model_state.json"))
+MODEL_PREDICTIONS_FILE = Path(os.environ.get("LOTTO_PREDICTIONS_FILE", ROOT / "data" / "prediction_history.json"))
+MODEL_STATE_LOCK = threading.Lock()
+MODEL_NAMES = ("bayesian", "logistic", "boosted", "markov")
+MODEL_LABELS = {
+    "bayesian": "Bayesian 機率平滑",
+    "logistic": "校準 Logistic",
+    "boosted": "Boosted 特徵集成",
+    "markov": "Markov 轉移",
+}
+EXCLUDED_MODELS = {
+    "random_forest": "目前不引入外部樹模型依賴；先以滾動回測證明特徵有效，再考慮加入。",
+    "xgboost": "彩票樣本特徵稀疏，且目前環境沒有 XGBoost；避免未驗證依賴。",
+    "lightgbm": "彩票樣本特徵稀疏，且目前環境沒有 LightGBM；避免未驗證依賴。",
+    "catboost": "彩票樣本特徵稀疏，且目前環境沒有 CatBoost；避免未驗證依賴。",
+    "monte_carlo": "依使用者要求不使用隨機亂數或隨機模擬。",
+    "genetic_algorithm": "依使用者要求不使用隨機亂數；改用可重現的 Bayesian model averaging。",
+}
+
+
+def _mm_safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return default
+    return result if math.isfinite(result) else default
+
+
+def _mm_clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
+    return max(low, min(high, _mm_safe_float(value)))
+
+
+def _mm_rows(rows: list[dict[str, Any]], max_number: int = 39, limit: int = 5000) -> list[dict[str, Any]]:
+    clean = []
+    for row in rows or []:
+        try:
+            normalized = validate_draw(row)
+        except (TypeError, ValueError):
+            continue
+        if all(1 <= number <= max_number for number in normalized["numbers"]):
+            clean.append(normalized)
+    clean.sort(key=lambda item: (item["date"], item["period"]))
+    return clean[-limit:]
+
+
+def _mm_window_counts(rows: list[dict[str, Any]], max_number: int, window: int) -> dict[int, int]:
+    counts = {number: 0 for number in range(1, max_number + 1)}
+    for row in rows[-window:]:
+        for number in row["numbers"]:
+            if number in counts:
+                counts[number] += 1
+    return counts
+
+
+def _mm_prime(number: int) -> bool:
+    if number < 2:
+        return False
+    divisor = 2
+    while divisor * divisor <= number:
+        if number % divisor == 0:
+            return False
+        divisor += 1
+    return True
+
+
+def _mm_ac(numbers: list[int]) -> int:
+    values = sorted(numbers)
+    differences = {right - left for index, left in enumerate(values) for right in values[index + 1 :]}
+    return max(0, len(differences) - max(0, len(values) - 1))
+
+
+def _mm_shape(numbers: list[int], max_number: int = 39) -> dict[str, Any]:
+    values = sorted(int(number) for number in numbers)
+    tails = [number % 10 for number in values]
+    return {
+        "odd": sum(number % 2 for number in values),
+        "small": sum(number <= max_number // 2 for number in values),
+        "zones": [
+            sum(1 for number in values if 1 <= number <= 13),
+            sum(1 for number in values if 14 <= number <= 26),
+            sum(1 for number in values if 27 <= number <= max_number),
+        ],
+        "routes": [sum(1 for number in values if number % 3 == route) for route in range(3)],
+        "prime": sum(_mm_prime(number) for number in values),
+        "sum": sum(values),
+        "span": values[-1] - values[0] if values else 0,
+        "ac": _mm_ac(values),
+        "sameTail": sum(max(0, tails.count(tail) - 1) for tail in set(tails)),
+        "consecutive": sum(right - left == 1 for left, right in zip(values, values[1:])),
+    }
+
+
+def _mm_average_shape(rows: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
+    shapes = [_mm_shape(row["numbers"], max_number) for row in rows]
+    if not shapes:
+        return {"odd": 2.5, "small": 2.5, "zones": [5 / 3] * 3, "routes": [5 / 3] * 3, "prime": 2, "sum": 100, "span": 30, "ac": 7, "sameTail": 1, "consecutive": 0.5}
+    keys = ("odd", "small", "prime", "sum", "span", "ac", "sameTail", "consecutive")
+    result = {key: round(sum(shape[key] for shape in shapes) / len(shapes), 4) for key in keys}
+    for key in ("zones", "routes"):
+        result[key] = [round(sum(shape[key][index] for shape in shapes) / len(shapes), 4) for index in range(3)]
+    return result
+
+
+def _mm_stats(rows: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
+    ordered = _mm_rows(rows, max_number=max_number, limit=5000)
+    recent = ordered[-300:]
+    latest = set(ordered[-1]["numbers"]) if ordered else set()
+    window_counts = {str(window): _mm_window_counts(ordered, max_number, window) for window in MODEL_WINDOWS}
+    occurrence_indexes = {number: [] for number in range(1, max_number + 1)}
+    for index, row in enumerate(ordered):
+        for number in row["numbers"]:
+            if number in occurrence_indexes:
+                occurrence_indexes[number].append(index)
+    omission = {}
+    average_omission = {}
+    maximum_omission = {}
+    return_rate = {}
+    repeat_rate = {}
+    max_run = {}
+    for number, indexes in occurrence_indexes.items():
+        omission[number] = len(ordered) - 1 - indexes[-1] if indexes else len(ordered)
+        gaps = [right - left - 1 for left, right in zip(indexes, indexes[1:])]
+        average_omission[number] = round(sum(gaps) / len(gaps), 4) if gaps else float(len(ordered))
+        maximum_omission[number] = max([*gaps, omission[number]] or [len(ordered)])
+        eligible = [gap for gap in gaps if 8 <= gap <= 15]
+        return_rate[number] = round(sum(8 <= gap <= 15 for gap in gaps) / len(gaps), 4) if gaps else 0.0
+        consecutive_hits = sum(1 for left, right in zip(indexes, indexes[1:]) if right == left + 1)
+        repeat_rate[number] = round(consecutive_hits / max(1, len(indexes) - 1), 4)
+        run = 0
+        for row in reversed(ordered):
+            if number in row["numbers"]:
+                run += 1
+            else:
+                break
+        max_run[number] = run
+    pair_counts: dict[tuple[int, int], int] = {}
+    for row in recent:
+        values = sorted(row["numbers"])
+        for left, right in itertools.combinations(values, 2):
+            pair_counts[(left, right)] = pair_counts.get((left, right), 0) + 1
+    cooccurrence = {number: 0 for number in range(1, max_number + 1)}
+    for (left, right), count in pair_counts.items():
+        cooccurrence[left] += count
+        cooccurrence[right] += count
+    tail_counts = {tail: 0 for tail in range(10)}
+    for row in recent:
+        for number in row["numbers"]:
+            tail_counts[number % 10] += 1
+    shapes = [_mm_shape(row["numbers"], max_number) for row in recent]
+    tail_presence = {tail: sum(1 for row in recent if any(number % 10 == tail for number in row["numbers"])) for tail in range(10)}
+    same_tail_rate = sum(shape["sameTail"] > 0 for shape in shapes) / max(1, len(shapes))
+    consecutive_rate = sum(shape["consecutive"] > 0 for shape in shapes) / max(1, len(shapes))
+    previous_repeat_rate = sum(bool(set(left["numbers"]) & set(right["numbers"])) for left, right in zip(ordered, ordered[1:])) / max(1, len(ordered) - 1)
+    weekday_counts = {str(day): 0 for day in range(7)}
+    month_counts = {str(month): 0 for month in range(1, 13)}
+    year_counts = {}
+    for row in ordered:
+        try:
+            weekday_counts[str(datetime.strptime(row["date"], "%Y-%m-%d").weekday())] += 1
+        except ValueError:
+            pass
+        month_counts[str(int(row["date"][5:7]))] += 1
+        year_counts[row["date"][:4]] = year_counts.get(row["date"][:4], 0) + 1
+    all_shapes = [_mm_shape(row["numbers"], max_number) for row in ordered]
+    sums = [shape["sum"] for shape in all_shapes]
+    spans = [shape["span"] for shape in all_shapes]
+    ac_values = [shape["ac"] for shape in all_shapes]
+    return {
+        "count": len(ordered),
+        "windows": {window: {number: window_counts[str(window)][number] for number in range(1, max_number + 1)} for window in MODEL_WINDOWS},
+        "occurrences": occurrence_indexes,
+        "omission": omission,
+        "averageOmission": average_omission,
+        "maximumOmission": maximum_omission,
+        "returnRate": return_rate,
+        "repeatRate": repeat_rate,
+        "currentRun": max_run,
+        "cooccurrence": cooccurrence,
+        "pairCounts": {f"{left}-{right}": count for (left, right), count in sorted(pair_counts.items(), key=lambda item: (-item[1], item[0]))[:50]},
+        "tailCounts": tail_counts,
+        "tailPresence": tail_presence,
+        "weekdayCounts": weekday_counts,
+        "monthCounts": month_counts,
+        "yearCounts": year_counts,
+        "shapeAverage": _mm_average_shape(recent, max_number),
+        "historicalShapeAverage": _mm_average_shape(ordered, max_number),
+        "shapeRates": {"sameTail": round(same_tail_rate, 4), "consecutive": round(consecutive_rate, 4), "previousRepeat": round(previous_repeat_rate, 4)},
+        "sumAverage": round(sum(sums) / len(sums), 4) if sums else 0,
+        "spanAverage": round(sum(spans) / len(spans), 4) if spans else 0,
+        "acAverage": round(sum(ac_values) / len(ac_values), 4) if ac_values else 0,
+        "sumRange": [min(sums), max(sums)] if sums else [0, 0],
+        "spanRange": [min(spans), max(spans)] if spans else [0, 0],
+        "acRange": [min(ac_values), max(ac_values)] if ac_values else [0, 0],
+        "latest": sorted(latest),
+    }
+
+
+def _mm_norm(value: float, values: list[float]) -> float:
+    if not values:
+        return 0.5
+    low, high = min(values), max(values)
+    if high == low:
+        return 0.5
+    return _mm_clamp((value - low) / (high - low))
+
+
+def _mm_feature_rows(stats: dict[str, Any], max_number: int = 39) -> tuple[list[str], dict[int, dict[str, float]]]:
+    keys = ("recent30", "recent100", "recent300", "recent1000", "recent5000", "omissionFit", "averageOmissionFit", "maximumOmissionFit", "returnRate", "repeatRate", "cooccurrence", "tailBalance", "oddBalance", "sizeBalance", "routeBalance", "primeBalance", "zoneBalance", "previousRepeat", "neighborSignal")
+    omission = stats["omission"]
+    avg_gap = stats["averageOmission"]
+    max_gap = stats["maximumOmission"]
+    windows = stats["windows"]
+    recent = windows.get(30, {})
+    latest = set(stats["latest"])
+    expected = max(1, stats["count"] * 5 / max_number)
+    tail_counts = stats["tailCounts"]
+    tail_target = max(1, stats["count"] * 5 / 10)
+    shape = stats["shapeAverage"]
+    historical = stats["historicalShapeAverage"]
+    zone_targets = shape["zones"]
+    route_targets = shape["routes"]
+    window_values = {window: [windows.get(window, {}).get(n, 0) for n in range(1, max_number + 1)] for window in MODEL_WINDOWS}
+    max_cooccurrence = max(stats["cooccurrence"].values() or [1])
+    rows = {}
+    for number in range(1, max_number + 1):
+        tail = number % 10
+        zone = 0 if number <= 13 else 1 if number <= 26 else 2
+        count_values = [windows.get(window, {}).get(number, 0) for window in MODEL_WINDOWS]
+        omission_value = omission.get(number, stats["count"])
+        rows[number] = {
+            "recent30": _mm_norm(count_values[0], window_values[30]),
+            "recent100": _mm_norm(count_values[1], window_values[100]),
+            "recent300": _mm_norm(count_values[2], window_values[300]),
+            "recent1000": _mm_norm(count_values[3], window_values[1000]),
+            "recent5000": _mm_norm(count_values[4], window_values[5000]),
+            "omissionFit": 0.88 if 8 <= omission_value <= 15 else 0.18 if omission_value >= 25 else 0.55 if omission_value >= 16 else 0.45,
+            "averageOmissionFit": _mm_clamp(1 - abs(omission_value - avg_gap.get(number, omission_value)) / max(10, stats["count"])),
+            "maximumOmissionFit": _mm_clamp(1 - abs(omission_value - max_gap.get(number, omission_value)) / max(10, stats["count"])),
+            "returnRate": _mm_clamp(stats["returnRate"].get(number, 0)),
+            "repeatRate": _mm_clamp(stats["repeatRate"].get(number, 0)),
+            "cooccurrence": _mm_norm(stats["cooccurrence"].get(number, 0), list(stats["cooccurrence"].values())),
+            "tailBalance": _mm_clamp(1 - abs(tail_counts.get(tail, 0) - tail_target) / max(1, tail_target * 1.5)),
+            "oddBalance": _mm_clamp(1 - abs((number % 2) - (shape["odd"] / 5)) * 1.4),
+            "sizeBalance": _mm_clamp(1 - abs((number <= 19) - (shape["small"] / 5)) * 1.4),
+            "routeBalance": _mm_clamp(1 - abs((number % 3) - min(range(3), key=lambda route: abs(route_targets[route] - historical["routes"][route]))) / 3),
+            "primeBalance": _mm_clamp(1 - abs(int(_mm_prime(number)) - historical["prime"] / 5) * 1.2),
+            "zoneBalance": _mm_clamp(1 - abs((zone_targets[zone] / 5) - (historical["zones"][zone] / 5)) * 1.5) if zone_targets else 0.5,
+            "previousRepeat": 0.2 if number in latest and stats["currentRun"].get(number, 0) >= 2 else 0.75 if number in latest else 0.48,
+            "neighborSignal": _mm_clamp(stats["cooccurrence"].get(number, 0) / max_cooccurrence),
+        }
+        # The same feature rows are used by all models; every window still
+        # keeps its own evidence and is never collapsed into one frequency.
+    return list(keys), rows
+
+
+def _mm_fit_logistic(features: dict[int, dict[str, float]], keys: list[str], stats: dict[str, Any]) -> dict[str, float]:
+    labels = {number: _mm_clamp(stats["windows"][300].get(number, 0) / max(1, min(300, stats["count"]))) for number in features}
+    coeffs = {key: 0.0 for key in keys}
+    intercept = 0.0
+    for _ in range(28):
+        gradient = {key: 0.0 for key in keys}
+        intercept_gradient = 0.0
+        for number in features:
+            linear = intercept + sum(coeffs[key] * features[number][key] for key in keys)
+            probability = 1 / (1 + math.exp(-max(-12, min(12, linear))))
+            error = labels[number] - probability
+            intercept_gradient += error
+            for key in keys:
+                gradient[key] += error * features[number][key]
+        intercept += intercept_gradient / max(1, len(features)) * 0.22
+        for key in keys:
+            coeffs[key] += gradient[key] / max(1, len(features)) * 0.22
+    return {"intercept": round(intercept, 6), **{key: round(value, 6) for key, value in coeffs.items()}}
+
+
+def _mm_model_scores(stats: dict[str, Any], max_number: int = 39) -> tuple[dict[str, dict[int, float]], dict[int, dict[str, float]], dict[str, Any]]:
+    keys, features = _mm_feature_rows(stats, max_number)
+    logistic = _mm_fit_logistic(features, keys, stats)
+    models = {name: {} for name in MODEL_NAMES}
+    target_values = {number: _mm_clamp(stats["windows"][300].get(number, 0) / max(1, min(300, stats["count"]))) for number in features}
+    for number, row in features.items():
+        windows_score = 0.34 * row["recent30"] + 0.26 * row["recent100"] + 0.18 * row["recent300"] + 0.13 * row["recent1000"] + 0.09 * row["recent5000"]
+        models["bayesian"][number] = _mm_clamp(windows_score * 0.65 + row["returnRate"] * 0.12 + row["omissionFit"] * 0.12 + row["tailBalance"] * 0.11)
+        logistic_value = logistic["intercept"] + sum(logistic[key] * row[key] for key in keys)
+        models["logistic"][number] = _mm_clamp(1 / (1 + math.exp(-max(-12, min(12, logistic_value)))))
+        models["boosted"][number] = _mm_clamp(0.42 * windows_score + 0.18 * row["cooccurrence"] + 0.15 * row["zoneBalance"] + 0.13 * row["tailBalance"] + 0.12 * row["omissionFit"])
+        transition = 0.35 * row["neighborSignal"] + 0.25 * row["returnRate"] + 0.2 * row["repeatRate"] + 0.2 * row["previousRepeat"]
+        models["markov"][number] = _mm_clamp(transition * 0.68 + windows_score * 0.32)
+    return models, features, {"logisticCoefficients": logistic, "featureKeys": keys, "targetRate": target_values}
+
+
+def _mm_select_pool(scores: dict[int, float], stats: dict[str, Any], max_number: int = 39, size: int = 15) -> list[int]:
+    ranked = sorted(scores, key=lambda number: (-scores[number], number))
+    selected: list[int] = []
+    target = stats["shapeAverage"]
+    for _ in range(min(size, len(ranked))):
+        best = None
+        best_value = -float("inf")
+        for number in ranked:
+            if number in selected:
+                continue
+            draft = selected + [number]
+            shape = _mm_shape(draft, max_number)
+            penalty = 0.0
+            penalty += abs(shape["odd"] / len(draft) - target["odd"] / 5) * 0.08
+            penalty += abs(shape["small"] / len(draft) - target["small"] / 5) * 0.08
+            penalty += sum(abs(shape["zones"][index] / len(draft) - target["zones"][index] / 5) for index in range(3)) * 0.035
+            penalty += max(0, shape["sameTail"] - target["sameTail"]) * 0.012
+            value = scores[number] - penalty
+            if value > best_value:
+                best_value = value
+                best = number
+        if best is None:
+            break
+        selected.append(best)
+    return selected
+
+
+def _mm_reasons(number: int, features: dict[int, dict[str, float]], stats: dict[str, Any]) -> list[str]:
+    row = features[number]
+    reasons = []
+    if row["recent30"] >= 0.68:
+        reasons.append("近30期證據較強")
+    elif row["recent100"] >= 0.65:
+        reasons.append("近100期中期支持")
+    if 8 <= stats["omission"].get(number, 0) <= 15:
+        reasons.append(f"遺漏{stats['omission'][number]}期，落在回補觀察區")
+    if stats["currentRun"].get(number, 0) >= 2:
+        reasons.append("連續出現2期以上，已自動降權")
+    if row["returnRate"] >= 0.55:
+        reasons.append("歷史回補率較高")
+    if row["tailBalance"] >= 0.72:
+        reasons.append(f"{number % 10}尾與近期分布較平衡")
+    if row["cooccurrence"] >= 0.65:
+        reasons.append("與近期共現結構相容")
+    if not reasons:
+        reasons.append("多視窗統計與結構條件交叉保留")
+    return reasons[:3]
+
+
+def _mm_model_weights(game: str, profiles: list[dict[str, Any]]) -> dict[str, float]:
+    default = {"tw539": {"bayesian": 0.32, "logistic": 0.28, "boosted": 0.24, "markov": 0.16}, "ca-fantasy5": {"bayesian": 0.28, "logistic": 0.25, "boosted": 0.22, "markov": 0.25}}[game]
+    if not profiles:
+        return default
+    raw = {}
+    for profile in profiles:
+        name = profile.get("id")
+        recent = _mm_safe_float(profile.get("recent100AverageHit", profile.get("averageHit", 0)))
+        overall = _mm_safe_float(profile.get("allHistoryAverageHit", profile.get("averageHit", 0)))
+        raw[name] = max(0.03, 0.62 * recent + 0.38 * overall)
+        if profile.get("status") == "downweighted":
+            raw[name] *= 0.55
+        if profile.get("status") == "retired":
+            raw[name] *= 0.15
+    total = sum(raw.values()) or 1.0
+    return {name: round(raw.get(name, default[name]) / total, 6) for name in MODEL_NAMES}
+
+
+def _mm_roll_backtest(rows: list[dict[str, Any]], game: str, max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    ordered = _mm_rows(rows, max_number=max_number, limit=MODEL_EVAL_WINDOW + MODEL_TRAIN_WINDOW)
+    if len(ordered) < 2:
+        return {"testedCount": 0, "method": "資料不足，尚未開始滾動回測。", "distribution": {}, "tierMetrics": {}}
+    start = min(MODEL_TRAIN_WINDOW, max(1, len(ordered) - 1))
+    model_hits = {name: [] for name in MODEL_NAMES}
+    ensemble_hits = {5: [], 10: [], 15: []}
+    recent_rows = []
+    for target_index in range(start, len(ordered)):
+        train = ordered[max(0, target_index - 5000):target_index]
+        stats = _mm_stats(train, max_number)
+        model_scores, _features, _meta = _mm_model_scores(stats, max_number)
+        profiles_so_far = [{"id": name, "averageHit": sum(model_hits[name]) / len(model_hits[name]) if model_hits[name] else 0} for name in MODEL_NAMES]
+        weights = _mm_model_weights(game, profiles_so_far)
+        ensemble_scores = {number: sum(weights[name] * model_scores[name][number] for name in MODEL_NAMES) for number in range(1, max_number + 1)}
+        pool = _mm_select_pool(ensemble_scores, stats, max_number, 15)
+        actual = set(ordered[target_index]["numbers"])
+        for name in MODEL_NAMES:
+            picked = sorted(model_scores[name], key=lambda number: (-model_scores[name][number], number))[:15]
+            model_hits[name].append(len(set(picked[:pick_count]) & actual))
+        for tier in (5, 10, 15):
+            ensemble_hits[tier].append(len(set(pool[:tier]) & actual))
+        if len(recent_rows) < 10:
+            recent_rows.append({"date": ordered[target_index]["date"], "period": ordered[target_index]["period"], "pick": pool[:5], "candidate15": pool, "actual": ordered[target_index]["numbers"], "hits": len(set(pool[:5]) & actual)})
+    tested = len(ordered) - start
+    def profile_for(name: str) -> dict[str, Any]:
+        values = model_hits[name]
+        return {"id": name, "label": MODEL_LABELS[name], "testedCount": len(values), "averageHit": round(sum(values) / max(1, len(values)), 3), "hitRate": round(sum(value >= 1 for value in values) / max(1, len(values)) * 100, 2), "hit1Rate": round(sum(value == 1 for value in values) / max(1, len(values)) * 100, 2), "hit2Rate": round(sum(value == 2 for value in values) / max(1, len(values)) * 100, 2), "hit3Rate": round(sum(value == 3 for value in values) / max(1, len(values)) * 100, 2), "hit4Rate": round(sum(value == 4 for value in values) / max(1, len(values)) * 100, 2), "hit5Rate": round(sum(value == 5 for value in values) / max(1, len(values)) * 100, 2), "recent100AverageHit": round(sum(values[-100:]) / max(1, len(values[-100:])), 3), "recent300AverageHit": round(sum(values[-300:]) / max(1, len(values[-300:])), 3), "allHistoryAverageHit": round(sum(values) / max(1, len(values)), 3), "bestHit": max(values or [0]), "status": "active"}
+    profiles = [profile_for(name) for name in MODEL_NAMES]
+    for profile in profiles:
+        if len(ordered) >= MODEL_MIN_QUALIFY_HISTORY and profile["recent100AverageHit"] < profile["allHistoryAverageHit"] * 0.8:
+            profile["status"] = "downweighted"
+        if tested >= 200 and len(model_hits[profile["id"]][-200:]) == 200 and sum(model_hits[profile["id"]][-200:]) / 200 < profile["allHistoryAverageHit"] * 0.8:
+            profile["status"] = "retired"
+        profile["qualified"] = len(ordered) >= MODEL_MIN_QUALIFY_HISTORY
+    distribution = {str(hit): 0 for hit in range(6)}
+    for hit in ensemble_hits[5]:
+        distribution[str(min(5, hit))] += 1
+    def tier_metrics(tier: int) -> dict[str, Any]:
+        values = ensemble_hits[tier]
+        return {"testedCount": len(values), "hitRate": round(sum(value >= 1 for value in values) / max(1, len(values)) * 100, 2), "averageHit": round(sum(values) / max(1, len(values)), 3), "twoPlusRate": round(sum(value >= 2 for value in values) / max(1, len(values)) * 100, 2), "threePlusRate": round(sum(value >= 3 for value in values) / max(1, len(values)) * 100, 2), "bestHit": max(values or [0])}
+    ensemble15 = ensemble_hits[15]
+    recent20 = ensemble15[-20:]
+    historical_average = sum(ensemble15) / max(1, len(ensemble15))
+    return {"testedCount": tested, "trainWindow": MODEL_TRAIN_WINDOW, "sourceWindow": len(ordered), "qualificationHistory": len(ordered), "qualifiedForPromotion": len(ordered) >= MODEL_MIN_QUALIFY_HISTORY, "averageHit": round(sum(ensemble_hits[5]) / max(1, tested), 3), "onePlusRate": round(sum(value >= 1 for value in ensemble_hits[5]) / max(1, tested) * 100, 2), "twoPlusRate": round(sum(value >= 2 for value in ensemble_hits[5]) / max(1, tested) * 100, 2), "threePlusRate": round(sum(value >= 3 for value in ensemble_hits[5]) / max(1, tested) * 100, 2), "bestHit": max(ensemble_hits[5] or [0]), "distribution": distribution, "tierMetrics": {str(tier): tier_metrics(tier) for tier in (5, 10, 15)}, "modelProfiles": profiles, "recentRows": recent_rows, "monitoring": {"recent20AverageHit": round(sum(recent20) / max(1, len(recent20)), 3), "historicalAverageHit": round(historical_average, 3), "warning": bool(len(recent20) >= 20 and sum(recent20) / 20 < historical_average * 0.8)}, "weightImpact": {name: {"averageHit15Impact": round(sum(ensemble_hits[15]) / max(1, tested) - sum(model_hits[name]) / max(1, tested), 3)} for name in MODEL_NAMES}, "method": f"{game} 獨立滾動回測：每個目標期只使用之前最多5,000期，至少以前300期訓練，從第{start + 1}筆一路測到最新資料；候選池目標為15碼覆蓋率。"}
+
+
+def _mm_json_load(path: Path, fallback: Any) -> Any:
+    try:
+        if path.exists():
+            with path.open("r", encoding="utf-8") as file:
+                return json.load(file)
+    except (OSError, ValueError, TypeError):
+        pass
+    return fallback
+
+
+def _mm_json_save(path: Path, value: Any) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        with temporary.open("w", encoding="utf-8") as file:
+            json.dump(value, file, ensure_ascii=False, separators=(",", ":"))
+        temporary.replace(path)
+    except OSError:
+        pass
+
+
+def _mm_save_prediction(game: str, analysis: dict[str, Any], latest: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    with MODEL_STATE_LOCK:
+        state = _mm_json_load(MODEL_PREDICTIONS_FILE, {"tw539": [], "ca-fantasy5": []})
+        records = list(state.get(game, [])) if isinstance(state, dict) else []
+        ordered = _mm_rows(history, 39, 5000)
+        by_period = {str(row["period"]): row for row in ordered}
+        for record in records:
+            source_period = str(record.get("sourcePeriod", ""))
+            if record.get("actual") or source_period not in by_period:
+                continue
+            source_index = next((index for index, row in enumerate(ordered) if str(row["period"]) == source_period), None)
+            if source_index is not None and source_index + 1 < len(ordered):
+                actual = ordered[source_index + 1]
+                record["actual"] = actual["numbers"]
+                record["actualPeriod"] = actual["period"]
+                record["hits5"] = len(set(record.get("recommended", [])) & set(actual["numbers"]))
+                record["hits10"] = len(set(record.get("backup", [])) & set(actual["numbers"]))
+                record["hits15"] = len(set(record.get("candidate15", [])) & set(actual["numbers"]))
+        source_period = str(latest.get("period", ""))
+        if source_period and not any(str(record.get("sourcePeriod")) == source_period for record in records):
+            records.insert(0, {"game": game, "sourcePeriod": source_period, "sourceDate": latest.get("date", ""), "createdAt": datetime.now(timezone.utc).isoformat(timespec="seconds"), "modelVersion": analysis.get("modelVersion", MODEL_ENGINE_VERSION), "weights": analysis.get("modelWeights", {}), "recommended": analysis.get("recommendation", [])[:5], "backup": analysis.get("backupRecommendation", [])[:5], "candidate15": analysis.get("candidateTiers", {}).get("full15", [])[:15], "allModelScores": analysis.get("modelScores", {}), "actual": None})
+        records = records[:5000]
+        _mm_json_save(MODEL_PREDICTIONS_FILE, {**(state if isinstance(state, dict) else {}), game: records})
+        latest_record = records[0] if records else None
+        return {"count": len(records), "latest": latest_record}
+
+
+def _mm_save_model_state(game: str, analysis: dict[str, Any], cycle: int) -> dict[str, Any]:
+    """Persist independent learned state without making it part of the draw data."""
+    with MODEL_STATE_LOCK:
+        state = _mm_json_load(MODEL_STATE_FILE, {})
+        if not isinstance(state, dict):
+            state = {}
+        state[game] = {
+            "modelVersion": analysis.get("modelVersion", MODEL_ENGINE_VERSION),
+            "lastTunedCycle": cycle,
+            "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "weights": analysis.get("modelWeights", {}),
+            "leaderboard": analysis.get("modelLeaderboard", []),
+            "monitoring": analysis.get("monitoring", {}),
+        }
+        _mm_json_save(MODEL_STATE_FILE, state)
+        return state[game]
+
+
+def _mm_analysis(game: str, rows: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    source_rows = _mm_rows(rows, max_number=max_number, limit=5000)
+    if not source_rows:
+        return {"drawCount": 0, "selectedDrawCount": 0, "recommendation": [], "candidateTiers": {}, "backtest": {"testedCount": 0}, "note": "資料不足，暫時無法計算。"}
+    stats = _mm_stats(source_rows, max_number)
+    model_scores, features, model_meta = _mm_model_scores(stats, max_number)
+    provisional_profiles = []
+    backtest = _mm_roll_backtest(source_rows, game, max_number, pick_count)
+    profiles = backtest.get("modelProfiles", [])
+    weights = _mm_model_weights(game, profiles)
+    ensemble_scores = {number: sum(weights[name] * model_scores[name][number] for name in MODEL_NAMES) for number in range(1, max_number + 1)}
+    pool = _mm_select_pool(ensemble_scores, stats, max_number, 15)
+    top5, backup5 = pool[:5], pool[5:10]
+    ranked = sorted(ensemble_scores, key=lambda number: (-ensemble_scores[number], number))
+    detail = []
+    for rank, number in enumerate(pool, start=1):
+        agreement = sum(number in sorted(model_scores[name], key=lambda candidate: (-model_scores[name][candidate], candidate))[:15] for name in MODEL_NAMES) / len(MODEL_NAMES)
+        detail.append({"number": number, "rank": rank, "tier": 1 if rank <= 5 else 2 if rank <= 10 else 3, "score": round(ensemble_scores[number] * 100, 2), "confidence": round(_mm_clamp(0.45 * ensemble_scores[number] + 0.55 * agreement) * 100, 2), "reason": "、".join(_mm_reasons(number, features, stats)), "modelAgreement": round(agreement * 100, 2)})
+    least = [{"number": number, "score": round(ensemble_scores[number] * 100, 2), "reason": "近期連續或結構失衡，且未取得多模型支持" if stats["currentRun"].get(number, 0) >= 2 else "多視窗分數與近期結構支持較弱"} for number in sorted(ensemble_scores, key=lambda number: (ensemble_scores[number], number))[:10]]
+    frequency = stats["windows"][300]
+    hot = sorted(frequency, key=lambda number: (-frequency[number], number))[:10]
+    cold = sorted(frequency, key=lambda number: (frequency[number], number))[:10]
+    overdue = sorted(stats["omission"], key=lambda number: (-stats["omission"][number], number))[:10]
+    shapes = stats["shapeAverage"]
+    consistency = sum(number in sorted(model_scores[name], key=lambda candidate: (-model_scores[name][candidate], candidate))[:15] for name in MODEL_NAMES for number in pool) / max(1, len(MODEL_NAMES) * len(pool))
+    cycle = len(source_rows) // MODEL_RETRAIN_EVERY
+    result = {"drawCount": len(source_rows), "selectedDrawCount": len(source_rows), "modelVersion": f"{MODEL_ENGINE_VERSION}-{game}", "windowsUsed": [window for window in MODEL_WINDOWS if len(source_rows) >= window or window == 30], "statistics": {"hot": hot, "cold": cold, "omission": stats["omission"], "averageOmission": stats["averageOmission"], "maximumOmission": stats["maximumOmission"], "returnRate": stats["returnRate"], "repeatRate": stats["repeatRate"], "tailCounts": stats["tailCounts"], "tailPresence": stats["tailPresence"], "oddEven": shapes["odd"], "smallLarge": shapes["small"], "zoneRatio": shapes["zones"], "routeRatio": shapes["routes"], "primeCount": shapes["prime"], "sumAverage": stats["sumAverage"], "spanAverage": stats["spanAverage"], "acAverage": stats["acAverage"], "sameTailRate": stats["shapeRates"]["sameTail"], "consecutiveRate": stats["shapeRates"]["consecutive"], "previousRepeatRate": stats["shapeRates"]["previousRepeat"], "weekdayCounts": stats["weekdayCounts"], "monthCounts": stats["monthCounts"], "crossYear": stats["yearCounts"], "pairCounts": stats["pairCounts"]}, "hot": [{"number": number, "count": frequency[number]} for number in hot], "cold": [{"number": number, "count": frequency[number]} for number in cold], "overdue": [{"number": number, "gap": stats["omission"][number]} for number in overdue], "frequency": [{"number": number, "count": frequency[number], "gap": stats["omission"][number]} for number in range(1, max_number + 1)], "recommendation": top5, "backupRecommendation": backup5, "recommendationRoles": [{"number": number, "rank": index, "score": next(item["score"] for item in detail if item["number"] == number)} for index, number in enumerate(top5, start=1)], "candidateTiers": {"top5": top5, "backup5": backup5, "top10": pool[:10], "full15": pool}, "candidateDetails": detail, "modelScores": {name: {str(number): round(score, 6) for number, score in scores.items()} for name, scores in model_scores.items()}, "modelWeights": weights, "modelLeaderboard": profiles, "modelProfiles": [{**profile, "quality": round(profile.get("allHistoryAverageHit", 0) * 100 + profile.get("hitRate", 0), 2)} for profile in profiles], "modelCatalog": {**{name: {"status": "active", "label": MODEL_LABELS[name]} for name in MODEL_NAMES}, **{name: {"status": "excluded", "reason": reason} for name, reason in EXCLUDED_MODELS.items()}}, "ensemble": {"overallConfidence": round(_mm_clamp(sum(ensemble_scores[number] for number in top5) / max(1, len(top5))) * 100, 2), "modelConsistency": round(consistency * 100, 2), "voteWeights": weights, "estimatedSum": round(sum(top5) * 1.0, 2), "estimatedSpan": max(top5) - min(top5) if top5 else 0, "estimatedAC": _mm_ac(top5), "estimatedOddEven": _mm_shape(top5, max_number)["odd"], "estimatedSmallLarge": _mm_shape(top5, max_number)["small"], "estimatedConsecutiveRate": round(stats["shapeRates"]["consecutive"] * 100, 2), "estimatedSameTailRate": round(stats["shapeRates"]["sameTail"] * 100, 2)}, "leastRecommended": least, "backtest": backtest, "automl": {"cycle": cycle, "retrainEvery": MODEL_RETRAIN_EVERY, "qualified": len(source_rows) >= MODEL_MIN_QUALIFY_HISTORY, "method": "每100期檢查一次，以滾動回測績效做 Bayesian model averaging；未通過1000期驗證的模型不升格為正式模型。"}, "monitoring": backtest.get("monitoring", {}), "featureLearning": {"featureKeys": model_meta["featureKeys"], "logisticCoefficients": model_meta["logisticCoefficients"]}, "patterns": pattern_summary(source_rows[-300:], max_number, f"{game}-multi-model"), "strategy": {"id": f"{game}-multi-model", "label": "候選池多模型集成", "summary": "目標是提高完整15碼候選池覆蓋率，再由5碼核心、5碼備選分層呈現。", "steps": ["近30期最高權重、近100期次高、近300期校正，資料足夠時納入近1000與近5000期", "熱冷、遺漏、回補、連莊、共現、尾數與奇偶大小共同計分，不單追熱", "連續出現2期以上自動降權；遺漏8~15期只適度加分，不硬性回補", "區間、012路、質數、和值、跨度、AC、同尾、連號與上期重複用來平衡候選池", "每期開獎後留存快照，滾動回測結果決定模型投票權重"], "candidatePool": pool, "variant": "independent-ensemble"}, "note": "本模型以候選15碼長期覆蓋率與5碼平均命中為目標，不宣稱預測必開號碼。各彩種獨立計算；沒有使用隨機亂數、幸運數字或單次結果改寫規則。彩券仍是隨機事件，請理性投注。"}
+    result["modelState"] = _mm_save_model_state(game, result, cycle)
+    return result
+
+
+def analyze(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    return _mm_analysis("tw539", draws, max_number, pick_count)
+
+
+def analyze_california(draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    return _mm_analysis("ca-fantasy5", draws, max_number, pick_count)
+
+
+def analyze_with_stable_backtest(draws: list[dict[str, Any]], backtest_draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    analysis = _mm_analysis("tw539", backtest_draws or draws, max_number, pick_count)
+    analysis["selectedDrawCount"] = len(draws)
+    return analysis
+
+
+def analyze_california_with_stable_backtest(draws: list[dict[str, Any]], backtest_draws: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    analysis = _mm_analysis("ca-fantasy5", backtest_draws or draws, max_number, pick_count)
+    analysis["selectedDrawCount"] = len(draws)
     return analysis
 
 
@@ -2019,11 +3096,16 @@ def attach_deep_sniper_analysis(
 ) -> dict[str, Any]:
     slot_start, slot_end = deep_analysis_slot()
     key = f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:deep-8h-{slot_start}"
-    deep = cached(
-        f"deep-sniper-{ANALYSIS_ENGINE_VERSION}-{key}",
-        lambda: deep_sniper_analysis(history, game=game, max_number=39, pick_count=5),
-        ttl_seconds=DEEP_ANALYSIS_WINDOW_SECONDS + 60,
-    )
+    # The public engine is now deterministic and backtest-driven. Keep the
+    # legacy deep-sniper slot for UI compatibility, but never let its older
+    # random/heuristic implementation overwrite the formal recommendation.
+    top5 = analysis.get("candidateTiers", {}).get("top5", analysis.get("recommendation", []))[:5]
+    deep = {
+        "numbers": top5,
+        "windowsUsed": analysis.get("windowsUsed", []),
+        "windowPicks": [{"window": window, "numbers": top5} for window in analysis.get("windowsUsed", [])],
+        "method": "候選池多模型集成（滾動回測加權；不使用隨機抽樣）",
+    }
     return {
         **analysis,
         "deepSniperRecommendation": deep.get("numbers", []),
@@ -2047,7 +3129,7 @@ def attach_deep_sniper_analysis(
 def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, Any]:
     if game == "tw539":
         latest = taiwan_latest()
-        fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
+        fetch_limit = max(limit, MODEL_ANALYSIS_DATA_WINDOW, MODEL_EVAL_WINDOW + MODEL_TRAIN_WINDOW)
         history = taiwan_history(fetch_limit)
         if history and not same_draw(history[0], latest):
             history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
@@ -2057,12 +3139,13 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         status = data_health(game, latest, draws)
         analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
         analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
+        analysis["predictionHistory"] = _mm_save_prediction(game, analysis, latest, history)
         payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="tw539")
         return payload
     if game == "ca-fantasy5":
-        fetch_limit = max(limit, BACKTEST_FALLBACK_LIMIT)
+        fetch_limit = max(limit, MODEL_ANALYSIS_DATA_WINDOW, MODEL_EVAL_WINDOW + MODEL_TRAIN_WINDOW)
         history = california_history(fetch_limit)
         if not history:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
@@ -2073,6 +3156,7 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         status = data_health(game, latest, draws)
         analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
         analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
+        analysis["predictionHistory"] = _mm_save_prediction(game, analysis, latest, history)
         payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="ca-fantasy5")
