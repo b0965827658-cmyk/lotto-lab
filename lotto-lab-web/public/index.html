@@ -11,7 +11,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=78" />
+    <link rel="stylesheet" href="/styles.css?v=79" />
   </head>
   <body>
     <main class="shell">
@@ -110,7 +110,7 @@
           <button class="page-tab" type="button" data-tab="stats">冷熱號</button>
           <button class="page-tab" type="button" data-tab="parity-tail">奇偶尾數</button>
           <button class="page-tab" type="button" data-tab="model">自訂邏輯推理</button>
-          <button class="page-tab" type="button" data-tab="model-pattern">狙擊手推薦</button>
+          <button class="page-tab" type="button" data-tab="model-pattern">核心候選 15 碼</button>
           <button class="page-tab" type="button" data-tab="backtest">模型回測</button>
           <button class="page-tab" type="button" data-tab="subscription">升級訂閱</button>
         </nav>
@@ -338,11 +338,11 @@
         </div>
 
         <div class="tab-panel" data-tab-panel="model-pattern">
-        <article class="panel pattern-panel logic-panel" data-tier="pro" data-lock-title="Pro 邏輯推理" data-lock-text="訂閱後可查看綜合模型最高分的 5 個號碼與推理摘要。">
+        <article class="panel pattern-panel logic-panel" data-tier="pro" data-lock-title="Pro 核心候選池" data-lock-text="訂閱後可查看 15 碼核心候選池與分析依據。">
           <div class="panel-head compact">
             <div>
-              <p class="label">邏輯推理</p>
-              <h2 id="patternModel">綜合推理最高分 5 碼</h2>
+              <p class="label">核心候選池</p>
+              <h2 id="patternModel">核心候選 15 碼</h2>
             </div>
             <span id="patternRepeat" class="count-pill">-</span>
           </div>
@@ -463,6 +463,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js?v=72"></script>
+    <script src="/app.js?v=73"></script>
   </body>
 </html>

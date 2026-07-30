@@ -502,6 +502,24 @@ input:focus-visible {
 }
 
 @media (max-width: 480px) {
+  .core-candidate-hero {
+    padding: 14px 10px;
+  }
+
+  .core-candidate-heading strong {
+    font-size: 16px;
+  }
+
+  .core-candidate-pool {
+    gap: 7px 5px;
+  }
+
+  .core-candidate-ball {
+    width: 50px;
+    height: 50px;
+    font-size: 16px;
+  }
+
   .deep-sniper-block {
     padding: 14px;
   }
@@ -2707,6 +2725,106 @@ body[data-plan="free"] .pro-required {
   font-size: 12px;
   font-style: normal;
   font-weight: 800;
+}
+
+.core-candidate-hero {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(214, 152, 34, 0.42);
+  border-radius: 14px;
+  background: linear-gradient(145deg, #f9fcff 0%, #edf5fb 100%);
+  padding: 18px;
+  text-align: center;
+}
+
+.core-candidate-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.core-candidate-heading span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.core-candidate-heading strong {
+  color: #174b78;
+  font-size: 18px;
+}
+
+.core-candidate-pool {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  justify-items: center;
+  gap: 10px;
+  width: min(100%, 520px);
+  margin: 0 auto;
+}
+
+.core-candidate-ball {
+  display: inline-grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 2px solid #b9d5e8;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  box-shadow: inset 0 -7px 10px rgba(0, 0, 0, 0.16), 0 3px 0 rgba(28, 75, 116, 0.16);
+}
+
+.core-candidate-ball.is-core {
+  border-color: #ffe4a1;
+  background: linear-gradient(145deg, #f7ca54 0%, #d68f0e 78%);
+  color: #1e2a31;
+}
+
+.core-candidate-ball.is-support {
+  background: linear-gradient(145deg, #4d9bc4 0%, #1e5f8d 78%);
+}
+
+.core-candidate-legend {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: #50687e;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.core-candidate-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.core-candidate-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.core-candidate-swatch.is-core {
+  background: #dfa21b;
+}
+
+.core-candidate-swatch.is-support {
+  background: #286f9b;
+}
+
+.core-candidate-hero em {
+  color: #5f7180;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.45;
 }
 
 .logic-reason-card {

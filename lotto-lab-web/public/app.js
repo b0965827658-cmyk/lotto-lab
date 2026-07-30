@@ -2116,15 +2116,45 @@ function renderDeepSniper() {
   `;
 }
 
+function coreCandidatePool() {
+  const analysis = state.analysis || {};
+  const strategyPool = Array.isArray(analysis.strategy?.candidatePool) ? analysis.strategy.candidatePool : [];
+  const recommendation = Array.isArray(analysis.recommendation) ? analysis.recommendation : [];
+  const frequencyRows = Array.isArray(analysis.frequency) ? analysis.frequency : [];
+  const frequencyPool = [...frequencyRows]
+    .sort(
+      (a, b) =>
+        Number(b.count || 0) - Number(a.count || 0) ||
+        Number(a.gap || 0) - Number(b.gap || 0) ||
+        Number(a.number) - Number(b.number),
+    )
+    .map((row) => row.number);
+  const normalized = [...strategyPool, ...recommendation, ...frequencyPool]
+    .map(Number)
+    .filter((number) => Number.isInteger(number) && number >= 1 && number <= 39);
+  const unique = [...new Set(normalized)];
+  return unique.length >= 15 ? unique.slice(0, 15) : unique;
+}
+
+function coreCandidateBalls(numbers) {
+  return numbers
+    .map(
+      (number, index) =>
+        `<span class="core-candidate-ball ${index < 5 ? "is-core" : "is-support"}" title="第 ${index + 1} 候選" aria-label="第 ${index + 1} 候選 ${pad(number)} 號">${pad(number)}</span>`,
+    )
+    .join("");
+}
+
 function renderPatterns(patterns) {
   if (!els.patternModel || !els.patternGrid || !els.patternLines) return;
-  const numbers = [...(state.analysis?.recommendation || [])];
-  if (numbers.length !== 5) {
-    els.patternModel.textContent = "綜合推理最高分 5 碼";
+  const pool = coreCandidatePool();
+  if (pool.length < 15) {
+    els.patternModel.textContent = "核心候選 15 碼";
     els.patternRepeat.textContent = "資料不足";
-    els.patternGrid.innerHTML = `<div class="empty-state">資料累積後會顯示綜合推理 5 碼。</div>`;
+    els.patternGrid.innerHTML = `<div class="empty-state">資料同步完成後會顯示核心候選 15 碼。</div>`;
     els.patternLines.innerHTML = "";
     renderDeepSniper();
+    if (els.deepSniperBlock) els.deepSniperBlock.hidden = true;
     return;
   }
   const backtest = state.analysis?.backtest || {};
@@ -2133,14 +2163,20 @@ function renderPatterns(patterns) {
   const intervals = (patterns?.intervals || []).slice(0, 2).map((item) => `${item.label} ${item.rate}%`).join("、") || "資料累積中";
   const strategy = state.analysis?.strategy || null;
   const strategySteps = strategy?.steps?.join(" ・ ") || "";
-  els.patternModel.textContent = "綜合推理最高分 5 碼";
-  els.patternRepeat.textContent = `${profile} · 單一結果`;
+  els.patternModel.textContent = "核心候選 15 碼";
+  els.patternRepeat.textContent = `${profile} · 統計候選池`;
   els.patternGrid.innerHTML = `
-    <div class="logic-pick-hero">
-      <span>目前唯一推薦組合</span>
-      <div class="balls accent logic-pick-balls">${balls(numbers)}</div>
-      ${keyNumberMarkup(numbers)}
-      <em>依目前資料綜合計分排序，不代表實際機率或保證中獎。</em>
+    <div class="core-candidate-hero">
+      <div class="core-candidate-heading">
+        <span>近期結構交叉篩選</span>
+        <strong>先看前 5 碼，再從完整 15 碼自行搭配</strong>
+      </div>
+      <div class="core-candidate-pool">${coreCandidateBalls(pool)}</div>
+      <div class="core-candidate-legend">
+        <span><i class="core-candidate-swatch is-core"></i>核心排序前 5 碼</span>
+        <span><i class="core-candidate-swatch is-support"></i>交叉候選 10 碼</span>
+      </div>
+      <em>依近期熱度、遺漏、區間、尾數與回測資料交叉整理；這是候選池，不代表實際機率或保證中獎。</em>
     </div>
   `;
   els.patternLines.innerHTML = `
@@ -2170,6 +2206,7 @@ function renderPatterns(patterns) {
     </div>
   `;
   renderDeepSniper();
+  if (els.deepSniperBlock) els.deepSniperBlock.hidden = true;
 }
 
 function renderSavedPicks() {
