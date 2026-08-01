@@ -3933,12 +3933,89 @@ def _formal_save_state(game: str, analysis: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def _formal_insufficient_result(
+    game: str,
+    source_rows: list[dict[str, Any]],
+    quality: dict[str, Any],
+    history_database: dict[str, Any],
+    reason: str,
+) -> dict[str, Any]:
+    """Return an auditable empty result instead of falling back to legacy picks."""
+    empty_backtest = {
+        "testedCount": 0,
+        "trainWindow": FORMAL_TRAIN_WINDOW,
+        "sourceWindow": len(source_rows),
+        "qualificationHistory": len(source_rows),
+        "qualifiedForPromotion": False,
+        "cacheStatus": "insufficient",
+        "method": "資料不足，未執行正式 walk-forward 回測。",
+        "baselineModels": {},
+        "modelProfiles": [],
+        "recentRows": [],
+        "tierMetrics": {},
+        "distribution": {},
+        "calibration": {"status": "insufficient-data"},
+        "monitoring": {"warning": False},
+    }
+    result = {
+        "drawCount": len(source_rows),
+        "selectedDrawCount": len(source_rows),
+        "dataInsufficient": True,
+        "modelVersion": f"{MODEL_ENGINE_VERSION}-{game}",
+        "game": game,
+        "databaseId": f"lotto-lab-{game}-independent",
+        "historyDatabase": history_database,
+        "dataQuality": quality,
+        "windowsUsed": [],
+        "recommendation": [],
+        "backupRecommendation": [],
+        "thirdRecommendation": [],
+        "candidateTiers": {"top5": [], "backup5": [], "top10": [], "third5": [], "full15": []},
+        "candidateDetails": [],
+        "ranking": [],
+        "modelScores": {},
+        "modelWeights": {},
+        "modelLeaderboard": [],
+        "modelProfiles": [],
+        "modelCatalog": {},
+        "baselineModels": {},
+        "frequency": [],
+        "patterns": {},
+        "statistics": {},
+        "ensemble": {"overallConfidence": None, "modelConsistency": None, "modelDisagreement": None, "riskLevel": "資料不足"},
+        "leastRecommended": [],
+        "recommendationCombos": {"firstChoice": [], "steady": [], "diversified": [], "highRisk": []},
+        "backtest": empty_backtest,
+        "automl": {"cycle": 0, "retrainEvery": 100, "qualified": False, "backtestStatus": "insufficient", "method": "資料不足，暫不訓練或調整權重。"},
+        "monitoring": {"warning": False, "status": "資料不足"},
+        "calibration": {"status": "insufficient-data"},
+        "uncertainty": {"modelConsistency": None, "modelDisagreement": None, "riskLevel": "資料不足"},
+        "stateDetection": {"state": "資料不足", "method": "尚未建立狀態判定"},
+        "appIntegration": {"enabled": False, "reason": "正式資料不足，未載入外部模型。"},
+        "ablation": {"status": "insufficient-data", "note": "資料不足，未執行消融實驗。"},
+        "strategy": {"id": f"{game}-independent-ensemble", "label": "正式模型待驗證", "candidatePool": [], "steps": []},
+        "note": reason,
+    }
+    _formal_save_state(game, result)
+    return result
+
+
 def _formal_analysis(game: str, rows: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
     source_rows = _mm_rows(rows, max_number=max_number, limit=5000)
     if not source_rows:
         return {"drawCount": 0, "recommendation": [], "candidateTiers": {}, "backtest": {"testedCount": 0, "cacheStatus": "insufficient"}, "note": "資料不足，不建立推測。"}
     quality = _formal_quality_report(game, rows)
     history_database = _formal_save_history(game, rows)
+    minimum_training_rows = FORMAL_TRAIN_WINDOW
+    usable_rows = min(len(source_rows), int(quality.get("verifiedCount", 0)))
+    if usable_rows < minimum_training_rows:
+        return _formal_insufficient_result(
+            game,
+            source_rows,
+            quality,
+            history_database,
+            f"目前只有 {usable_rows} 期已驗證資料；正式模型至少需要 {minimum_training_rows} 期，暫不產生推薦或回測數字。",
+        )
     backtest = _formal_backtest(source_rows, game, max_number, pick_count)
     profiles = backtest.get("modelProfiles", [])
     weights = backtest.get("dynamicWeights") or _formal_weights_from_profiles(game, profiles)
@@ -3979,6 +4056,8 @@ def _mm_analysis(game: str, rows: list[dict[str, Any]], max_number: int = 39, pi
 
 
 def _mm_save_prediction(game: str, analysis: dict[str, Any], latest: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    if analysis.get("dataInsufficient"):
+        return {"databaseId": f"lotto-lab-{game}-prediction-history", "count": 0, "latest": None, "immutableSnapshot": False, "status": "insufficient"}
     return _formal_save_snapshot(game, analysis, latest, history)
 
 
@@ -4009,6 +4088,7 @@ def attach_deep_sniper_analysis(
         "windowPicks": [{"window": window, "numbers": top5} for window in analysis.get("windowsUsed", [])],
         "method": "候選池多模型集成（滾動回測加權；不使用隨機抽樣）",
     }
+    deep_status = "8 小時深度分析已完成；新一期開出時立即重算。" if len(deep.get("numbers", [])) == 5 else "資料不足，深度分析暫不產生推薦。"
     return {
         **analysis,
         "deepSniperRecommendation": deep.get("numbers", []),
@@ -4025,7 +4105,7 @@ def attach_deep_sniper_analysis(
         "deepSniperWindows": deep.get("windowsUsed", []),
         "deepSniperWindowPicks": deep.get("windowPicks", []),
         "deepSniperMethod": deep.get("method", "多視窗交叉分析"),
-        "deepSniperStatus": "8 小時深度分析已完成；新一期開出時立即重算。",
+        "deepSniperStatus": deep_status,
     }
 
 
@@ -4057,6 +4137,12 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         analysis = cached(analysis_key, lambda: analyze_california_with_stable_backtest(draws, history))
         latest = history[0]
         status = data_health(game, latest, draws)
+        if analysis.get("dataInsufficient"):
+            status = {
+                **status,
+                "validated": False,
+                "message": "最新開獎可解析，但正式模型資料不足；暫不產生推薦。",
+            }
         analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
         analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
         analysis["predictionHistory"] = _mm_save_prediction(game, analysis, latest, history)
