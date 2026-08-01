@@ -67,11 +67,23 @@ class FormalEngineTests(unittest.TestCase):
         result = server._formal_analysis("tw539", self.tw_rows, 39, 5)
         self.assertEqual(len(result["candidateTiers"]["top5"]), 5)
         self.assertEqual(len(result["candidateTiers"]["full15"]), 15)
+        self.assertEqual(len(result["frequency"]), 39)
+        self.assertEqual(result["statistics"]["hot"], [row["number"] for row in result["hot"]])
+        self.assertEqual(result["statistics"]["cold"], [row["number"] for row in result["cold"]])
+        self.assertEqual(result["statisticsWindow"], 300)
         self.assertEqual(set(result["modelWeights"]), set(server.FORMAL_MODEL_NAMES["tw539"]))
         self.assertIn("calibration", result)
         self.assertIn("uncertainty", result)
         self.assertIn("ablation", result)
         self.assertFalse(result["appIntegration"]["enabled"])
+
+    def test_insufficient_california_data_never_falls_back_to_legacy_picks(self):
+        result = server._formal_analysis("ca-fantasy5", self.ca_rows[:24], 39, 5)
+        self.assertTrue(result["dataInsufficient"])
+        self.assertEqual(result["recommendation"], [])
+        self.assertEqual(result["candidateTiers"]["full15"], [])
+        self.assertEqual(result["backtest"]["cacheStatus"], "insufficient")
+        self.assertEqual(result["modelWeights"], {})
 
 
 if __name__ == "__main__":
