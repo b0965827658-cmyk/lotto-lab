@@ -1858,7 +1858,7 @@ function scheduleModelRender(message = "模型設定已更新。") {
   }, MODEL_RENDER_DEBOUNCE_MS);
 }
 
-function renderModelBacktest(backtest, profiles = []) {
+function renderModelBacktest(backtest, profiles = [], analysis = null) {
   if (!els.backtestBadge || !els.backtestRecent || !els.backtestMethod) return;
   if (!backtest || !backtest.testedCount) {
     els.backtestBadge.textContent = "資料不足";
@@ -1874,6 +1874,7 @@ function renderModelBacktest(backtest, profiles = []) {
   );
   const recentRows = Array.isArray(backtest.recentRows) ? backtest.recentRows : [];
   const modelProfiles = Array.isArray(profiles) ? profiles : [];
+  const formalAnalysis = analysis || state.analysis || {};
   const averageHit = Number.isFinite(Number(backtest.averageHit)) ? backtest.averageHit : "-";
   const onePlusRate = Number.isFinite(Number(backtest.onePlusRate)) ? backtest.onePlusRate : 0;
   const twoPlusRate = Number.isFinite(Number(backtest.twoPlusRate)) ? backtest.twoPlusRate : 0;
@@ -1889,9 +1890,9 @@ function renderModelBacktest(backtest, profiles = []) {
         <div class="model-rank ${index === 0 ? "best" : ""}">
           <div>
             <strong>${profile.label}</strong>
-            <span>均中 ${profile.averageHit ?? profile.allHistoryAverageHit ?? 0} · 摸邊 ${profile.hitRate ?? profile.onePlusRate ?? 0}% · 近100期 ${profile.recent100AverageHit ?? "-"} · ${profile.status || "active"}</span>
+            <span>均中 ${profile.averageHit ?? profile.averageHit5 ?? profile.allHistoryAverageHit ?? 0} · 15碼覆蓋 ${profile.hitRate15 ?? profile.hitRate ?? profile.onePlusRate ?? 0}% · 近100期 ${profile.recent100AverageHit15 ?? profile.recent100AverageHit ?? "-"} · ${profile.status || "active"}</span>
           </div>
-          <em>${profile.bestHit} 中</em>
+          <em>${profile.bestHit ?? "-"} 中</em>
         </div>
       `,
     )
@@ -1957,6 +1958,38 @@ function renderModelBacktest(backtest, profiles = []) {
         : ""}
     </div>
   `;
+  const quality = formalAnalysis.dataQuality || {};
+  const baseline = backtest.baselineComparison || {};
+  const calibration = formalAnalysis.calibration || backtest.calibration || {};
+  const uncertainty = formalAnalysis.uncertainty || {};
+  const ablation = formalAnalysis.ablation || {};
+  const safeMetric = (value, suffix = "") => value == null || value === "" ? "-" : `${value}${suffix}`;
+  const profileScores = modelProfiles.filter((profile) => profile && (profile.brierScore != null || profile.logLoss != null));
+  const scoreHtml = profileScores.length
+    ? profileScores.map((profile) => `<span>${profile.label}: Brier ${safeMetric(profile.brierScore)} · Log Loss ${safeMetric(profile.logLoss)} · ECE ${safeMetric(profile.expectedCalibrationError)}</span>`).join("")
+    : "尚未有可比較的校準分數";
+  const ablationHtml = ablation.status === "complete" || ablation.status === "measured-preview"
+    ? Object.entries(ablation.comparisons || {})
+        .slice(0, 6)
+        .map(([key, item]) => `<span>${key}: ${safeMetric(item.averageHit15)} 顆 · Δ ${safeMetric(item.deltaVsFull)} · ${item.interpretation || ""}</span>`)
+        .join("")
+    : (ablation.note || "消融實驗背景建立中");
+  const formalAuditHtml = `
+    <section class="formal-audit" aria-label="正式模型驗收">
+      <div class="formal-audit-head">
+        <strong>正式模型驗收</strong>
+        <span>${backtest.qualifiedForPromotion ? "已達正式驗證門檻" : "觀察中，尚未升格"}</span>
+      </div>
+      <div class="formal-audit-grid">
+        <div><strong>資料品質</strong><span>${safeMetric(quality.historyCount)} 筆有效 · ${safeMetric(quality.invalidCount)} 筆異常 · ${safeMetric(quality.duplicateCount)} 筆重複</span></div>
+        <div><strong>基準比較</strong><span>集成 ${safeMetric(baseline.complexAverageHit15)} 顆 · 最佳簡單基準 ${safeMetric(baseline.bestSimpleAverageHit15)} 顆 · ${baseline.status || "尚未完成"}</span></div>
+        <div><strong>校準狀態</strong><span>ECE ${safeMetric(calibration.expectedCalibrationError)} · MCE ${safeMetric(calibration.maximumCalibrationError)} · ${calibration.status || "未建立"}</span></div>
+        <div><strong>不確定性</strong><span>一致度 ${safeMetric(uncertainty.modelConsistency, "%")} · 分歧 ${safeMetric(uncertainty.modelDisagreement, "%")} · 風險 ${uncertainty.riskLevel || "-"}</span></div>
+      </div>
+      <div class="formal-audit-subsection"><strong>模型分數（僅列實際計算）</strong><div>${scoreHtml}</div></div>
+      <div class="formal-audit-subsection"><strong>消融實驗</strong><div>${ablationHtml}</div></div>
+    </section>
+  `;
   const validationRows = validationRowsForLatest();
   const validationHtml = validationRows.length
     ? `
@@ -2015,8 +2048,8 @@ function renderModelBacktest(backtest, profiles = []) {
       `,
     )
     .join("");
-  if (validationHtml || ranking || warning || coverageHtml) {
-    els.backtestRecent.insertAdjacentHTML("afterbegin", `${coverageHtml}${validationHtml}${warning}<div class="model-rank-list">${ranking}</div>`);
+  if (validationHtml || ranking || warning || coverageHtml || formalAuditHtml) {
+    els.backtestRecent.insertAdjacentHTML("afterbegin", `${formalAuditHtml}${coverageHtml}${validationHtml}${warning}<div class="model-rank-list">${ranking}</div>`);
   }
   const automl = state.analysis?.automl;
   const monitoring = state.analysis?.monitoring || backtest.monitoring || {};
@@ -2249,7 +2282,10 @@ function renderPatterns(patterns) {
   const scoreByNumber = new Map(details.map((item) => [Number(item.number), item]));
   const detailLine = (numbers) => numbers.map((number) => {
     const item = scoreByNumber.get(Number(number));
-    return `<span class="candidate-score-chip"><b>${pad(number)}</b><small>${item ? `${item.score}分 · 信心 ${item.confidence}%` : "候選池"}</small></span>`;
+    const confidence = item?.calibratedProbability != null
+      ? `校準 ${item.calibratedProbability}%`
+      : `相對信心 ${item?.relativeConfidence || "-"}`;
+    return `<span class="candidate-score-chip"><b>${pad(number)}</b><small>${item ? `${item.score}分 · ${confidence}` : "候選池"}</small></span>`;
   }).join("");
   els.patternModel.textContent = "核心候選 15 碼";
   els.patternRepeat.textContent = `${profile} · 多模型集成`;
@@ -2284,7 +2320,7 @@ function renderPatterns(patterns) {
               .map(
                 (item) => `
                   <div class="candidate-detail-card">
-                    <div><strong>${pad(item.number)} 號</strong><span>第 ${item.rank} 位 · ${item.score} 分</span></div>
+                    <div><strong>${pad(item.number)} 號</strong><span>第 ${item.rank} 位 · ${item.score} 分 · ${item.calibratedProbability != null ? `校準 ${item.calibratedProbability}%` : `相對信心 ${item.relativeConfidence || "-"}`}</span></div>
                     <p>${item.reason || "綜合權重與結構平衡入選"}</p>
                   </div>
                 `,
@@ -2434,7 +2470,7 @@ function render(payload, companionPayload = null) {
   els.dashboard.hidden = false;
   renderLatestDraws();
   els.note.textContent = analysis.note;
-  renderModelBacktest(analysis.backtest, analysis.modelProfiles);
+  renderModelBacktest(analysis.backtest, analysis.modelProfiles, analysis);
   renderPatterns(analysis.patterns, analysis.modelProfiles);
   if (els.statsInsight) els.statsInsight.innerHTML = statsInsightMarkup(analysis);
   if (els.statsMatrix) els.statsMatrix.innerHTML = statsMatrixRows(analysis.frequency, latest?.numbers || [], analysis);
@@ -2548,7 +2584,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (!state.serviceWorkerRegistration) {
-    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=79", {
+    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=80", {
       updateViaCache: "none",
     });
   }
