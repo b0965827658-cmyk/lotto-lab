@@ -9,7 +9,6 @@ import itertools
 import json
 import math
 import os
-import random
 import re
 import socket
 import ssl
@@ -1033,7 +1032,7 @@ def recommendation_number_scores(
                 (frequency[n] / max_freq) * 0.45
                 + (recent_frequency[n] / max_recent) * 0.18
                 + (gaps[n] / max_gap) * 0.27
-                + random.Random(f"{seed_label}:{n}").random() * 0.10
+                + (1 / max_number) * 0.10
             )
             for n in range(1, max_number + 1)
         }
@@ -1041,7 +1040,7 @@ def recommendation_number_scores(
     model = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["balanced"])
     profile = pattern_profile(draws, max_number)
     return {
-        n: score_number(n, profile, model) + random.Random(f"{seed_label}:{profile_name}:{n}").random() * 0.035
+        n: score_number(n, profile, model)
         for n in range(1, max_number + 1)
     }
 
@@ -1065,14 +1064,15 @@ def model_recommendation(
     )
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(24, max_number)]
-    rng = random.Random(f"lotto-lab:{profile_name}:{seed_label}:{','.join(map(str, pool))}")
     candidates: set[tuple[int, ...]] = set()
     candidates.add(tuple(sorted(pool[:pick_count])))
-    for _ in range(420):
-        weighted = sorted(pool, key=lambda n: number_scores[n] + rng.random() * 0.28, reverse=True)
-        candidates.add(tuple(sorted(weighted[:pick_count])))
-        if len(pool) >= pick_count:
-            candidates.add(tuple(sorted(rng.sample(pool, pick_count))))
+    for start in range(max(0, len(pool) - pick_count + 1)):
+        candidates.add(tuple(sorted(pool[start : start + pick_count])))
+    for stride in (2, 3, 4):
+        for offset in range(stride):
+            combo = pool[offset::stride][:pick_count]
+            if len(combo) == pick_count:
+                candidates.add(tuple(sorted(combo)))
 
     def score_combo(combo: tuple[int, ...]) -> float:
         score = sum(number_scores[n] for n in combo) / pick_count
@@ -1169,14 +1169,15 @@ def classic_recommendation(draws: list[dict[str, Any]], max_number: int = 39, pi
     )
 
     pool = sorted(number_scores, key=lambda n: (-number_scores[n], n))[: min(22, max_number)]
-    rng = random.Random(f"lotto-lab:{seed_label}:{','.join(map(str, pool))}")
     candidates: set[tuple[int, ...]] = set()
     candidates.add(tuple(sorted(pool[:pick_count])))
-    for _ in range(260):
-        weighted = sorted(pool, key=lambda n: number_scores[n] + rng.random() * 0.34, reverse=True)
-        candidates.add(tuple(sorted(weighted[:pick_count])))
-        if len(pool) >= pick_count:
-            candidates.add(tuple(sorted(rng.sample(pool, pick_count))))
+    for start in range(max(0, len(pool) - pick_count + 1)):
+        candidates.add(tuple(sorted(pool[start : start + pick_count])))
+    for stride in (2, 3, 4):
+        for offset in range(stride):
+            combo = pool[offset::stride][:pick_count]
+            if len(combo) == pick_count:
+                candidates.add(tuple(sorted(combo)))
 
     def score_combo(combo: tuple[int, ...]) -> float:
         score = sum(number_scores[n] for n in combo) / pick_count
@@ -3148,6 +3149,837 @@ def data_health(game: str, latest: dict[str, Any] | None, history: list[dict[str
         "historyCount": len(history),
         "message": "資料已驗證" if valid_latest and history else "資料不足，暫不更新分析",
     }
+
+
+# ---------------------------------------------------------------------------
+# Formal independent evaluation layer
+# ---------------------------------------------------------------------------
+# The original UI-compatible engine above is intentionally kept intact.  The
+# production entry points below add the audit/reporting layer required by the
+# two-game specification.  Each game has its own model store, prediction
+# store, feature adapter, model names and backtest cache.
+ANALYSIS_ENGINE_VERSION = "2026.08-independent-walkforward-v2"
+MODEL_ENGINE_VERSION = "2026.08-independent-walkforward-v2"
+FORMAL_TRAIN_WINDOW = 300
+FORMAL_SOURCE_WINDOW = 1000
+FORMAL_FULL_EVAL_LIMIT = 700
+FORMAL_PREVIEW_LIMIT = 40
+FORMAL_MODEL_NAMES = {
+    "tw539": ("tw-bayesian", "tw-logistic", "tw-boosted", "tw-markov"),
+    "ca-fantasy5": ("ca-bayesian", "ca-logistic", "ca-transition", "ca-ranker"),
+}
+FORMAL_MODEL_LABELS = {
+    "tw-bayesian": "539 Bayesian 多視窗",
+    "tw-logistic": "539 Logistic 結構模型",
+    "tw-boosted": "539 Boosted 特徵模型",
+    "tw-markov": "539 Markov 轉移模型",
+    "ca-bayesian": "天天樂 Bayesian 多週期",
+    "ca-logistic": "天天樂 Logistic 星期校正",
+    "ca-transition": "天天樂轉移與成對模型",
+    "ca-ranker": "天天樂結構排序模型",
+}
+FORMAL_DB_FILES = {
+    "tw539": ROOT / "data" / "tw539_model_store.json",
+    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_model_store.json",
+}
+FORMAL_HISTORY_FILES = {
+    "tw539": ROOT / "data" / "tw539_database.json",
+    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_database.json",
+}
+FORMAL_PREDICTION_FILES = {
+    "tw539": ROOT / "data" / "tw539_prediction_history.json",
+    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_prediction_history.json",
+}
+FORMAL_BACKTEST_FILES = {
+    "tw539": ROOT / "data" / "tw539_walkforward_cache.json",
+    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_walkforward_cache.json",
+}
+FORMAL_ABLATION_FILES = {
+    "tw539": ROOT / "data" / "tw539_ablation_cache.json",
+    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_ablation_cache.json",
+}
+FORMAL_BACKTEST_JOBS: set[str] = set()
+FORMAL_ABLATION_JOBS: set[str] = set()
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover - old Python fallback
+    ZoneInfo = None
+
+
+def _formal_json_load(path: Path, fallback: Any) -> Any:
+    try:
+        if path.exists():
+            with path.open("r", encoding="utf-8") as handle:
+                value = json.load(handle)
+            return value
+    except (OSError, ValueError, TypeError):
+        pass
+    return fallback
+
+
+def _formal_json_save(path: Path, value: Any) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
+        temporary.replace(path)
+    except OSError:
+        pass
+
+
+def _formal_timezone(game: str) -> str:
+    return "Asia/Taipei" if game == "tw539" else "America/Los_Angeles"
+
+
+def _formal_weekday(date_text: str, game: str) -> str:
+    try:
+        parsed = datetime.strptime(date_text, "%Y-%m-%d")
+        # Source dates are already local draw dates.  Applying the named
+        # timezone documents the rule and prevents Taiwan time leaking into
+        # the California feature adapter.
+        if ZoneInfo:
+            parsed = parsed.replace(tzinfo=ZoneInfo(_formal_timezone(game)))
+        return str(parsed.weekday())
+    except (TypeError, ValueError):
+        return "-1"
+
+
+def _formal_quality_report(game: str, raw_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    valid: list[dict[str, Any]] = []
+    invalid: list[dict[str, Any]] = []
+    periods: dict[str, int] = {}
+    sources: dict[str, int] = {}
+    for index, row in enumerate(raw_rows or []):
+        try:
+            normalized = _formal_enrich_draw(row, game)
+            valid.append(normalized)
+            period = str(normalized.get("period", ""))
+            periods[period] = periods.get(period, 0) + 1
+            source = str(normalized.get("source", "unknown"))
+            sources[source] = sources.get(source, 0) + 1
+        except (TypeError, ValueError) as exc:
+            invalid.append({"index": index, "reason": str(exc)})
+    unique = dedupe_draws(valid)
+    ordered = sorted(unique, key=lambda item: (item.get("date", ""), item.get("period", "")))
+    date_gaps = []
+    for previous, current in zip(ordered, ordered[1:]):
+        try:
+            gap = (datetime.strptime(current["date"], "%Y-%m-%d") - datetime.strptime(previous["date"], "%Y-%m-%d")).days
+            allowed = 4 if game == "tw539" else 2
+            if gap > allowed:
+                date_gaps.append({"from": previous["date"], "to": current["date"], "days": gap})
+        except (KeyError, TypeError, ValueError):
+            continue
+    duplicates = sorted(period for period, count in periods.items() if count > 1)
+    source_policy = "台灣官方資料優先；來源不一致時停用該期更新" if game == "tw539" else "California Fantasy 5 可信來源；來源不一致時停用該期更新"
+    return {
+        "databaseId": f"lotto-lab-{game}-independent",
+        "game": game,
+        "sourcePolicy": source_policy,
+        "timeZone": _formal_timezone(game),
+        "historyCount": len(unique),
+        "rawRowCount": len(raw_rows or []),
+        "validCount": len(valid),
+        "invalidCount": len(invalid),
+        "invalidRows": invalid[:20],
+        "duplicatePeriods": duplicates[:50],
+        "duplicateCount": len(duplicates),
+        "startDate": ordered[0]["date"] if ordered else "",
+        "latestDate": ordered[-1]["date"] if ordered else "",
+        "sourceCounts": sources,
+        "verifiedCount": sum(bool(row.get("verified")) for row in valid),
+        "dateGaps": date_gaps[:50],
+        "anomalies": bool(invalid or duplicates),
+        "schema": ["game", "period", "date", "weekday", "originalNumbers", "numbers", "source", "capturedAt", "dataVersion", "verified"],
+        "note": "日期缺口可能由休市造成；缺口只列出供人工複核，不會自行補猜。" if date_gaps else "未發現超過休市容許範圍的日期缺口。",
+    }
+
+
+def _formal_enrich_draw(row: dict[str, Any], game: str) -> dict[str, Any]:
+    normalized = validate_draw(row)
+    original = row.get("originalNumbers") or row.get("drawOrder") or row.get("numbers", [])
+    return {
+        **normalized,
+        "weekday": _formal_weekday(normalized["date"], game),
+        "originalNumbers": [int(number) for number in original],
+        "sortedNumbers": normalized["numbers"],
+        "capturedAt": row.get("capturedAt") or row.get("fetchedAt") or None,
+        "dataVersion": row.get("dataVersion") or "source-row-v1",
+        "verified": True,
+    }
+
+
+def _formal_save_history(game: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Persist the independently normalized source rows for audit/rebuilds."""
+    enriched = []
+    for row in rows or []:
+        try:
+            enriched.append(_formal_enrich_draw(row, game))
+        except (TypeError, ValueError):
+            continue
+    _formal_json_save(FORMAL_HISTORY_FILES[game], enriched)
+    return {"databaseId": f"lotto-lab-{game}-history", "rowCount": len(enriched), "path": str(FORMAL_HISTORY_FILES[game]), "schemaVersion": "v2"}
+
+
+def _formal_count_window(rows: list[dict[str, Any]], window: int, max_number: int = 39) -> dict[int, int]:
+    return _mm_window_counts(rows, max_number, window)
+
+
+def _formal_ca_features(rows: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
+    ordered = _mm_rows(rows, max_number=max_number, limit=5000)
+    windows = (7, 14, 30, 60, 120, 300, 1000, 5000)
+    counts = {window: _formal_count_window(ordered, window, max_number) for window in windows}
+    latest = set(ordered[-1]["numbers"]) if ordered else set()
+    pair_counts: dict[tuple[int, int], int] = {}
+    weekday_counts: dict[str, dict[int, int]] = {str(day): {number: 0 for number in range(1, max_number + 1)} for day in range(7)}
+    for row in ordered:
+        values = sorted(row["numbers"])
+        for pair in itertools.combinations(values, 2):
+            pair_counts[pair] = pair_counts.get(pair, 0) + 1
+        day = _formal_weekday(row["date"], "ca-fantasy5")
+        for number in values:
+            weekday_counts[day][number] += 1
+    transition = {number: 0 for number in range(1, max_number + 1)}
+    repeat_counts = {number: 0 for number in range(1, max_number + 1)}
+    for newer, older in zip(ordered[1:], ordered[:-1]):
+        older_set = set(older["numbers"])
+        newer_set = set(newer["numbers"])
+        for number in newer_set:
+            if number in older_set:
+                transition[number] += 1
+        for number in older_set & newer_set:
+            repeat_counts[number] += 1
+    last_day = _formal_weekday(ordered[-1]["date"], "ca-fantasy5") if ordered else "-1"
+    return {"ordered": ordered, "windows": counts, "latest": latest, "pairCounts": pair_counts, "weekdayCounts": weekday_counts, "currentWeekday": last_day, "transition": transition, "repeatCounts": repeat_counts}
+
+
+def _formal_ca_model_scores(rows: list[dict[str, Any]], max_number: int = 39) -> tuple[dict[str, dict[int, float]], dict[str, Any], dict[str, Any]]:
+    base_stats = _mm_stats(rows, max_number)
+    extra = _formal_ca_features(rows, max_number)
+    ordered = extra["ordered"]
+    current_day = extra["currentWeekday"]
+    windows = extra["windows"]
+    all_counts = windows[5000]
+    maximum = max(max(all_counts.values() or [1]), 1)
+    pair_support = {number: 0 for number in range(1, max_number + 1)}
+    for (left, right), count in extra["pairCounts"].items():
+        if left in extra["latest"]:
+            pair_support[right] += count
+        if right in extra["latest"]:
+            pair_support[left] += count
+    max_pair = max(pair_support.values() or [1])
+    models = {name: {} for name in FORMAL_MODEL_NAMES["ca-fantasy5"]}
+    features = {}
+    for number in range(1, max_number + 1):
+        short = sum(windows[window].get(number, 0) / max(1, window) for window in (7, 14, 30)) / 3
+        medium = sum(windows[window].get(number, 0) / max(1, window) for window in (60, 120, 300)) / 3
+        long = all_counts.get(number, 0) / max(1, len(ordered) * 5 / max_number)
+        day_rate = extra["weekdayCounts"].get(current_day, {}).get(number, 0) / max(1, sum(extra["weekdayCounts"].get(current_day, {}).values()) / max_number)
+        omission = base_stats["omission"].get(number, len(ordered))
+        omission_signal = 0.72 if 6 <= omission <= 14 else 0.42 if omission < 6 else 0.58 if omission <= 20 else 0.3
+        recent_repeat = 0.75 if number in extra["latest"] and base_stats["currentRun"].get(number, 0) < 2 else 0.25 if base_stats["currentRun"].get(number, 0) >= 2 else 0.45
+        pair_signal = _mm_clamp(pair_support[number] / max_pair)
+        features[number] = {"short": _mm_clamp(short * 8), "medium": _mm_clamp(medium * 8), "long": _mm_clamp(long), "weekday": _mm_clamp(day_rate / 2), "omission": omission_signal, "pair": pair_signal, "repeat": recent_repeat}
+        row = features[number]
+        models["ca-bayesian"][number] = _mm_clamp(0.46 * row["short"] + 0.24 * row["medium"] + 0.12 * row["long"] + 0.10 * row["omission"] + 0.08 * row["pair"])
+        logistic = -0.92 + 1.2 * row["short"] + 0.72 * row["medium"] + 0.38 * row["weekday"] + 0.32 * row["pair"] + 0.2 * row["omission"]
+        models["ca-logistic"][number] = _mm_clamp(1 / (1 + math.exp(-max(-12, min(12, logistic)))))
+        models["ca-transition"][number] = _mm_clamp(0.36 * row["pair"] + 0.28 * row["repeat"] + 0.2 * row["omission"] + 0.16 * row["short"])
+        models["ca-ranker"][number] = _mm_clamp(0.34 * row["short"] + 0.2 * row["medium"] + 0.16 * row["weekday"] + 0.16 * row["pair"] + 0.14 * row["repeat"])
+    return models, features, {"stats": base_stats, "caFeatures": extra, "featureKeys": ["short", "medium", "long", "weekday", "omission", "pair", "repeat"], "modelType": "california-specialized"}
+
+
+def _formal_scores(game: str, rows: list[dict[str, Any]], max_number: int = 39) -> tuple[dict[str, dict[int, float]], dict[int, dict[str, float]], dict[str, Any]]:
+    if game == "ca-fantasy5":
+        return _formal_ca_model_scores(rows, max_number)
+    stats = _mm_stats(rows, max_number)
+    models, features, meta = _mm_model_scores(stats, max_number)
+    renamed = {f"tw-{name}": values for name, values in models.items()}
+    return renamed, features, {"stats": stats, **meta, "modelType": "taiwan-specialized"}
+
+
+def _formal_scores_without_feature(game: str, rows: list[dict[str, Any]], disabled: str, max_number: int = 39) -> dict[str, dict[int, float]]:
+    """Re-score one training slice with one feature family neutralized.
+
+    Neutralizing a feature to its midpoint keeps the same walk-forward slice
+    and model equations, so the comparison measures the feature contribution
+    without introducing a second data split or future information.
+    """
+    if game == "ca-fantasy5":
+        base_models, features, _meta = _formal_ca_model_scores(rows, max_number)
+        neutralize = {
+            "heat": ("short", "medium", "long"),
+            "omission": ("omission",),
+            "pair": ("pair",),
+            "transition": ("repeat",),
+            "weekday": ("weekday",),
+            "structure": (),
+        }.get(disabled, ())
+        if not neutralize:
+            return base_models
+        adjusted = {number: {key: (0.5 if key in neutralize else value) for key, value in row.items()} for number, row in features.items()}
+        models = {name: {} for name in FORMAL_MODEL_NAMES[game]}
+        for number, row in adjusted.items():
+            models["ca-bayesian"][number] = _mm_clamp(0.46 * row["short"] + 0.24 * row["medium"] + 0.12 * row["long"] + 0.10 * row["omission"] + 0.08 * row["pair"])
+            logistic = -0.92 + 1.2 * row["short"] + 0.72 * row["medium"] + 0.38 * row["weekday"] + 0.32 * row["pair"] + 0.2 * row["omission"]
+            models["ca-logistic"][number] = _mm_clamp(1 / (1 + math.exp(-max(-12, min(12, logistic)))))
+            models["ca-transition"][number] = _mm_clamp(0.36 * row["pair"] + 0.28 * row["repeat"] + 0.2 * row["omission"] + 0.16 * row["short"])
+            models["ca-ranker"][number] = _mm_clamp(0.34 * row["short"] + 0.2 * row["medium"] + 0.16 * row["weekday"] + 0.16 * row["pair"] + 0.14 * row["repeat"])
+        return models
+
+    stats = _mm_stats(rows, max_number)
+    keys, features = _mm_feature_rows(stats, max_number)
+    groups = {
+        "heat": ("recent30", "recent100", "recent300", "recent1000", "recent5000"),
+        "omission": ("omissionFit", "averageOmissionFit", "maximumOmissionFit", "returnRate"),
+        "pair": ("cooccurrence",),
+        "transition": ("previousRepeat", "neighborSignal", "repeatRate"),
+        "weekday": (),
+        "structure": ("tailBalance", "oddBalance", "sizeBalance", "routeBalance", "primeBalance", "zoneBalance"),
+    }
+    neutralize = set(groups.get(disabled, ()))
+    if disabled == "weekday":
+        return {f"tw-{name}": values for name, values in _mm_model_scores(stats, max_number)[0].items()}
+    adjusted = {number: {key: (0.5 if key in neutralize else value) for key, value in row.items()} for number, row in features.items()}
+    logistic = _mm_fit_logistic(adjusted, keys, stats)
+    models = {name: {} for name in MODEL_NAMES}
+    for number, row in adjusted.items():
+        windows_score = 0.34 * row["recent30"] + 0.26 * row["recent100"] + 0.18 * row["recent300"] + 0.13 * row["recent1000"] + 0.09 * row["recent5000"]
+        models["bayesian"][number] = _mm_clamp(windows_score * 0.65 + row["returnRate"] * 0.12 + row["omissionFit"] * 0.12 + row["tailBalance"] * 0.11)
+        logistic_value = logistic["intercept"] + sum(logistic[key] * row[key] for key in keys)
+        models["logistic"][number] = _mm_clamp(1 / (1 + math.exp(-max(-12, min(12, logistic_value)))))
+        models["boosted"][number] = _mm_clamp(0.42 * windows_score + 0.18 * row["cooccurrence"] + 0.15 * row["zoneBalance"] + 0.13 * row["tailBalance"] + 0.12 * row["omissionFit"])
+        transition = 0.35 * row["neighborSignal"] + 0.25 * row["returnRate"] + 0.2 * row["repeatRate"] + 0.2 * row["previousRepeat"]
+        models["markov"][number] = _mm_clamp(transition * 0.68 + windows_score * 0.32)
+    return {f"tw-{name}": values for name, values in models.items()}
+
+
+def _formal_ablation_preview(rows: list[dict[str, Any]], game: str, max_number: int = 39) -> dict[str, Any]:
+    """Measure feature contribution on the same latest out-of-sample slices."""
+    ordered = _mm_rows(rows, max_number=max_number, limit=FORMAL_SOURCE_WINDOW)
+    if len(ordered) <= FORMAL_TRAIN_WINDOW:
+        return {"status": "insufficient", "testedCount": 0, "note": "至少需要300期訓練資料。"}
+    targets = list(range(FORMAL_TRAIN_WINDOW, len(ordered)))[-min(FORMAL_PREVIEW_LIMIT, len(ordered) - FORMAL_TRAIN_WINDOW):]
+    groups = ["heat", "omission", "pair", "transition", "weekday", "structure"]
+    scores_by_variant: dict[str, list[int]] = {"full": [], **{group: [] for group in groups}}
+    weights = _formal_default_weights(game)
+    for target_index in targets:
+        train = ordered[max(0, target_index - 5000):target_index]
+        actual = set(ordered[target_index]["numbers"])
+        for variant in scores_by_variant:
+            model_scores = _formal_scores(game, train, max_number)[0] if variant == "full" else _formal_scores_without_feature(game, train, variant, max_number)
+            ensemble = {number: sum(weights[name] * model_scores[name][number] for name in FORMAL_MODEL_NAMES[game]) for number in range(1, max_number + 1)}
+            pool = sorted(ensemble, key=lambda number: (-ensemble[number], number))[:15]
+            scores_by_variant[variant].append(len(set(pool) & actual))
+    full_average = sum(scores_by_variant["full"]) / max(1, len(targets))
+    comparisons = {}
+    for variant in groups:
+        values = scores_by_variant[variant]
+        average = sum(values) / max(1, len(values))
+        comparisons[variant] = {"averageHit15": round(average, 4), "coverageRate15": round(sum(value >= 1 for value in values) / max(1, len(values)) * 100, 2), "deltaVsFull": round(average - full_average, 4), "interpretation": "可能有幫助，仍需正式全量驗證" if average < full_average else "目前未顯示提升，不宣稱重要"}
+    return {"status": "measured-preview", "testedCount": len(targets), "window": FORMAL_SOURCE_WINDOW, "baselineAverageHit15": round(full_average, 4), "comparisons": comparisons, "method": "同一組 walk-forward 目標期；將單一特徵族中性化後重算，非事後挑選。", "note": "這是預覽消融；正式升格仍以完整1000期 out-of-sample 結果為準。"}
+
+
+def _formal_ablation_signature(rows: list[dict[str, Any]], game: str, max_number: int = 39) -> str:
+    ordered = _mm_rows(rows, max_number=max_number, limit=FORMAL_SOURCE_WINDOW)
+    first = ordered[0]["period"] if ordered else "empty"
+    last = ordered[-1]["period"] if ordered else "empty"
+    return f"{game}:{MODEL_ENGINE_VERSION}:ablation:{len(ordered)}:{first}:{last}"
+
+
+def _formal_start_ablation(rows: list[dict[str, Any]], game: str, signature: str, max_number: int) -> None:
+    with MODEL_STATE_LOCK:
+        if signature in FORMAL_ABLATION_JOBS:
+            return
+        FORMAL_ABLATION_JOBS.add(signature)
+
+    def run() -> None:
+        try:
+            result = _formal_ablation_preview(rows, game, max_number)
+            _formal_json_save(FORMAL_ABLATION_FILES[game], {"signature": signature, "result": result, "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+        except Exception as exc:
+            print(f"formal ablation error ({game}): {exc}")
+        finally:
+            with MODEL_STATE_LOCK:
+                FORMAL_ABLATION_JOBS.discard(signature)
+
+    threading.Thread(target=run, name=f"formal-ablation-{game}", daemon=True).start()
+
+
+def _formal_ablation(rows: list[dict[str, Any]], game: str, max_number: int = 39) -> dict[str, Any]:
+    signature = _formal_ablation_signature(rows, game, max_number)
+    cached_result = _formal_json_load(FORMAL_ABLATION_FILES[game], {})
+    if isinstance(cached_result, dict) and cached_result.get("signature") == signature and cached_result.get("result"):
+        return {**cached_result["result"], "cacheStatus": "complete", "cacheSignature": signature}
+    _formal_start_ablation(rows, game, signature, max_number)
+    return {"status": "warming", "testedCount": 0, "cacheStatus": "warming", "cacheSignature": signature, "note": "消融實驗正在背景建立；完成後才會報告特徵是否真的提升命中率。"}
+
+
+def _formal_default_weights(game: str) -> dict[str, float]:
+    names = FORMAL_MODEL_NAMES[game]
+    defaults = {"tw539": [0.31, 0.27, 0.24, 0.18], "ca-fantasy5": [0.29, 0.24, 0.24, 0.23]}[game]
+    return {name: value for name, value in zip(names, defaults)}
+
+
+def _formal_cap_weights(weights: dict[str, float], cap: float = 0.55) -> dict[str, float]:
+    names = list(weights)
+    raw = {name: max(0.04, float(weights.get(name, 0))) for name in names}
+    total = sum(raw.values()) or 1.0
+    values = {name: raw[name] / total for name in names}
+    for _ in range(3):
+        overflow = sum(max(0.0, values[name] - cap) for name in names)
+        if not overflow:
+            break
+        capped = [name for name in names if values[name] >= cap]
+        for name in capped:
+            values[name] = cap
+        others = [name for name in names if name not in capped]
+        other_total = sum(values[name] for name in others) or 1.0
+        for name in others:
+            values[name] += overflow * values[name] / other_total
+    total = sum(values.values()) or 1.0
+    return {name: round(values[name] / total, 6) for name in names}
+
+
+def _formal_weights_from_profiles(game: str, profiles: list[dict[str, Any]]) -> dict[str, float]:
+    defaults = _formal_default_weights(game)
+    if not profiles:
+        return defaults
+    raw = {}
+    for profile in profiles:
+        name = profile.get("id")
+        if name not in defaults:
+            continue
+        short = _formal_safe_number(profile.get("recent100AverageHit15", profile.get("averageHit15", 0)))
+        long = _formal_safe_number(profile.get("allHistoryAverageHit15", profile.get("averageHit15", 0)))
+        calibration = 1 - _formal_safe_number(profile.get("expectedCalibrationError", 0.5))
+        stability = _formal_safe_number(profile.get("stability", 0.5))
+        value = 0.58 * short + 0.3 * long + 0.08 * calibration + 0.04 * stability
+        if profile.get("status") == "downweighted":
+            value *= 0.7
+        if profile.get("status") == "retired":
+            value *= 0.2
+        raw[name] = max(0.04, value)
+    for name, value in defaults.items():
+        raw.setdefault(name, value)
+    return _formal_cap_weights(raw)
+
+
+def _formal_safe_number(value: Any, default: float = 0.0) -> float:
+    try:
+        value = float(value)
+        return value if math.isfinite(value) else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _formal_soft_calibrate(score: float, bins: list[list[int]], base_rate: float = 5 / 39) -> float:
+    index = min(9, max(0, int(_mm_clamp(score) * 10)))
+    count, hits = bins[index]
+    if count < 20:
+        return base_rate
+    return _mm_clamp((hits + 2 * base_rate) / (count + 2), 0.001, 0.999)
+
+
+def _formal_observe_probability(score: float, label: int, bins: list[list[int]]) -> None:
+    index = min(9, max(0, int(_mm_clamp(score) * 10)))
+    bins[index][0] += 1
+    bins[index][1] += int(label)
+
+
+def _formal_metric_summary(acc: dict[str, Any], window: int | None = None) -> dict[str, Any]:
+    events = acc.get("events", [])
+    if window:
+        events = events[-window:]
+    count = len(events)
+    if not count:
+        return {"testedCount": 0}
+    metrics: dict[str, Any] = {"testedCount": count}
+    for tier in (5, 8, 10, 15):
+        values = [int(event["hits"].get(str(tier), 0)) for event in events]
+        distribution = {str(hit): sum(value == hit for value in values) / count * 100 for hit in range(6)}
+        metrics[f"averageHit{tier}"] = round(sum(values) / count, 4)
+        metrics[f"hitRate{tier}"] = round(sum(value >= 1 for value in values) / count * 100, 2)
+        metrics[f"precisionAt{tier}"] = round(sum(value / tier for value in values) / count * 100, 2)
+        metrics[f"recallAt{tier}"] = round(sum(value / 5 for value in values) / count * 100, 2)
+        metrics[f"distribution{tier}"] = {key: round(value, 2) for key, value in distribution.items()}
+    brier = [event.get("brier") for event in events if event.get("brier") is not None]
+    logloss = [event.get("logloss") for event in events if event.get("logloss") is not None]
+    metrics["brierScore"] = round(sum(brier) / len(brier), 6) if brier else None
+    metrics["logLoss"] = round(sum(logloss) / len(logloss), 6) if logloss else None
+    metrics["distribution"] = metrics["distribution5"]
+    metrics["averageHit"] = metrics["averageHit5"]
+    metrics["onePlusRate"] = metrics["hitRate5"]
+    metrics["twoPlusRate"] = round(sum(int(event["hits"].get("5", 0)) >= 2 for event in events) / count * 100, 2)
+    metrics["threePlusRate"] = round(sum(int(event["hits"].get("5", 0)) >= 3 for event in events) / count * 100, 2)
+    metrics["bestHit"] = max(int(event["hits"].get("5", 0)) for event in events)
+    return metrics
+
+
+def _formal_expected_random(max_number: int = 39) -> dict[str, Any]:
+    # Closed-form expectation; no random generator is used in production or
+    # in this baseline.  This is the correct comparison for a uniform draw.
+    total = math.comb(max_number, 5)
+    result = {"model": "random-expected", "label": "均勻隨機基準（理論期望）", "probability": round(5 / max_number, 6), "testedCount": 0}
+    for tier in (5, 8, 10, 15):
+        expected_hit = tier * 5 / max_number
+        hit_rate = 1 - (math.comb(max_number - 5, tier) / total if max_number - 5 >= tier else 0)
+        result[f"averageHit{tier}"] = round(expected_hit, 4)
+        result[f"hitRate{tier}"] = round(hit_rate * 100, 2)
+        result[f"precisionAt{tier}"] = round(expected_hit / tier * 100, 2)
+        result[f"recallAt{tier}"] = round(expected_hit / 5 * 100, 2)
+    p = 5 / max_number
+    result["brierScore"] = round(p * (1 - p), 6)
+    result["logLoss"] = round(-(p * math.log(p) + (1 - p) * math.log(1 - p)), 6)
+    result["note"] = "理論期望，不是實際隨機抽樣；用於避免挑選最好看的回測區間。"
+    return result
+
+
+def _formal_baseline_scores(rows: list[dict[str, Any]], max_number: int = 39) -> dict[str, dict[int, float]]:
+    ordered = _mm_rows(rows, max_number=max_number, limit=5000)
+    all_counts = _formal_count_window(ordered, 5000, max_number)
+    hot10 = _formal_count_window(ordered, 10, max_number)
+    hot30 = _formal_count_window(ordered, 30, max_number)
+    omission = _mm_stats(ordered, max_number)["omission"]
+    return {
+        "all-frequency": {number: all_counts[number] / max(1, len(ordered)) for number in range(1, max_number + 1)},
+        "hot-10": {number: hot10[number] / 10 for number in range(1, max_number + 1)},
+        "hot-30": {number: hot30[number] / 30 for number in range(1, max_number + 1)},
+        "omission": {number: omission[number] / max(1, len(ordered)) for number in range(1, max_number + 1)},
+        "uniform": {number: 1 / max_number for number in range(1, max_number + 1)},
+    }
+
+
+def _formal_model_profile(name: str, scores: dict[str, Any], events: list[dict[str, Any]], qualified: bool) -> dict[str, Any]:
+    acc = {"events": events}
+    all_metrics = _formal_metric_summary(acc)
+    recent100 = _formal_metric_summary(acc, 100)
+    recent300 = _formal_metric_summary(acc, 300)
+    recent30 = _formal_metric_summary(acc, 30)
+    recent60 = _formal_metric_summary(acc, 60)
+    recent120 = _formal_metric_summary(acc, 120)
+    recent500 = _formal_metric_summary(acc, 500)
+    recent1000 = _formal_metric_summary(acc, 1000)
+    average = all_metrics.get("averageHit15", 0)
+    short = recent100.get("averageHit15", average)
+    status = "active"
+    if qualified and short < average * 0.8:
+        status = "downweighted"
+    if qualified and len(events) >= 200 and _formal_metric_summary(acc, 200).get("averageHit15", 0) < average * 0.8:
+        status = "retired"
+    stability = 1 - min(1, abs(short - average) / max(1, average))
+    return {
+        "id": name,
+        "label": FORMAL_MODEL_LABELS.get(name, name),
+        "features": "模型專用特徵，不與另一彩種共用",
+        "trainingWindows": [30, 100, 300, 1000, 5000],
+        "testedCount": len(events),
+        "averageHit": all_metrics.get("averageHit5", 0),
+        "averageHit5": all_metrics.get("averageHit5", 0),
+        "averageHit15": average,
+        "onePlusRate": all_metrics.get("hitRate5", 0),
+        "hitRate15": all_metrics.get("hitRate15", 0),
+        "recent30AverageHit15": recent30.get("averageHit15", 0),
+        "recent60AverageHit15": recent60.get("averageHit15", average),
+        "recent100AverageHit15": recent100.get("averageHit15", 0),
+        "recent120AverageHit15": recent120.get("averageHit15", average),
+        "recent300AverageHit15": recent300.get("averageHit15", 0),
+        "recent500AverageHit15": recent500.get("averageHit15", average),
+        "recent1000AverageHit15": recent1000.get("averageHit15", average),
+        "allHistoryAverageHit15": average,
+        "brierScore": all_metrics.get("brierScore"),
+        "logLoss": all_metrics.get("logLoss"),
+        "bestHit": all_metrics.get("bestHit", 0),
+        "expectedCalibrationError": _formal_safe_number(scores.get("expectedCalibrationError", 0.5)),
+        "stability": round(stability, 4),
+        "status": status,
+        "qualified": qualified,
+    }
+
+
+def _formal_significance(events: list[dict[str, Any]], random_average: float, tier: int = 15) -> dict[str, Any]:
+    values = [float(event["hits"].get(str(tier), 0)) for event in events]
+    if len(values) < 2:
+        return {"status": "insufficient", "deltaAverageHit": None, "confidenceInterval95": None}
+    average = sum(values) / len(values)
+    variance = sum((value - average) ** 2 for value in values) / (len(values) - 1)
+    margin = 1.96 * math.sqrt(variance / len(values))
+    low, high = average - margin - random_average, average + margin - random_average
+    return {
+        "status": "evidence_not_significant" if low <= 0 <= high else "directional_only",
+        "deltaAverageHit": round(average - random_average, 4),
+        "confidenceInterval95": [round(low, 4), round(high, 4)],
+        "method": "walk-forward mean with normal-approximation interval; no random permutation is used",
+    }
+
+
+def _formal_walkforward(rows: list[dict[str, Any]], game: str, max_number: int = 39, target_limit: int | None = None) -> dict[str, Any]:
+    ordered = _mm_rows(rows, max_number=max_number, limit=FORMAL_SOURCE_WINDOW)
+    if len(ordered) <= FORMAL_TRAIN_WINDOW:
+        return {"testedCount": 0, "sourceWindow": len(ordered), "trainWindow": FORMAL_TRAIN_WINDOW, "cacheStatus": "insufficient", "method": "資料不足，至少需要300期訓練資料。", "modelProfiles": [], "baselineModels": {}, "tierMetrics": {}}
+    start = FORMAL_TRAIN_WINDOW
+    indices = list(range(start, len(ordered)))
+    if target_limit:
+        indices = indices[-target_limit:]
+    names = FORMAL_MODEL_NAMES[game]
+    model_acc = {name: {"events": []} for name in names}
+    baseline_acc = {name: {"events": []} for name in ("all-frequency", "hot-10", "hot-30", "omission", "uniform")}
+    ensemble_acc = {"events": []}
+    bins = {name: [[0, 0] for _ in range(10)] for name in [*names, "ensemble"]}
+    weights = _formal_default_weights(game)
+    recent_rows = []
+    for target_index in indices:
+        train = ordered[max(0, target_index - 5000):target_index]
+        model_scores, _features, meta = _formal_scores(game, train, max_number)
+        baseline_scores = _formal_baseline_scores(train, max_number)
+        weighted_scores = {number: sum(weights[name] * model_scores[name][number] for name in names) for number in range(1, max_number + 1)}
+        pools = {name: sorted(scores, key=lambda number: (-scores[number], number)) for name, scores in {**model_scores, **baseline_scores, "ensemble": weighted_scores}.items()}
+        actual = set(ordered[target_index]["numbers"])
+        for name in names:
+            picks = pools[name]
+            hits = {str(tier): len(set(picks[:tier]) & actual) for tier in (5, 8, 10, 15)}
+            probs = [_formal_soft_calibrate(model_scores[name][number], bins[name]) for number in range(1, max_number + 1)]
+            brier = sum((prob - int(number in actual)) ** 2 for number, prob in zip(range(1, max_number + 1), probs)) / max_number
+            logloss = -sum((math.log(max(0.001, min(0.999, prob))) if number in actual else math.log(max(0.001, min(0.999, 1 - prob)))) for number, prob in zip(range(1, max_number + 1), probs)) / max_number
+            model_acc[name]["events"].append({"hits": hits, "brier": brier, "logloss": logloss})
+            for number in range(1, max_number + 1):
+                _formal_observe_probability(model_scores[name][number], int(number in actual), bins[name])
+        ensemble_picks = pools["ensemble"]
+        ensemble_hits = {str(tier): len(set(ensemble_picks[:tier]) & actual) for tier in (5, 8, 10, 15)}
+        ensemble_probs = [_formal_soft_calibrate(weighted_scores[number], bins["ensemble"]) for number in range(1, max_number + 1)]
+        ensemble_brier = sum((prob - int(number in actual)) ** 2 for number, prob in zip(range(1, max_number + 1), ensemble_probs)) / max_number
+        ensemble_logloss = -sum((math.log(max(0.001, min(0.999, prob))) if number in actual else math.log(max(0.001, min(0.999, 1 - prob)))) for number, prob in zip(range(1, max_number + 1), ensemble_probs)) / max_number
+        ensemble_acc["events"].append({"hits": ensemble_hits, "brier": ensemble_brier, "logloss": ensemble_logloss})
+        for number in range(1, max_number + 1):
+            _formal_observe_probability(weighted_scores[number], int(number in actual), bins["ensemble"])
+        for name, scores in baseline_scores.items():
+            picks = pools[name]
+            baseline_acc[name]["events"].append({"hits": {str(tier): len(set(picks[:tier]) & actual) for tier in (5, 8, 10, 15)}, "brier": None, "logloss": None})
+        if len(recent_rows) < 10:
+            recent_rows.append({"date": ordered[target_index]["date"], "period": ordered[target_index]["period"], "pick": ensemble_picks[:5], "candidate15": ensemble_picks[:15], "actual": ordered[target_index]["numbers"], "hits": ensemble_hits["5"]})
+        # Exponentially weighted online update, capped later.  It changes
+        # slowly and only after an out-of-sample target has been observed.
+        model_quality = {}
+        for name in names:
+            model_quality[name] = 0.55 * (sum(event["hits"]["15"] for event in model_acc[name]["events"][-30:]) / max(1, len(model_acc[name]["events"][-30:]))) + 0.45 * (sum(event["hits"]["15"] for event in model_acc[name]["events"]) / len(model_acc[name]["events"]))
+        weights = _formal_cap_weights({name: 0.8 * weights[name] + 0.2 * max(0.04, model_quality[name]) for name in names})
+    tested = len(ensemble_acc["events"])
+    qualified = len(ordered) >= FORMAL_SOURCE_WINDOW
+    ensemble_metrics = _formal_metric_summary(ensemble_acc)
+    tier_metrics = {str(tier): {"testedCount": tested, "hitRate": ensemble_metrics.get(f"hitRate{tier}", 0), "averageHit": ensemble_metrics.get(f"averageHit{tier}", 0), "twoPlusRate": round(sum(event["hits"][str(tier)] >= 2 for event in ensemble_acc["events"]) / max(1, tested) * 100, 2), "threePlusRate": round(sum(event["hits"][str(tier)] >= 3 for event in ensemble_acc["events"]) / max(1, tested) * 100, 2), "bestHit": max([event["hits"][str(tier)] for event in ensemble_acc["events"]] or [0])} for tier in (5, 8, 10, 15)}
+    def profile_ece(name: str) -> float:
+        values = []
+        for index in range(10):
+            count, hits = bins[name][index]
+            if count:
+                values.append(abs((index + 0.5) / 10 - hits / count) * count)
+        total = sum(bins[name][index][0] for index in range(10))
+        return sum(values) / max(1, total)
+
+    profiles = []
+    for name in names:
+        profiles.append(_formal_model_profile(name, {"expectedCalibrationError": profile_ece(name)}, model_acc[name]["events"], qualified))
+    baseline_models = {name: _formal_metric_summary(acc) for name, acc in baseline_acc.items()}
+    for name in tuple(baseline_models):
+        baseline_models[name]["windows"] = {str(window): _formal_metric_summary(baseline_acc[name], window) for window in (30, 60, 120, 300, 500, 1000)}
+    baseline_models["random-expected"] = _formal_expected_random(max_number)
+    best_baseline = max((baseline_models[name].get("averageHit15", 0) for name in baseline_models), default=0)
+    monitoring_values = [event["hits"]["15"] for event in ensemble_acc["events"]]
+    recent20 = monitoring_values[-20:]
+    historical_average = sum(monitoring_values) / max(1, len(monitoring_values))
+    calibration_bins = []
+    for index in range(10):
+        count, hits = bins["ensemble"][index]
+        calibration_bins.append({"bin": index, "count": count, "predicted": round((index + 0.5) / 10, 3), "observed": round(hits / count, 4) if count else None})
+    ece_values = [abs(item["predicted"] - item["observed"]) * item["count"] for item in calibration_bins if item["observed"] is not None]
+    ece = sum(ece_values) / max(1, sum(item["count"] for item in calibration_bins if item["observed"] is not None))
+    return {**ensemble_metrics, "trainWindow": FORMAL_TRAIN_WINDOW, "sourceWindow": len(ordered), "testedCount": tested, "qualificationHistory": len(ordered), "qualifiedForPromotion": qualified, "cacheStatus": "complete", "tierMetrics": tier_metrics, "windowMetrics": {str(window): _formal_metric_summary(ensemble_acc, window) for window in (30, 60, 120, 300, 500, 1000)}, "modelProfiles": profiles, "baselineModels": baseline_models, "baselineBestAverageHit15": round(best_baseline, 4), "baselineComparison": {"complexAverageHit15": ensemble_metrics.get("averageHit15", 0), "bestSimpleAverageHit15": round(best_baseline, 4), "delta": round(ensemble_metrics.get("averageHit15", 0) - best_baseline, 4), "status": "尚未證明優於簡單基準" if ensemble_metrics.get("averageHit15", 0) <= best_baseline else "方向性優勢，仍需更多期數驗證"}, "significance": _formal_significance(ensemble_acc["events"], 15 * 5 / max_number, 15), "recentRows": recent_rows, "dynamicWeights": weights, "monitoring": {"recent20AverageHit15": round(sum(recent20) / max(1, len(recent20)), 4), "historicalAverageHit15": round(historical_average, 4), "warning": bool(len(recent20) >= 20 and sum(recent20) / 20 < historical_average * 0.8)}, "calibration": {"status": "empirical-online-calibration", "method": "逐期只用已發生的 out-of-sample 結果建立分箱校準；前20筆使用均勻基準", "expectedCalibrationError": round(ece, 6), "maximumCalibrationError": round(max([abs(item["predicted"] - item["observed"]) for item in calibration_bins if item["observed"] is not None] or [0]), 6), "reliabilityBins": calibration_bins}, "weightImpact": {name: {"averageHit15Impact": round(ensemble_metrics.get("averageHit15", 0) - _formal_metric_summary(model_acc[name]).get("averageHit15", 0), 4), "learnedWeight": round(weights[name] * 100, 2)} for name in names}, "method": f"{game} walk-forward：每個目標期只用之前最多5000期，至少以前{FORMAL_TRAIN_WINDOW}期訓練；使用最近1000期作正式驗證，共{tested}期。", "note": "所有特徵、權重與校準都只在目標期之前計算；無未來資料回填。"}
+
+
+def _formal_backtest_signature(rows: list[dict[str, Any]], game: str, max_number: int = 39) -> str:
+    ordered = _mm_rows(rows, max_number=max_number, limit=FORMAL_SOURCE_WINDOW)
+    first = ordered[0]["period"] if ordered else "empty"
+    last = ordered[-1]["period"] if ordered else "empty"
+    return f"{game}:{MODEL_ENGINE_VERSION}:{len(ordered)}:{first}:{last}"
+
+
+def _formal_backtest_cached(game: str, signature: str) -> dict[str, Any] | None:
+    value = _formal_json_load(FORMAL_BACKTEST_FILES[game], {})
+    if isinstance(value, dict) and value.get("signature") == signature and value.get("result", {}).get("testedCount", 0):
+        return {**value["result"], "cacheSignature": signature, "cacheStatus": "complete"}
+    return None
+
+
+def _formal_start_backtest(rows: list[dict[str, Any]], game: str, signature: str, max_number: int, pick_count: int) -> None:
+    with MODEL_STATE_LOCK:
+        if signature in FORMAL_BACKTEST_JOBS:
+            return
+        FORMAL_BACKTEST_JOBS.add(signature)
+    def run() -> None:
+        try:
+            result = _formal_walkforward(rows, game, max_number)
+            _formal_json_save(FORMAL_BACKTEST_FILES[game], {"signature": signature, "result": result, "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+        except Exception as exc:
+            print(f"formal walkforward error ({game}): {exc}")
+        finally:
+            with MODEL_STATE_LOCK:
+                FORMAL_BACKTEST_JOBS.discard(signature)
+    threading.Thread(target=run, name=f"formal-walkforward-{game}", daemon=True).start()
+
+
+def _formal_backtest(rows: list[dict[str, Any]], game: str, max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    ordered = _mm_rows(rows, max_number=max_number, limit=FORMAL_SOURCE_WINDOW)
+    signature = _formal_backtest_signature(ordered, game, max_number)
+    cached_result = _formal_backtest_cached(game, signature)
+    if cached_result:
+        return cached_result
+    _formal_start_backtest(ordered, game, signature, max_number, pick_count)
+    preview = _formal_walkforward(ordered, game, max_number, target_limit=min(FORMAL_PREVIEW_LIMIT, max(0, len(ordered) - FORMAL_TRAIN_WINDOW)))
+    preview["cacheStatus"] = "warming"
+    preview["cacheSignature"] = signature
+    preview["qualifiedForPromotion"] = False
+    preview["method"] = "正式1000期 walk-forward 正在背景建立；目前只顯示不升格的40期預覽。"
+    return preview
+
+
+def _formal_probability_for_current(score: float, backtest: dict[str, Any]) -> tuple[float | None, str]:
+    calibration = backtest.get("calibration", {})
+    if calibration.get("status") != "empirical-online-calibration":
+        return None, "未校準"
+    bins = calibration.get("reliabilityBins", [])
+    index = min(9, max(0, int(_mm_clamp(score) * 10)))
+    item = bins[index] if index < len(bins) else {}
+    observed = item.get("observed")
+    return (float(observed) if observed is not None else None), "經驗校準" if observed is not None else "校準資料不足"
+
+
+def _formal_state_report(stats: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    recent = rows[-30:]
+    historical = rows[-300:]
+    recent_shapes = [_mm_shape(row["numbers"]) for row in recent]
+    historical_shapes = [_mm_shape(row["numbers"]) for row in historical]
+    recent_sum = sum(shape["sum"] for shape in recent_shapes) / max(1, len(recent_shapes))
+    historical_sum = sum(shape["sum"] for shape in historical_shapes) / max(1, len(historical_shapes))
+    variance = sum((shape["sum"] - historical_sum) ** 2 for shape in historical_shapes) / max(1, len(historical_shapes))
+    z = (recent_sum - historical_sum) / max(1, math.sqrt(variance))
+    state = "可能版路切換" if abs(z) >= 2 else "近期分布穩定"
+    return {"state": state, "rollingZSum": round(z, 4), "changePointProbability": round(min(0.99, abs(z) / 5), 4), "method": "rolling z-score；尚未把單期異常視為狀態切換"}
+
+
+def _formal_pair_metrics(rows: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
+    ordered = _mm_rows(rows, max_number=max_number, limit=5000)
+    number_count = {number: sum(number in row["numbers"] for row in ordered) for number in range(1, max_number + 1)}
+    pair_counts: dict[str, int] = {}
+    total = len(ordered)
+    for row in ordered:
+        for left, right in itertools.combinations(sorted(row["numbers"]), 2):
+            key = f"{left:02d}-{right:02d}"
+            pair_counts[key] = pair_counts.get(key, 0) + 1
+    rows_out = []
+    for key, count in sorted(pair_counts.items(), key=lambda item: (-item[1], item[0]))[:40]:
+        left, right = (int(part) for part in key.split("-"))
+        p_left = (number_count[left] + 1) / (total + 2)
+        p_right = (number_count[right] + 1) / (total + 2)
+        p_pair = (count + 1) / (total + 2)
+        lift = p_pair / max(1e-9, p_left * p_right)
+        pmi = math.log(max(1e-9, lift))
+        union = number_count[left] + number_count[right] - count
+        rows_out.append({"numbers": [left, right], "count": count, "lift": round(lift, 4), "pmi": round(pmi, 4), "jaccard": round(count / max(1, union), 4)})
+    return {"topPairs": rows_out, "method": "Laplace smoothing；少量共現不直接當成高機率。"}
+
+
+def _formal_combinations(pool: list[int]) -> dict[str, list[list[int]]]:
+    ordered = list(dict.fromkeys(pool))
+    if len(ordered) < 5:
+        return {"firstChoice": [ordered], "steady": [], "diversified": [], "highRisk": []}
+    combos = []
+    for start in range(0, min(6, len(ordered) - 4)):
+        combo = sorted(ordered[start : start + 5])
+        if combo not in combos:
+            combos.append(combo)
+    return {"firstChoice": [combos[0]], "steady": combos[1:4], "diversified": combos[4:7], "highRisk": [sorted(ordered[-5:])]}
+
+
+def _formal_save_snapshot(game: str, analysis: dict[str, Any], latest: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    path = FORMAL_PREDICTION_FILES[game]
+    with MODEL_STATE_LOCK:
+        records = _formal_json_load(path, [])
+        if not isinstance(records, list):
+            records = []
+        ordered = _mm_rows(history, max_number=39, limit=5000)
+        by_period = {str(row["period"]): index for index, row in enumerate(ordered)}
+        for record in records:
+            if record.get("outcome") is not None:
+                continue
+            index = by_period.get(str(record.get("sourcePeriod")))
+            if index is None or index + 1 >= len(ordered):
+                continue
+            actual = ordered[index + 1]
+            outcome = {"actualPeriod": actual["period"], "actualDate": actual["date"], "numbers": actual["numbers"], "hits5": len(set(record.get("snapshot", {}).get("top5", [])) & set(actual["numbers"])), "hits8": len(set(record.get("snapshot", {}).get("top8", [])) & set(actual["numbers"])), "hits10": len(set(record.get("snapshot", {}).get("top10", [])) & set(actual["numbers"])), "hits15": len(set(record.get("snapshot", {}).get("full15", [])) & set(actual["numbers"]))}
+            record["outcome"] = outcome
+        source_period = str(latest.get("period", ""))
+        if source_period and not any(str(record.get("sourcePeriod")) == source_period for record in records):
+            records.insert(0, {"game": game, "sourcePeriod": source_period, "sourceDate": latest.get("date", ""), "snapshotAt": analysis.get("metadata", {}).get("generatedAt") or datetime.now(timezone.utc).isoformat(timespec="seconds"), "modelVersion": analysis.get("modelVersion", MODEL_ENGINE_VERSION), "snapshot": {"dataCutoffPeriod": source_period, "dataCount": analysis.get("drawCount", 0), "modelWeights": analysis.get("modelWeights", {}), "scores": analysis.get("modelScores", {}), "top5": analysis.get("candidateTiers", {}).get("top5", []), "top8": analysis.get("candidateTiers", {}).get("top10", [])[:8], "top10": analysis.get("candidateTiers", {}).get("top10", []), "full15": analysis.get("candidateTiers", {}).get("full15", []), "reasons": analysis.get("candidateDetails", [])}, "outcome": None})
+        records = records[:5000]
+        _formal_json_save(path, records)
+        return {"databaseId": f"lotto-lab-{game}-prediction-history", "count": len(records), "latest": records[0] if records else None, "immutableSnapshot": True}
+
+
+def _formal_save_state(game: str, analysis: dict[str, Any]) -> dict[str, Any]:
+    path = FORMAL_DB_FILES[game]
+    state = {"databaseId": f"lotto-lab-{game}-model-store", "game": game, "modelVersion": analysis.get("modelVersion", MODEL_ENGINE_VERSION), "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"), "weights": analysis.get("modelWeights", {}), "leaderboard": analysis.get("modelLeaderboard", []), "backtestStatus": analysis.get("backtest", {}).get("cacheStatus", "complete"), "schemaVersion": "v2"}
+    _formal_json_save(path, state)
+    return state
+
+
+def _formal_analysis(game: str, rows: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    source_rows = _mm_rows(rows, max_number=max_number, limit=5000)
+    if not source_rows:
+        return {"drawCount": 0, "recommendation": [], "candidateTiers": {}, "backtest": {"testedCount": 0, "cacheStatus": "insufficient"}, "note": "資料不足，不建立推測。"}
+    quality = _formal_quality_report(game, rows)
+    history_database = _formal_save_history(game, rows)
+    backtest = _formal_backtest(source_rows, game, max_number, pick_count)
+    profiles = backtest.get("modelProfiles", [])
+    weights = backtest.get("dynamicWeights") or _formal_weights_from_profiles(game, profiles)
+    model_scores, features, meta = _formal_scores(game, source_rows, max_number)
+    common_stats = meta.get("stats") or _mm_stats(source_rows, max_number)
+    ensemble_scores = {number: sum(weights[name] * model_scores[name][number] for name in FORMAL_MODEL_NAMES[game]) for number in range(1, max_number + 1)}
+    pool = _mm_select_pool(ensemble_scores, common_stats, max_number, 15)
+    ranked = sorted(ensemble_scores, key=lambda number: (-ensemble_scores[number], number))
+    model_top15 = {name: sorted(scores, key=lambda number: (-scores[number], number))[:15] for name, scores in model_scores.items()}
+    details = []
+    for rank, number in enumerate(pool, start=1):
+        support = [name for name, values in model_top15.items() if number in values]
+        opposing = [name for name, values in model_top15.items() if number not in values]
+        probability, calibration_status = _formal_probability_for_current(sum(weights[name] * model_scores[name][number] for name in FORMAL_MODEL_NAMES[game]), backtest)
+        details.append({"number": number, "rank": rank, "tier": 1 if rank <= 5 else 2 if rank <= 10 else 3, "score": round(ensemble_scores[number] * 100, 2), "relativeConfidence": "高" if rank <= 5 else "中", "calibratedProbability": round(probability * 100, 2) if probability is not None else None, "calibrationStatus": calibration_status, "reason": "、".join(_mm_reasons(number, features, common_stats)), "supportingModels": support, "opposingModels": opposing})
+    low_numbers = sorted(ensemble_scores, key=lambda number: (ensemble_scores[number], number))[:10]
+    least = [{"number": number, "score": round(ensemble_scores[number] * 100, 2), "reason": "多模型排序較低；不代表不可能開出"} for number in low_numbers]
+    state = _formal_state_report(common_stats, source_rows)
+    pair_metrics = _formal_pair_metrics(source_rows, max_number)
+    shapes = common_stats.get("shapeAverage", {})
+    consistency = sum(number in model_top15[name] for name in FORMAL_MODEL_NAMES[game] for number in pool) / max(1, len(FORMAL_MODEL_NAMES[game]) * len(pool))
+    entropy_scores = [max(1e-9, ensemble_scores[number]) for number in ranked]
+    entropy_total = sum(entropy_scores)
+    entropy = -sum((score / entropy_total) * math.log(score / entropy_total) for score in entropy_scores) / math.log(max_number)
+    model_deltas = [max(model_scores[name].values()) - min(model_scores[name].values()) for name in FORMAL_MODEL_NAMES[game]]
+    model_disagreement = min(1, (sum(model_deltas) / max(1, len(model_deltas))))
+    risk = "高" if consistency < 0.45 or state["state"] == "可能版路切換" else "中" if consistency < 0.65 else "低"
+    strategy = {"id": f"{game}-independent-ensemble", "label": "候選池多模型集成", "summary": "目標是提高15碼候選池覆蓋率，而非宣稱能預測單一期必開號碼。", "candidatePool": pool, "modelType": meta.get("modelType"), "steps": ["短、中、長視窗分開計算，不把兩彩種資料混合", "先與均勻、頻率、熱號、遺漏值基準比較", "以 walk-forward 的 out-of-sample 表現更新投票權重", "連續失效只降權或標記淘汰，不因單期命中暴增", "資料來源不一致或驗證失敗時停止該期模型更新"]}
+    result = {"drawCount": len(source_rows), "selectedDrawCount": len(source_rows), "modelVersion": f"{MODEL_ENGINE_VERSION}-{game}", "game": game, "databaseId": f"lotto-lab-{game}-independent", "historyDatabase": history_database, "windowsUsed": [window for window in (30, 100, 300, 1000, 5000) if len(source_rows) >= window or window == 30], "dataQuality": quality, "statistics": {"hot": [number for number in ranked[:10]], "cold": [number for number in sorted(ensemble_scores, key=lambda number: (ensemble_scores[number], number))[:10]], "omission": common_stats.get("omission", {}), "averageOmission": common_stats.get("averageOmission", {}), "maximumOmission": common_stats.get("maximumOmission", {}), "returnRate": common_stats.get("returnRate", {}), "repeatRate": common_stats.get("repeatRate", {}), "tailCounts": common_stats.get("tailCounts", {}), "weekdayCounts": common_stats.get("weekdayCounts", {}), "monthCounts": common_stats.get("monthCounts", {}), "yearCounts": common_stats.get("yearCounts", {}), "shapeAverage": common_stats.get("shapeAverage", {}), "historicalShapeAverage": common_stats.get("historicalShapeAverage", {}), "windowFrequencies": {str(window): common_stats.get("windows", {}).get(window, {}) for window in (30, 100, 300, 1000, 5000)}, "pairMetrics": pair_metrics, "caFeatures": meta.get("caFeatures", {}) if game == "ca-fantasy5" else None}, "recommendation": pool[:5], "backupRecommendation": pool[5:10], "candidateTiers": {"top5": pool[:5], "backup5": pool[5:10], "top10": pool[:10], "full15": pool}, "candidateDetails": details, "ranking": [{"number": number, "rank": rank, "score": round(ensemble_scores[number] * 100, 2)} for rank, number in enumerate(ranked, start=1)], "modelScores": {name: {str(number): round(score, 6) for number, score in scores.items()} for name, scores in model_scores.items()}, "modelWeights": weights, "modelLeaderboard": profiles, "modelProfiles": profiles, "modelCatalog": {name: {"status": "active", "label": FORMAL_MODEL_LABELS[name], "features": meta.get("featureKeys", [])} for name in FORMAL_MODEL_NAMES[game]}, "baselineModels": backtest.get("baselineModels", {}), "ensemble": {"overallConfidence": round(sum(ensemble_scores[number] for number in pool[:5]) / max(1, len(pool[:5])) * 100, 2), "modelConsistency": round(consistency * 100, 2), "modelDisagreement": round(model_disagreement * 100, 2), "predictionEntropy": round(entropy, 4), "candidateConcentration": round(sum(ensemble_scores[number] for number in pool[:5]) / max(1e-9, sum(ensemble_scores.values())), 4), "riskLevel": risk, "estimatedSum": sum(pool[:5]), "estimatedSpan": max(pool[:5]) - min(pool[:5]), "estimatedAC": _mm_ac(pool[:5]), "estimatedOddEven": _mm_shape(pool[:5])["odd"], "estimatedSmallLarge": _mm_shape(pool[:5])["small"], "estimatedConsecutiveRate": common_stats.get("shapeRates", {}).get("consecutive", 0) * 100, "estimatedSameTailRate": common_stats.get("shapeRates", {}).get("sameTail", 0) * 100}, "leastRecommended": least, "recommendationCombos": _formal_combinations(pool), "backtest": backtest, "automl": {"cycle": len(source_rows) // 100, "retrainEvery": 100, "qualified": bool(backtest.get("qualifiedForPromotion", False)), "backtestStatus": backtest.get("cacheStatus", "complete"), "method": "每100期重新檢查模型，權重由 out-of-sample 回測與校準誤差共同決定。"}, "monitoring": backtest.get("monitoring", {}), "calibration": backtest.get("calibration", {}), "uncertainty": {"modelConsistency": round(consistency * 100, 2), "modelDisagreement": round(model_disagreement * 100, 2), "predictionEntropy": round(entropy, 4), "candidateConcentration": round(sum(ensemble_scores[number] for number in pool[:5]) / max(1e-9, sum(ensemble_scores.values())), 4), "riskLevel": risk, "suspectedStateChange": state["state"] == "可能版路切換"}, "stateDetection": state, "appIntegration": {"enabled": False, "reason": "App 外部模型只允許進入 California Fantasy 5；目前未提供可驗證 App 分數快照。"} if game == "tw539" else {"enabled": False, "reason": "目前尚未收到可追溯的外部 App 分數快照，因此不擅自混入。"}, "ablation": _formal_ablation(source_rows, game, max_number), "strategy": strategy, "note": "分數是相對排序，不是實際中獎率。未使用未來資料、隨機亂數或事後修改推薦；彩券仍是隨機事件，請理性投注。"}
+    result["thirdRecommendation"] = pool[10:15]
+    result["candidateTiers"]["third5"] = pool[10:15]
+    _formal_save_state(game, result)
+    return result
+
+
+def _mm_analysis(game: str, rows: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
+    return _formal_analysis(game, rows, max_number, pick_count)
+
+
+def _mm_save_prediction(game: str, analysis: dict[str, Any], latest: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    return _formal_save_snapshot(game, analysis, latest, history)
 
 
 def analysis_metadata(limit: int, data_status: dict[str, Any]) -> dict[str, Any]:
