@@ -31,6 +31,21 @@ except Exception:  # pragma: no cover - optional production dependency
     WebPushException = None
     webpush = None
 
+try:
+    import analysis_v2
+except Exception:  # pragma: no cover - server can still serve static pages if optional ML deps are absent
+    analysis_v2 = None
+
+try:
+    import prediction_journal_v3
+except Exception:  # pragma: no cover - journal is optional during static-only startup
+    prediction_journal_v3 = None
+
+try:
+    import feature_importance
+except Exception:  # pragma: no cover - explainability is additive and optional at startup
+    feature_importance = None
+
 _ORIGINAL_GETADDRINFO = socket.getaddrinfo
 
 
@@ -45,6 +60,8 @@ socket.getaddrinfo = ipv4_getaddrinfo
 ROOT = Path(__file__).parent
 PUBLIC = ROOT / "public"
 BUNDLED_TAIWAN_HISTORY = PUBLIC / "taiwan_539_history.json"
+BUNDLED_CA_FANTASY5_HISTORY = ROOT / "data" / "ca_fantasy5_database.json"
+BUNDLED_CA_FANTASY5_HISTORY_V2 = ROOT / "data" / "ca_fantasy5_database_v2.json"
 
 TAIWAN_LAST_URL = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/LastNumber"
 TAIWAN_DATASET_URL = "https://gaze.nta.gov.tw/dntmb/OpenData/csvDw?ntaCode=D423F"
@@ -73,9 +90,12 @@ API_RATE_LIMITS = {
     "/api/latest": (180, 60),
     "/api/lottery": (90, 60),
     "/api/history-search": (45, 60),
+    "/api/prediction-journal": (30, 60),
+    "/api/ai-vs-app": (30, 60),
     "/api/config": (120, 60),
     "/api/push-subscription": (20, 60),
     "/api/notify-latest": (5, 600),
+    "/prediction": (60, 60),
 }
 ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
 STRIPE_PAYMENT_LINK = os.environ.get("LOTTO_STRIPE_PAYMENT_LINK", "").strip()
@@ -686,14 +706,34 @@ def parse_california_history(source_html: str) -> list[dict[str, Any]]:
 
 def california_history(limit: int = 180) -> list[dict[str, Any]]:
     def load():
-        return parse_california_history(fetch_text(CALIFORNIA_FANTASY5_URL))
+        bundled: list[dict[str, Any]] = []
+        # Prefer the formal production database, while retaining the v2 bundle
+        # as a compatibility source for deployments that still contain it.
+        for database_path in (BUNDLED_CA_FANTASY5_HISTORY, BUNDLED_CA_FANTASY5_HISTORY_V2):
+            try:
+                if not database_path.exists():
+                    continue
+                raw = json.loads(database_path.read_text(encoding="utf-8"))
+                bundled.extend(item for item in raw if item.get("game") == "ca-fantasy5")
+            except (OSError, TypeError, ValueError):
+                continue
+        live: list[dict[str, Any]] = []
+        try:
+            live = parse_california_history(fetch_text(CALIFORNIA_FANTASY5_URL, timeout=15))
+        except Exception:
+            live = []
+        merged = dedupe_draws(live + bundled)
+        merged.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+        return merged
 
     return cached("california-history", load)[:limit]
 
 
 def california_latest() -> dict[str, Any]:
     def load():
-        values = parse_california_history(fetch_text(CALIFORNIA_FANTASY5_URL, timeout=15))
+        values = california_history(5000)
+        if not values:
+            values = parse_california_history(fetch_text(CALIFORNIA_FANTASY5_URL, timeout=15))
         if not values:
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的最新開獎資料")
         return values[0]
@@ -4137,6 +4177,8 @@ def attach_deep_sniper_analysis(
 
 
 def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, Any]:
+    if analysis_v2 is None:
+        raise RuntimeError("v2 分析引擎尚未載入；請確認 scikit-learn 與 joblib 已安裝")
     if game == "tw539":
         latest = taiwan_latest()
         fetch_limit = max(limit, MODEL_ANALYSIS_DATA_WINDOW, MODEL_EVAL_WINDOW + MODEL_TRAIN_WINDOW)
@@ -4145,11 +4187,15 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
             history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
-        analysis = cached(analysis_key, lambda: analyze_with_stable_backtest(draws, history))
+        analysis = cached(analysis_key, lambda: analysis_v2.analyze_tw539(history))
         status = data_health(game, latest, draws)
         analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
         analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
+        if feature_importance is not None and not analysis.get("dataInsufficient"):
+            analysis["featureImportance"] = feature_importance.capture_prediction(game, analysis, latest, history)
         analysis["predictionHistory"] = _mm_save_prediction(game, analysis, latest, history)
+        if prediction_journal_v3 is not None:
+            analysis["predictionJournal"] = prediction_journal_v3.record_live_prediction(game, analysis, latest, history)
         payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="tw539")
@@ -4161,7 +4207,7 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
-        analysis = cached(analysis_key, lambda: analyze_california_with_stable_backtest(draws, history))
+        analysis = cached(analysis_key, lambda: analysis_v2.analyze_ca_fantasy5(history))
         latest = history[0]
         status = data_health(game, latest, draws)
         if analysis.get("dataInsufficient"):
@@ -4169,10 +4215,14 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
                 **status,
                 "validated": False,
                 "message": "最新開獎可解析，但正式模型資料不足；暫不產生推薦。",
-            }
+        }
         analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
         analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
+        if feature_importance is not None and not analysis.get("dataInsufficient"):
+            analysis["featureImportance"] = feature_importance.capture_prediction(game, analysis, latest, history)
         analysis["predictionHistory"] = _mm_save_prediction(game, analysis, latest, history)
+        if prediction_journal_v3 is not None:
+            analysis["predictionJournal"] = prediction_journal_v3.record_live_prediction(game, analysis, latest, history)
         payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="ca-fantasy5")
@@ -4244,6 +4294,8 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/") and self.reject_if_rate_limited(parsed.path):
             return
+        if parsed.path.startswith("/prediction/") and self.reject_if_rate_limited("/prediction"):
+            return
         if parsed.path == "/api/health":
             self.send_json({"ok": True, "service": "lotto-lab", "time": datetime.now().isoformat(timespec="seconds")})
             return
@@ -4294,6 +4346,21 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=502)
             return
+        if parsed.path == "/api/analyze/tw539" or parsed.path == "/api/analyze/ca-fantasy5":
+            params = parse_qs(parsed.query)
+            route_game = "tw539" if parsed.path.endswith("tw539") else "ca-fantasy5"
+            try:
+                requested = clean_game(params.get("game", [route_game])[0])
+                if requested != route_game:
+                    raise ValueError("分析 API 彩種與路徑不一致")
+                limit = clamp_int(params.get("limit", ["365"])[0], 365, 1, 365)
+                payload = build_payload(route_game, limit)
+                self.send_json({"ok": True, "game": route_game, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=502)
+            return
         if parsed.path == "/api/lottery":
             params = parse_qs(parsed.query)
             try:
@@ -4331,6 +4398,51 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=502)
+            return
+        if parsed.path == "/api/prediction-journal":
+            params = parse_qs(parsed.query)
+            try:
+                if prediction_journal_v3 is None:
+                    raise RuntimeError("Prediction Journal 模組尚未載入")
+                game = clean_game(params.get("game", ["tw539"])[0])
+                limit = clamp_int(params.get("limit", ["100"])[0], 100, 1, 500)
+                history = taiwan_history(5000) if game == "tw539" else california_history(5000)
+                result = prediction_journal_v3.get_journal(game, history, limit=limit)
+                self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **result})
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=502)
+            return
+        if parsed.path == "/api/ai-vs-app":
+            params = parse_qs(parsed.query)
+            try:
+                if prediction_journal_v3 is None:
+                    raise RuntimeError("AI vs App Battle 模組尚未載入")
+                limit = clamp_int(params.get("limit", ["100"])[0], 100, 1, 500)
+                history = california_history(5000)
+                result = prediction_journal_v3.get_battle(history, limit=limit)
+                self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **result})
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=502)
+            return
+        if parsed.path.startswith("/prediction/") and parsed.path.endswith("/feature_importance"):
+            try:
+                if feature_importance is None:
+                    raise RuntimeError("Feature Importance 模組尚未載入")
+                prefix = "/prediction/"
+                suffix = "/feature_importance"
+                draw_id = unquote(parsed.path[len(prefix):-len(suffix)]).strip("/")
+                params = parse_qs(parsed.query)
+                game = params.get("game", [None])[0]
+                result = feature_importance.get_prediction(draw_id, game=clean_game(game) if game else None)
+                self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **result})
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=500)
             return
         return super().do_GET()
 
@@ -4374,6 +4486,21 @@ class Handler(SimpleHTTPRequestHandler):
                 game = clean_game(payload.get("game", "tw539"))
                 with notify_lock:
                     self.send_json(notify_latest_game(game))
+                return
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=500)
+                return
+        if parsed.path == "/api/ai-vs-app":
+            try:
+                if prediction_journal_v3 is None:
+                    raise RuntimeError("AI vs App Battle 模組尚未載入")
+                payload = self.read_json_body()
+                snapshot = payload.get("snapshot", payload)
+                result = prediction_journal_v3.submit_app_snapshot(snapshot)
+                self.send_json({"ok": True, **result})
+                return
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
                 return
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=500)
