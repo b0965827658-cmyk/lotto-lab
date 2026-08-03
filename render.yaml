@@ -1,19 +1,16 @@
 services:
   - type: web
     name: lotto-lab
-    runtime: python
+    runtime: docker
     rootDir: lotto-lab-web
+    dockerfilePath: ./Dockerfile
     plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: python server.py
     healthCheckPath: /api/health
     disk:
       name: lotto-lab-data
       mountPath: /var/data
       sizeGB: 1
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.14.3
       - key: LOTTO_PERSISTENT_DATA_DIR
         value: /var/data
       - key: HOST
