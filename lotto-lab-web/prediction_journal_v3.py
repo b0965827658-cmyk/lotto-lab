@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +54,20 @@ def _canonical(value: Any) -> str:
 
 def _hash(value: Any) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
+def _verify_prediction_lock(record: dict[str, Any]) -> None:
+    """Reject journal records whose immutable prediction payload was changed."""
+    prediction = record.get("prediction")
+    prediction_hash = record.get("predictionHash")
+    if prediction is not None or prediction_hash is not None:
+        if not isinstance(prediction, dict) or not prediction_hash or _hash(prediction) != prediction_hash:
+            raise JournalError("Prediction lock verification failed")
+        return
+    snapshot = record.get("snapshot")
+    snapshot_hash = record.get("snapshotHash")
+    if snapshot is not None and snapshot_hash and _hash(snapshot) != snapshot_hash:
+        raise JournalError("Legacy prediction lock verification failed")
 
 
 def _path_for(game: str, path: Path | None = None) -> Path:
@@ -138,10 +152,10 @@ def _outcome_for(record: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str
         return None
     draw = ordered[cutoff_position + 1]
     actual = _number_list(draw["numbers"], exact=5)
-    snapshot = record.get("snapshot", {})
+    snapshot = record.get("prediction") or record.get("snapshot", {})
     top5 = set(_number_list(snapshot.get("top5", []), exact=5))
     top10 = set(_number_list(snapshot.get("top10", []), exact=10))
-    full15 = set(_number_list(snapshot.get("full15", []), exact=15))
+    full15 = set(_number_list(snapshot.get("top15") or snapshot.get("full15", []), exact=15))
     actual_set = set(actual)
     return {
         "period": str(draw["period"]),
@@ -157,13 +171,25 @@ def _outcome_for(record: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str
 def _finalize(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> bool:
     changed = False
     for record in records:
+        _verify_prediction_lock(record)
         if record.get("recordType") != "live-pre-draw" or record.get("status") != "open":
             continue
         outcome = _outcome_for(record, rows)
         if outcome is not None:
+            settlement = {
+                "drawId": outcome["period"],
+                "drawDate": outcome["date"],
+                "winningNumbers": outcome["numbers"],
+                "top5Hits": outcome["hits5"],
+                "top10Hits": outcome["hits10"],
+                "top15Hits": outcome["hits15"],
+                "settledAt": outcome["settledAt"],
+            }
+            record["settlement"] = settlement
             record["outcome"] = outcome
             record["status"] = "closed"
             record["closedAt"] = outcome["settledAt"]
+            _verify_prediction_lock(record)
             changed = True
     return changed
 
@@ -195,6 +221,24 @@ def require_stage4(records: list[dict[str, Any]]) -> dict[str, Any]:
     return status
 
 
+def _next_draw_date(game: str, cutoff_date: str) -> str:
+    value = datetime.strptime(cutoff_date, "%Y-%m-%d").date() + timedelta(days=1)
+    if game == "tw539" and value.weekday() == 6:
+        value += timedelta(days=1)
+    return value.isoformat()
+
+
+def _complete_ranking(analysis: dict[str, Any]) -> list[int]:
+    ranking = analysis.get("ranking") or []
+    if not isinstance(ranking, list):
+        raise JournalError("Complete ranking is missing")
+    ordered = sorted(
+        (item for item in ranking if isinstance(item, dict)),
+        key=lambda item: int(item.get("rank", 10_000)),
+    )
+    return _number_list([item.get("number") for item in ordered], exact=39)
+
+
 def _snapshot_from_analysis(game: str, analysis: dict[str, Any], latest: dict[str, Any], history: list[dict[str, Any]], captured_at: str) -> dict[str, Any]:
     tiers = analysis.get("candidateTiers") or {}
     top5 = _number_list(tiers.get("top5") or analysis.get("recommendation", []), exact=5)
@@ -205,6 +249,8 @@ def _snapshot_from_analysis(game: str, analysis: dict[str, Any], latest: dict[st
     except Exception:
         source_data_hash = None
     model_version = str(analysis.get("modelVersion") or "unknown")
+    ranking39 = _complete_ranking(analysis)
+    repository_version = f"sha256:{source_data_hash}" if source_data_hash else "unknown"
     snapshot = {
         "top5": top5,
         "top10": top10,
@@ -220,6 +266,18 @@ def _snapshot_from_analysis(game: str, analysis: dict[str, Any], latest: dict[st
     if not cutoff_period or not latest.get("date"):
         raise JournalError("缺少資料截止期別或日期")
     target_key = _target_key(cutoff_period)
+    prediction = {
+        "predictionTime": captured_at,
+        "drawId": target_key,
+        "drawDate": _next_draw_date(game, latest["date"]),
+        "top5": top5,
+        "top10": top10,
+        "top15": full15,
+        "ranking39": ranking39,
+        "modelVersion": model_version,
+        "repositoryVersion": repository_version,
+        "datasetHash": source_data_hash,
+    }
     return {
         "stageVersion": STAGE_VERSION,
         "recordType": "live-pre-draw",
@@ -227,7 +285,7 @@ def _snapshot_from_analysis(game: str, analysis: dict[str, Any], latest: dict[st
         "status": "open",
         "targetKey": target_key,
         "targetPeriod": None,
-        "targetDate": None,
+        "targetDate": prediction["drawDate"],
         "predictionCapturedAt": captured_at,
         "dataCutoffPeriod": cutoff_period,
         "dataCutoffDate": latest["date"],
@@ -235,6 +293,10 @@ def _snapshot_from_analysis(game: str, analysis: dict[str, Any], latest: dict[st
         "modelVersion": model_version,
         "snapshotHash": _hash(snapshot),
         "snapshot": snapshot,
+        "predictionHash": _hash(prediction),
+        "prediction": prediction,
+        "locked": True,
+        "settlement": None,
         "outcome": None,
     }
 

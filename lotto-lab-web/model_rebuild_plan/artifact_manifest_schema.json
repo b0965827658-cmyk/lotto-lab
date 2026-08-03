@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lotto-lab://schemas/v3.0.1-rebuilt-artifact-manifest.json",
+  "title": "Lotto Lab v3.0.1-rebuilt Artifact Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "releaseVersion", "artifactOrigin", "game", "modelVersion", "seed",
+    "trainedAt", "trainingCutoff", "historyCount", "dataFile", "dataSha256",
+    "canonicalDataSha256", "featureSchemaVersion", "featureSchemaSha256",
+    "featureNames", "codeCommit", "environment", "threadControls", "models",
+    "weights", "validation", "canonicalManifestSha256"
+  ],
+  "properties": {
+    "releaseVersion": { "const": "v3.0.1-rebuilt" },
+    "artifactOrigin": { "const": "Rebuilt from fixed data and environment; not a recovered copy of the pre-migration V3.0.0 artifacts." },
+    "game": { "enum": ["tw539", "ca-fantasy5"] },
+    "modelVersion": { "type": "string", "minLength": 1 },
+    "seed": { "const": 20260801 },
+    "trainedAt": { "type": "string", "format": "date-time" },
+    "trainingCutoff": { "type": "string", "format": "date" },
+    "historyCount": { "type": "integer", "minimum": 301 },
+    "dataFile": { "type": "string" },
+    "dataSha256": { "$ref": "#/$defs/sha256" },
+    "canonicalDataSha256": { "$ref": "#/$defs/sha256" },
+    "featureSchemaVersion": { "type": "string" },
+    "featureSchemaSha256": { "$ref": "#/$defs/sha256" },
+    "featureNames": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "codeCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "environment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["python", "numpy", "scikitLearn", "joblib", "pandas", "tzdata", "platform"],
+      "properties": {
+        "python": { "const": "3.14.0" }, "numpy": { "const": "2.5.1" },
+        "scikitLearn": { "const": "1.9.0" }, "joblib": { "const": "1.5.3" },
+        "pandas": { "const": "3.0.5" }, "tzdata": { "const": "2026.3" },
+        "platform": { "type": "string" }
+      }
+    },
+    "threadControls": { "type": "object", "additionalProperties": { "const": "1" } },
+    "models": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "path", "sha256", "hyperparameters", "inputDimension", "outputDimension", "loadable"],
+        "properties": {
+          "name": { "enum": ["logistic-regression", "random-forest", "hist-gradient-boosting"] },
+          "path": { "type": "string" }, "sha256": { "$ref": "#/$defs/sha256" },
+          "hyperparameters": { "type": "object" }, "inputDimension": { "type": "integer", "minimum": 1 },
+          "outputDimension": { "const": 1 }, "loadable": { "const": true }
+        }
+      }
+    },
+    "weights": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "method", "values"],
+      "properties": {
+        "path": { "type": "string" }, "sha256": { "$ref": "#/$defs/sha256" },
+        "method": { "type": "string" }, "values": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 } }
+      }
+    },
+    "validation": {
+      "type": "object", "additionalProperties": true,
+      "required": ["walkForwardWindows", "metrics", "baselineComparisons", "promotionDecision"],
+      "properties": {
+        "walkForwardWindows": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+        "metrics": { "type": "object" }, "baselineComparisons": { "type": "object" },
+        "promotionDecision": { "enum": ["accepted", "rejected", "baseline-only"] }
+      }
+    },
+    "canonicalManifestSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+}
+
