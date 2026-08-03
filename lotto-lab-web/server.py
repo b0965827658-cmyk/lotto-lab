@@ -133,6 +133,15 @@ analysis_jobs: dict[str, dict[str, Any]] = {}
 analysis_job_keys: dict[str, str] = {}
 ANALYSIS_JOB_RETRY_SECONDS = 2
 ANALYSIS_JOB_RESULT_TTL_SECONDS = CACHE_TTL_SECONDS
+WARM_CACHE_FILE = Path(os.environ.get("LOTTO_WARM_CACHE_FILE", PERSISTENT_DATA / "analysis_warm_cache.json"))
+WARM_CACHE_LIMITS = tuple(
+    dict.fromkeys(
+        limit for value in os.environ.get("LOTTO_WARM_CACHE_LIMITS", "90,10").split(",") if (limit := int(value.strip() or 0)) > 0
+    )
+)
+WARM_CACHE_POLL_SECONDS = max(30, int(os.environ.get("LOTTO_WARM_CACHE_POLL_SECONDS", "60")))
+warm_cache_lock = threading.Lock()
+warm_cache_jobs: set[str] = set()
 
 
 def clamp_int(value: str, default: int, minimum: int, maximum: int) -> int:
@@ -331,6 +340,141 @@ def cached(key: str, loader, ttl_seconds: int | None = None):
 def cache_key_for_draws(prefix: str, game: str, limit: int, draws: list[dict[str, Any]]) -> str:
     latest = draws[0] if draws else {}
     return f"{prefix}-{ANALYSIS_ENGINE_VERSION}-{game}-{limit}-{latest.get('date', '')}-{latest.get('period', '')}"
+
+
+def _warm_json_load() -> dict[str, Any]:
+    try:
+        value = json.loads(WARM_CACHE_FILE.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, TypeError, ValueError):
+        return {}
+
+
+def _warm_json_save(value: dict[str, Any]) -> None:
+    WARM_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = WARM_CACHE_FILE.with_suffix(f"{WARM_CACHE_FILE.suffix}.tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(WARM_CACHE_FILE)
+
+
+def _repository_signature(game: str, history: list[dict[str, Any]]) -> str:
+    latest = history[0] if history else {}
+    return f"{game}:{len(history)}:{latest.get('date', '')}:{latest.get('period', '')}"
+
+
+def _warm_cache_key(game: str, limit: int, optimize: bool = False) -> str:
+    return f"{game}:{limit}:{int(optimize)}"
+
+
+def get_warm_analysis(game: str, limit: int, optimize: bool = False) -> dict[str, Any] | None:
+    with warm_cache_lock:
+        entry = _warm_json_load().get("entries", {}).get(_warm_cache_key(game, limit, optimize))
+    if not isinstance(entry, dict) or not isinstance(entry.get("result"), dict):
+        return None
+    return entry
+
+
+def build_warm_cache(game: str, limit: int, signature: str, loader=None) -> bool:
+    """Build one cache entry and publish it only after the full payload succeeds."""
+    loader = loader or build_payload
+    key = _warm_cache_key(game, limit, False)
+    payload = loader(game, limit, optimize=False)
+    result = {
+        "ok": True,
+        "game": game,
+        "updatedAt": datetime.now().isoformat(timespec="seconds"),
+        **payload,
+    }
+    with warm_cache_lock:
+        document = _warm_json_load()
+        entries = document.setdefault("entries", {})
+        entries[key] = {
+            "game": game,
+            "limit": limit,
+            "repositorySignature": signature,
+            "completedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "result": result,
+        }
+        document["schemaVersion"] = 1
+        _warm_json_save(document)
+    return True
+
+
+def store_warm_result(game: str, limit: int, signature: str, result: dict[str, Any]) -> None:
+    key = _warm_cache_key(game, limit, False)
+    with warm_cache_lock:
+        document = _warm_json_load()
+        document.setdefault("entries", {})[key] = {
+            "game": game,
+            "limit": limit,
+            "repositorySignature": signature,
+            "completedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "result": result,
+        }
+        document["schemaVersion"] = 1
+        _warm_json_save(document)
+
+
+def _run_warm_cache(game: str, signature: str, limits: tuple[int, ...], loader=None) -> None:
+    job_key = f"{game}:{signature}"
+    try:
+        missing = [
+            limit
+            for limit in limits
+            if not ((entry := get_warm_analysis(game, limit)) and entry.get("repositorySignature") == signature)
+        ]
+        if missing:
+            canonical_limit = max(missing)
+            build_warm_cache(game, canonical_limit, signature, loader=loader)
+            canonical = get_warm_analysis(game, canonical_limit)
+            for limit in missing:
+                if limit == canonical_limit:
+                    continue
+                result = json.loads(json.dumps(canonical["result"], ensure_ascii=False))
+                result["history"] = result.get("history", [])[:limit]
+                result.get("analysis", {}).get("metadata", {})["analysisLimit"] = limit
+                store_warm_result(game, limit, signature, result)
+        print(f"warm cache completed ({game}) {signature}")
+    except Exception as exc:
+        # Entries are replaced only after success, so the previous good cache remains.
+        print(f"warm cache failed ({game}): {exc}")
+    finally:
+        with warm_cache_lock:
+            warm_cache_jobs.discard(job_key)
+
+
+def start_warm_cache(game: str, signature: str, limits: tuple[int, ...] | None = None, loader=None) -> bool:
+    limits = limits or WARM_CACHE_LIMITS
+    job_key = f"{game}:{signature}"
+    with warm_cache_lock:
+        if job_key in warm_cache_jobs:
+            return False
+        if all(
+            (entry := _warm_json_load().get("entries", {}).get(_warm_cache_key(game, limit, False)))
+            and entry.get("repositorySignature") == signature
+            for limit in limits
+        ):
+            return False
+        warm_cache_jobs.add(job_key)
+    threading.Thread(
+        target=_run_warm_cache,
+        args=(game, signature, limits, loader),
+        name=f"warm-cache-{game}",
+        daemon=True,
+    ).start()
+    return True
+
+
+def warm_cache_monitor_loop() -> None:
+    while True:
+        for game in ("tw539", "ca-fantasy5"):
+            try:
+                history = taiwan_history(5000) if game == "tw539" else california_history(5000)
+                if history:
+                    start_warm_cache(game, _repository_signature(game, history))
+            except Exception as exc:
+                print(f"warm cache repository check failed ({game}): {exc}")
+        time.sleep(WARM_CACHE_POLL_SECONDS)
 
 
 def fetch_text(url: str, timeout: int = 25) -> str:
@@ -4255,7 +4399,7 @@ def _analysis_job_response(job: dict[str, Any], include_result: bool = True) -> 
     return response
 
 
-def _run_analysis_job(job_id: str, loader) -> None:
+def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
     try:
         with analysis_job_lock:
             job = analysis_jobs[job_id]
@@ -4269,6 +4413,11 @@ def _run_analysis_job(job_id: str, loader) -> None:
             "updatedAt": datetime.now().isoformat(timespec="seconds"),
             **payload,
         }
+        if persist_warm:
+            latest = result.get("latest", {})
+            draw_count = result.get("analysis", {}).get("drawCount", len(result.get("history", [])))
+            signature = f"{game}:{draw_count}:{latest.get('date', '')}:{latest.get('period', '')}"
+            store_warm_result(game, limit, signature, result)
         with analysis_job_lock:
             job = analysis_jobs[job_id]
             job.update(status="completed", result=result, completed_at=time.time(), error=None)
@@ -4284,9 +4433,23 @@ def _run_analysis_job(job_id: str, loader) -> None:
 
 
 def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=None) -> tuple[dict[str, Any], int]:
+    persist_warm = loader is None
     loader = loader or build_payload
     request_key = f"{game}:{limit}:{int(optimize)}"
     now = time.time()
+    if persist_warm and not optimize:
+        warm = get_warm_analysis(game, limit)
+        if warm:
+            return {
+                "status": "completed",
+                "job_id": f"warm-{hashlib.sha256(request_key.encode()).hexdigest()[:24]}",
+                "game": game,
+                "retry_after_seconds": ANALYSIS_JOB_RETRY_SECONDS,
+                "cached": True,
+                "stale": False,
+                "error": None,
+                "result": warm["result"],
+            }, 200
     with analysis_job_lock:
         existing_id = analysis_job_keys.get(request_key)
         existing = analysis_jobs.get(existing_id) if existing_id else None
@@ -4314,7 +4477,7 @@ def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=Non
         analysis_job_keys[request_key] = job_id
     threading.Thread(
         target=_run_analysis_job,
-        args=(job_id, loader),
+        args=(job_id, loader, persist_warm),
         name=f"lotto-analysis-{game}-{job_id[:8]}",
         daemon=True,
     ).start()
@@ -4675,6 +4838,8 @@ def main():
     port = int(os.environ.get("PORT", "8787"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)
+    threading.Thread(target=warm_cache_monitor_loop, name="lotto-warm-cache-monitor", daemon=True).start()
+    print(f"warm cache monitor enabled every {WARM_CACHE_POLL_SECONDS}s for limits {WARM_CACHE_LIMITS}")
     if AUTO_NOTIFY_ENABLED:
         threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
         print(f"auto notify enabled every {max(30, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
