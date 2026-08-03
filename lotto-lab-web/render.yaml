@@ -14,3 +14,11 @@ services:
         value: /var/data
       - key: HOST
         value: 0.0.0.0
+      - key: OMP_NUM_THREADS
+        value: 1
+      - key: OPENBLAS_NUM_THREADS
+        value: 1
+      - key: MKL_NUM_THREADS
+        value: 1
+      - key: NUMEXPR_NUM_THREADS
+        value: 1
