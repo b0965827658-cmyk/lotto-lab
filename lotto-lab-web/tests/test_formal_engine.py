@@ -77,6 +77,19 @@ class FormalEngineTests(unittest.TestCase):
         self.assertIn("ablation", result)
         self.assertFalse(result["appIntegration"]["enabled"])
 
+    def test_homepage_statistics_do_not_change_prediction_regression(self):
+        prediction = {
+            "candidateTiers": {"top5": [1, 2, 3, 4, 5], "top10": list(range(1, 11)), "full15": list(range(1, 16))},
+            "ranking": [{"number": number, "rank": number, "score": number / 100} for number in range(1, 40)],
+        }
+        result = server._attach_homepage_statistics(prediction, self.tw_rows)
+        self.assertEqual(prediction["candidateTiers"], result["candidateTiers"])
+        self.assertEqual(prediction["ranking"], result["ranking"])
+        self.assertEqual(39, len(result["frequency"]))
+        self.assertEqual(10, len(result["hot"]))
+        self.assertEqual(10, len(result["cold"]))
+        self.assertEqual(300, result["statisticsWindow"])
+
     def test_insufficient_california_data_never_falls_back_to_legacy_picks(self):
         result = server._formal_analysis("ca-fantasy5", self.ca_rows[:24], 39, 5)
         self.assertTrue(result["dataInsufficient"])

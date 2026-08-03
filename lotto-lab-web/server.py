@@ -133,6 +133,7 @@ analysis_jobs: dict[str, dict[str, Any]] = {}
 analysis_job_keys: dict[str, str] = {}
 ANALYSIS_JOB_RETRY_SECONDS = 2
 ANALYSIS_JOB_RESULT_TTL_SECONDS = CACHE_TTL_SECONDS
+WARM_CACHE_SCHEMA_VERSION = 2
 WARM_CACHE_FILE = Path(os.environ.get("LOTTO_WARM_CACHE_FILE", PERSISTENT_DATA / "analysis_warm_cache.json"))
 WARM_CACHE_LIMITS = tuple(
     dict.fromkeys(
@@ -370,7 +371,11 @@ def _warm_cache_key(game: str, limit: int, optimize: bool = False) -> str:
 def get_warm_analysis(game: str, limit: int, optimize: bool = False) -> dict[str, Any] | None:
     with warm_cache_lock:
         entry = _warm_json_load().get("entries", {}).get(_warm_cache_key(game, limit, optimize))
-    if not isinstance(entry, dict) or not isinstance(entry.get("result"), dict):
+    if (
+        not isinstance(entry, dict)
+        or entry.get("schemaVersion") != WARM_CACHE_SCHEMA_VERSION
+        or not isinstance(entry.get("result"), dict)
+    ):
         return None
     return entry
 
@@ -390,13 +395,14 @@ def build_warm_cache(game: str, limit: int, signature: str, loader=None) -> bool
         document = _warm_json_load()
         entries = document.setdefault("entries", {})
         entries[key] = {
+            "schemaVersion": WARM_CACHE_SCHEMA_VERSION,
             "game": game,
             "limit": limit,
             "repositorySignature": signature,
             "completedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "result": result,
         }
-        document["schemaVersion"] = 1
+        document["schemaVersion"] = WARM_CACHE_SCHEMA_VERSION
         _warm_json_save(document)
     return True
 
@@ -406,13 +412,14 @@ def store_warm_result(game: str, limit: int, signature: str, result: dict[str, A
     with warm_cache_lock:
         document = _warm_json_load()
         document.setdefault("entries", {})[key] = {
+            "schemaVersion": WARM_CACHE_SCHEMA_VERSION,
             "game": game,
             "limit": limit,
             "repositorySignature": signature,
             "completedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "result": result,
         }
-        document["schemaVersion"] = 1
+        document["schemaVersion"] = WARM_CACHE_SCHEMA_VERSION
         _warm_json_save(document)
 
 
@@ -453,6 +460,7 @@ def start_warm_cache(game: str, signature: str, limits: tuple[int, ...] | None =
             return False
         if all(
             (entry := _warm_json_load().get("entries", {}).get(_warm_cache_key(game, limit, False)))
+            and entry.get("schemaVersion") == WARM_CACHE_SCHEMA_VERSION
             and entry.get("repositorySignature") == signature
             for limit in limits
         ):
@@ -4215,6 +4223,20 @@ def _formal_display_statistics(stats: dict[str, Any], max_number: int = 39) -> d
     }
 
 
+def _attach_homepage_statistics(analysis: dict[str, Any], history: list[dict[str, Any]], max_number: int = 39) -> dict[str, Any]:
+    """Attach the existing empirical fields consumed by the homepage."""
+    common_stats = _mm_stats(_mm_rows(history, max_number=max_number, limit=5000), max_number)
+    display_stats = _formal_display_statistics(common_stats, max_number)
+    return {
+        **analysis,
+        "hot": [{"number": number, "count": display_stats["frequency"][number - 1]["count"]} for number in display_stats["hot"]],
+        "cold": [{"number": number, "count": display_stats["frequency"][number - 1]["count"]} for number in display_stats["cold"]],
+        "overdue": [{"number": number, "gap": common_stats["omission"][number]} for number in display_stats["overdue"]],
+        "frequency": display_stats["frequency"],
+        "statisticsWindow": display_stats["window"],
+    }
+
+
 def _formal_analysis(game: str, rows: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
     source_rows = _mm_rows(rows, max_number=max_number, limit=5000)
     if not source_rows:
@@ -4346,6 +4368,7 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         analysis = cached(analysis_key, lambda: analysis_v2.analyze_tw539(history))
         status = data_health(game, latest, draws)
         analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
+        analysis = _attach_homepage_statistics(analysis, history)
         analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
         if feature_importance is not None and not analysis.get("dataInsufficient"):
             analysis["featureImportance"] = feature_importance.capture_prediction(game, analysis, latest, history)
@@ -4373,6 +4396,7 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
                 "message": "最新開獎可解析，但正式模型資料不足；暫不產生推薦。",
         }
         analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
+        analysis = _attach_homepage_statistics(analysis, history)
         analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
         if feature_importance is not None and not analysis.get("dataInsufficient"):
             analysis["featureImportance"] = feature_importance.capture_prediction(game, analysis, latest, history)

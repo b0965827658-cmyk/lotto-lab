@@ -98,7 +98,7 @@ class WarmCacheTests(unittest.TestCase):
     def test_cache_file_is_valid_json(self):
         server.build_warm_cache("ca-fantasy5", 10, "sig", lambda *args, **kwargs: self.payload(3))
         document = json.loads(server.WARM_CACHE_FILE.read_text(encoding="utf-8"))
-        self.assertEqual(1, document["schemaVersion"])
+        self.assertEqual(server.WARM_CACHE_SCHEMA_VERSION, document["schemaVersion"])
 
 
 if __name__ == "__main__":
