@@ -8,6 +8,7 @@ the random baseline is never included in production ensemble weights.
 
 from __future__ import annotations
 
+import builtins
 import csv
 import hashlib
 import json
@@ -91,7 +92,7 @@ def load_history(game: str, path: Path | None = None) -> list[dict[str, Any]]:
 
 
 def _numbers(row: dict[str, Any]) -> list[int]:
-    return sorted(int(number) for number in row["numbers"])
+    return builtins.sorted(builtins.int(number) for number in row["numbers"])
 
 
 def _draw_shape(numbers: list[int]) -> dict[str, float]:

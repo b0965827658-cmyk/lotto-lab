@@ -14,6 +14,8 @@ import socket
 import ssl
 import threading
 import time
+import traceback
+import uuid
 import posixpath
 import urllib.error
 import urllib.request
@@ -59,6 +61,7 @@ socket.getaddrinfo = ipv4_getaddrinfo
 
 ROOT = Path(__file__).parent
 PUBLIC = ROOT / "public"
+PERSISTENT_DATA = Path(os.environ.get("LOTTO_PERSISTENT_DATA_DIR", ROOT / "data"))
 BUNDLED_TAIWAN_HISTORY = PUBLIC / "taiwan_539_history.json"
 BUNDLED_CA_FANTASY5_HISTORY = ROOT / "data" / "ca_fantasy5_database.json"
 BUNDLED_CA_FANTASY5_HISTORY_V2 = ROOT / "data" / "ca_fantasy5_database_v2.json"
@@ -89,6 +92,8 @@ MAX_PUSH_SUBSCRIPTIONS = int(os.environ.get("LOTTO_MAX_PUSH_SUBSCRIPTIONS", "500
 API_RATE_LIMITS = {
     "/api/latest": (180, 60),
     "/api/lottery": (90, 60),
+    "/api/analyze": (90, 60),
+    "/api/analyze/status": (240, 60),
     "/api/history-search": (45, 60),
     "/api/prediction-journal": (30, 60),
     "/api/ai-vs-app": (30, 60),
@@ -103,8 +108,8 @@ PUSH_PUBLIC_KEY = os.environ.get("LOTTO_VAPID_PUBLIC_KEY", "").strip()
 PUSH_PRIVATE_KEY = os.environ.get("LOTTO_VAPID_PRIVATE_KEY", "").strip().replace("\\n", "\n")
 PUSH_CONTACT_EMAIL = os.environ.get("LOTTO_PUSH_CONTACT_EMAIL", "admin@example.com").strip()
 NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
-SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", ROOT / "data" / "push_subscriptions.json"))
-NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", ROOT / "data" / "notify_state.json"))
+SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", PERSISTENT_DATA / "push_subscriptions.json"))
+NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", PERSISTENT_DATA / "notify_state.json"))
 AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "30"))
 AUTO_NOTIFY_GAMES = [
@@ -123,6 +128,11 @@ class CacheItem:
 cache: dict[str, CacheItem] = {}
 rate_limit_hits: dict[tuple[str, str], list[float]] = {}
 notify_lock = threading.Lock()
+analysis_job_lock = threading.Lock()
+analysis_jobs: dict[str, dict[str, Any]] = {}
+analysis_job_keys: dict[str, str] = {}
+ANALYSIS_JOB_RETRY_SECONDS = 2
+ANALYSIS_JOB_RESULT_TTL_SECONDS = CACHE_TTL_SECONDS
 
 
 def clamp_int(value: str, default: int, minimum: int, maximum: int) -> int:
@@ -2580,9 +2590,9 @@ MODEL_TRAIN_WINDOW = 300
 MODEL_EVAL_WINDOW = 700
 MODEL_MIN_QUALIFY_HISTORY = 1000
 MODEL_RETRAIN_EVERY = 100
-MODEL_STATE_FILE = Path(os.environ.get("LOTTO_MODEL_STATE_FILE", ROOT / "data" / "model_state.json"))
+MODEL_STATE_FILE = Path(os.environ.get("LOTTO_MODEL_STATE_FILE", PERSISTENT_DATA / "model_state.json"))
 MODEL_PREDICTIONS_FILE = Path(os.environ.get("LOTTO_PREDICTIONS_FILE", ROOT / "data" / "prediction_history.json"))
-MODEL_BACKTEST_CACHE_FILE = Path(os.environ.get("LOTTO_BACKTEST_CACHE_FILE", ROOT / "data" / "multimodel_backtest_cache.json"))
+MODEL_BACKTEST_CACHE_FILE = Path(os.environ.get("LOTTO_BACKTEST_CACHE_FILE", PERSISTENT_DATA / "multimodel_backtest_cache.json"))
 MODEL_STATE_LOCK = threading.Lock()
 MODEL_BACKTEST_JOBS: set[str] = set()
 MODEL_NAMES = ("bayesian", "logistic", "boosted", "markov")
@@ -3219,24 +3229,24 @@ FORMAL_MODEL_LABELS = {
     "ca-ranker": "天天樂結構排序模型",
 }
 FORMAL_DB_FILES = {
-    "tw539": ROOT / "data" / "tw539_model_store.json",
-    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_model_store.json",
+    "tw539": PERSISTENT_DATA / "tw539_model_store.json",
+    "ca-fantasy5": PERSISTENT_DATA / "ca_fantasy5_model_store.json",
 }
 FORMAL_HISTORY_FILES = {
-    "tw539": ROOT / "data" / "tw539_database.json",
-    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_database.json",
+    "tw539": PERSISTENT_DATA / "tw539_database.json",
+    "ca-fantasy5": PERSISTENT_DATA / "ca_fantasy5_database.json",
 }
 FORMAL_PREDICTION_FILES = {
-    "tw539": ROOT / "data" / "tw539_prediction_history.json",
-    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_prediction_history.json",
+    "tw539": PERSISTENT_DATA / "tw539_prediction_history.json",
+    "ca-fantasy5": PERSISTENT_DATA / "ca_fantasy5_prediction_history.json",
 }
 FORMAL_BACKTEST_FILES = {
-    "tw539": ROOT / "data" / "tw539_walkforward_cache.json",
-    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_walkforward_cache.json",
+    "tw539": PERSISTENT_DATA / "tw539_walkforward_cache.json",
+    "ca-fantasy5": PERSISTENT_DATA / "ca_fantasy5_walkforward_cache.json",
 }
 FORMAL_ABLATION_FILES = {
-    "tw539": ROOT / "data" / "tw539_ablation_cache.json",
-    "ca-fantasy5": ROOT / "data" / "ca_fantasy5_ablation_cache.json",
+    "tw539": PERSISTENT_DATA / "tw539_ablation_cache.json",
+    "ca-fantasy5": PERSISTENT_DATA / "ca_fantasy5_ablation_cache.json",
 }
 FORMAL_BACKTEST_JOBS: set[str] = set()
 FORMAL_ABLATION_JOBS: set[str] = set()
@@ -4230,6 +4240,93 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
     raise ValueError("unknown game")
 
 
+def _analysis_job_response(job: dict[str, Any], include_result: bool = True) -> dict[str, Any]:
+    response = {
+        "status": job["status"],
+        "job_id": job["job_id"],
+        "game": job["game"],
+        "retry_after_seconds": ANALYSIS_JOB_RETRY_SECONDS,
+        "cached": bool(job.get("cached", False)),
+        "stale": False,
+        "error": job.get("error"),
+    }
+    if include_result and job.get("result") is not None:
+        response["result"] = job["result"]
+    return response
+
+
+def _run_analysis_job(job_id: str, loader) -> None:
+    try:
+        with analysis_job_lock:
+            job = analysis_jobs[job_id]
+            game = job["game"]
+            limit = job["limit"]
+            optimize = job["optimize"]
+        payload = loader(game, limit, optimize=optimize)
+        result = {
+            "ok": True,
+            "game": game,
+            "updatedAt": datetime.now().isoformat(timespec="seconds"),
+            **payload,
+        }
+        with analysis_job_lock:
+            job = analysis_jobs[job_id]
+            job.update(status="completed", result=result, completed_at=time.time(), error=None)
+    except Exception as exc:
+        error_traceback = traceback.format_exc()
+        with analysis_job_lock:
+            job = analysis_jobs[job_id]
+            job.update(
+                status="failed",
+                completed_at=time.time(),
+                error={"message": str(exc), "type": type(exc).__name__, "traceback": error_traceback},
+            )
+
+
+def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=None) -> tuple[dict[str, Any], int]:
+    loader = loader or build_payload
+    request_key = f"{game}:{limit}:{int(optimize)}"
+    now = time.time()
+    with analysis_job_lock:
+        existing_id = analysis_job_keys.get(request_key)
+        existing = analysis_jobs.get(existing_id) if existing_id else None
+        if existing and existing["status"] == "processing":
+            return _analysis_job_response(existing), 202
+        if existing and now - existing.get("completed_at", 0) < ANALYSIS_JOB_RESULT_TTL_SECONDS:
+            existing["cached"] = existing["status"] == "completed"
+            return _analysis_job_response(existing), 200
+
+        job_id = uuid.uuid4().hex
+        job = {
+            "job_id": job_id,
+            "request_key": request_key,
+            "game": game,
+            "limit": limit,
+            "optimize": optimize,
+            "status": "processing",
+            "created_at": now,
+            "completed_at": 0.0,
+            "cached": False,
+            "error": None,
+            "result": None,
+        }
+        analysis_jobs[job_id] = job
+        analysis_job_keys[request_key] = job_id
+    threading.Thread(
+        target=_run_analysis_job,
+        args=(job_id, loader),
+        name=f"lotto-analysis-{game}-{job_id[:8]}",
+        daemon=True,
+    ).start()
+    return _analysis_job_response(job), 202
+
+
+def get_analysis_job(job_id: str) -> dict[str, Any] | None:
+    with analysis_job_lock:
+        job = analysis_jobs.get(job_id)
+        return _analysis_job_response(job) if job else None
+
+
 def public_draw(draw: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in draw.items() if key not in {"source", "sourceUrl"}}
 
@@ -4261,12 +4358,17 @@ class Handler(SimpleHTTPRequestHandler):
         return self.client_address[0] if self.client_address else "unknown"
 
     def rate_limited(self, path: str) -> tuple[bool, int]:
-        limit = API_RATE_LIMITS.get(path)
+        rate_path = path
+        if path.startswith("/api/analyze/status/"):
+            rate_path = "/api/analyze/status"
+        elif path.startswith("/api/analyze/"):
+            rate_path = "/api/analyze"
+        limit = API_RATE_LIMITS.get(rate_path)
         if not limit:
             return False, 0
         max_hits, window_seconds = limit
         now = time.time()
-        key = (self.client_key(), path)
+        key = (self.client_key(), rate_path)
         hits = [hit for hit in rate_limit_hits.get(key, []) if now - hit < window_seconds]
         if len(hits) >= max_hits:
             retry_after = max(1, int(window_seconds - (now - hits[0])))
@@ -4298,6 +4400,14 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/health":
             self.send_json({"ok": True, "service": "lotto-lab", "time": datetime.now().isoformat(timespec="seconds")})
+            return
+        if parsed.path.startswith("/api/analyze/status/"):
+            job_id = unquote(parsed.path.rsplit("/", 1)[-1]).strip()
+            result = get_analysis_job(job_id)
+            if result is None:
+                self.send_json({"ok": False, "error": "analysis job not found"}, status=404)
+            else:
+                self.send_json(result)
             return
         if parsed.path == "/api/config":
             self.send_json(
@@ -4452,6 +4562,20 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if not self.verify_origin():
             self.send_json({"ok": False, "error": "不允許的請求來源"}, status=403)
+            return
+        if parsed.path in {"/api/analyze/tw539", "/api/analyze/ca-fantasy5"}:
+            try:
+                game = parsed.path.rsplit("/", 1)[-1]
+                payload = self.read_json_body()
+                limit = clamp_int(payload.get("limit", 180), 180, 1, 365)
+                optimize = str(payload.get("optimize", "0")).strip().lower() in {"1", "true", "yes"}
+                result, status = start_analysis_job(game, limit, optimize=optimize)
+                headers = {"Retry-After": str(result["retry_after_seconds"])} if status == 202 else None
+                self.send_json(result, status=status, extra_headers=headers)
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=500)
             return
         if parsed.path == "/api/push-subscription":
             try:

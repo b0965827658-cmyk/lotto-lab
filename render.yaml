@@ -2,6 +2,7 @@ services:
   - type: web
     name: lotto-lab
     runtime: python
+    rootDir: lotto-lab-web
     plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: python server.py

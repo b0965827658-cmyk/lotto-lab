@@ -50,7 +50,8 @@ const API_CACHE_STORAGE_KEY = "lotto-lab-api-cache-v2";
 const LAST_SEEN_DRAW_STORAGE_KEY = "lotto-lab-last-seen-draw";
 const POLL_INTERVAL_MS = 30 * 1000;
 const LATEST_POLL_INTERVAL_MS = 15 * 1000;
-const FETCH_TIMEOUT_MS = 360000;
+const FETCH_TIMEOUT_MS = 18000;
+const ANALYSIS_JOB_MAX_WAIT_MS = 8 * 60 * 1000;
 const MAX_BACKTEST_CACHE_SIZE = 600;
 const MAX_CANDIDATE_CACHE_SIZE = 120;
 const MODEL_RENDER_DEBOUNCE_MS = 120;
@@ -926,6 +927,32 @@ async function fetchJsonWithTimeout(url, options = {}) {
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function requestAnalysisPayload(game, limit) {
+  let job = await fetchJsonWithTimeout(`/api/analyze/${game}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit, optimize: false }),
+  });
+  const startedAt = Date.now();
+  while (job?.status === "processing") {
+    if (!job.job_id) throw new Error("分析工作缺少 job_id");
+    if (Date.now() - startedAt >= ANALYSIS_JOB_MAX_WAIT_MS) throw new Error("分析工作等待逾時，請稍後重試");
+    await wait(Math.max(1, Number(job.retry_after_seconds) || 2) * 1000);
+    job = await fetchJsonWithTimeout(`/api/analyze/status/${encodeURIComponent(job.job_id)}`);
+  }
+  if (job?.status === "failed") {
+    throw new Error(job.error?.message || "分析工作失敗");
+  }
+  if (job?.status !== "completed" || !job.result) {
+    throw new Error(job?.error || "分析工作回應格式不正確");
+  }
+  return job.result;
 }
 
 function loadModelWeights() {
@@ -2766,8 +2793,8 @@ async function load(options = {}) {
   try {
     const previousSeen = readLastSeenDraw()[state.game] || "";
     const [rawPayload, rawCompanionPayload] = await Promise.all([
-      fetchJsonWithTimeout(`/api/lottery?game=${state.game}&limit=${state.limit}&t=${Date.now()}`),
-      fetchJsonWithTimeout(`/api/lottery?game=${companionGame}&limit=10&t=${Date.now()}`).catch(() => null),
+      requestAnalysisPayload(state.game, state.limit),
+      requestAnalysisPayload(companionGame, 10).catch(() => null),
     ]);
     const payload = validateLotteryPayload(rawPayload);
     const companionPayload = rawCompanionPayload?.ok && isValidDraw(rawCompanionPayload.latest) ? rawCompanionPayload : null;

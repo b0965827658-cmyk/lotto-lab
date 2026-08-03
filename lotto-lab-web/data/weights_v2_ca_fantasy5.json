@@ -1,0 +1,21 @@
+{
+  "game": "ca-fantasy5",
+  "modelVersion": "2026.08-independent-baselines-v2",
+  "updatedAt": "2026-08-03T00:21:28+00:00",
+  "weights": {
+    "game": "ca-fantasy5",
+    "period": "11956",
+    "date": "2026-08-02",
+    "uniform": 0.06880278931197212,
+    "random": 0.08154253918457462,
+    "long-term-frequency": 0.07216494927835052,
+    "rolling-frequency": 0.11003989889960102,
+    "gap": 0.14228423857715763,
+    "repeat": 0.0498450595015494,
+    "co-occurrence": 0.04842727951572721,
+    "logistic-regression": 0.14388430856115692,
+    "random-forest": 0.14106900858930993,
+    "hist-gradient-boosting": 0.14193992858060073
+  },
+  "source": "walk-forward previous outcomes"
+}

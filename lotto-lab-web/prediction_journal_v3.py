@@ -17,6 +17,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+import os
 
 try:
     import analysis_v2
@@ -25,7 +26,7 @@ except Exception:  # pragma: no cover - direct unit tests can still import helpe
 
 
 ROOT = Path(__file__).parent
-DATA = ROOT / "data"
+DATA = Path(os.environ.get("LOTTO_PERSISTENT_DATA_DIR", ROOT / "data"))
 STAGE_VERSION = "2026.08-prediction-journal-v3"
 MIN_REAL_PRE_DRAW = 100
 MAX_RECORDS = 5000

@@ -1,0 +1,50 @@
+{
+  "game": "tw539",
+  "modelVersion": "2026.08-independent-baselines-v2",
+  "seed": 20260801,
+  "modelType": "deterministic_score_function",
+  "models": [
+    {
+      "name": "uniform",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "random",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "long-term-frequency",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "rolling-frequency",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "gap",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "repeat",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "co-occurrence",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    }
+  ]
+}

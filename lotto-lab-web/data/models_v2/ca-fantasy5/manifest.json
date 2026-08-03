@@ -1,0 +1,98 @@
+{
+  "game": "ca-fantasy5",
+  "modelVersion": "2026.08-independent-baselines-v2",
+  "seed": 20260801,
+  "trainedAt": "2026-08-03T00:13:52+00:00",
+  "historyCount": 465,
+  "featureNames": [
+    "freq_5",
+    "freq_7",
+    "freq_14",
+    "freq_30",
+    "freq_100",
+    "freq_300",
+    "gap",
+    "repeat_prev",
+    "repeat_2",
+    "pair",
+    "tail",
+    "odd",
+    "size",
+    "zone",
+    "sum",
+    "span",
+    "ac",
+    "same_tail",
+    "consecutive",
+    "weekday_pacific",
+    "dst_pacific",
+    "month_pacific"
+  ],
+  "baselineModels": [
+    {
+      "name": "uniform",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "random",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "long-term-frequency",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "rolling-frequency",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "gap",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "repeat",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    },
+    {
+      "name": "co-occurrence",
+      "loadable": true,
+      "inputDimension": 39,
+      "outputDimension": 39
+    }
+  ],
+  "models": [
+    {
+      "name": "logistic-regression",
+      "path": "D:\\Lotto\\lotto-lab\\lotto-lab-web\\data\\models_v2\\ca-fantasy5\\logistic-regression.joblib",
+      "inputDimension": 22,
+      "outputDimension": 1,
+      "loadable": true
+    },
+    {
+      "name": "random-forest",
+      "path": "D:\\Lotto\\lotto-lab\\lotto-lab-web\\data\\models_v2\\ca-fantasy5\\random-forest.joblib",
+      "inputDimension": 22,
+      "outputDimension": 1,
+      "loadable": true
+    },
+    {
+      "name": "hist-gradient-boosting",
+      "path": "D:\\Lotto\\lotto-lab\\lotto-lab-web\\data\\models_v2\\ca-fantasy5\\hist-gradient-boosting.joblib",
+      "inputDimension": 22,
+      "outputDimension": 1,
+      "loadable": true
+    }
+  ]
+}

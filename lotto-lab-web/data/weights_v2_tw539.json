@@ -1,0 +1,21 @@
+{
+  "game": "tw539",
+  "modelVersion": "2026.08-independent-baselines-v2",
+  "updatedAt": "2026-08-03T00:23:30+00:00",
+  "weights": {
+    "game": "tw539",
+    "period": "115000158",
+    "date": "2026-06-30",
+    "uniform": 0.10475257104752571,
+    "random": 0.09776571097765711,
+    "long-term-frequency": 0.0949257309492573,
+    "rolling-frequency": 0.0970368709703687,
+    "gap": 0.0921862809218628,
+    "repeat": 0.1048279710482797,
+    "co-occurrence": 0.10507929105079292,
+    "logistic-regression": 0.09917314099173141,
+    "random-forest": 0.10231471102314711,
+    "hist-gradient-boosting": 0.1019377210193772
+  },
+  "source": "walk-forward previous outcomes"
+}
