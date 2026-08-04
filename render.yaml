@@ -8,11 +8,11 @@ services:
     healthCheckPath: /api/health
     disk:
       name: lotto-lab-data
-      mountPath: /var/data
+      mountPath: /api/health
       sizeGB: 1
     envVars:
       - key: LOTTO_PERSISTENT_DATA_DIR
-        value: /var/data
+        value: /api/health
       - key: HOST
         value: 0.0.0.0
       - key: OMP_NUM_THREADS

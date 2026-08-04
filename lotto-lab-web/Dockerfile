@@ -18,9 +18,9 @@ COPY data ./data
 
 ENV HOST=0.0.0.0
 ENV PORT=8787
-ENV LOTTO_PERSISTENT_DATA_DIR=/var/data
+ENV LOTTO_PERSISTENT_DATA_DIR=/api/health
 
-RUN mkdir -p /var/data
+RUN mkdir -p /api/health
 
 EXPOSE ${PORT}
 

@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV HOST=0.0.0.0
 ENV PORT=8787
-ENV LOTTO_PERSISTENT_DATA_DIR=/var/data
+ENV LOTTO_PERSISTENT_DATA_DIR=/api/health
 ENV OMP_NUM_THREADS=1
 ENV OPENBLAS_NUM_THREADS=1
 ENV MKL_NUM_THREADS=1
@@ -19,7 +19,7 @@ COPY lotto-lab-web/server.py lotto-lab-web/analysis_v2.py lotto-lab-web/predicti
 COPY lotto-lab-web/public ./public
 COPY lotto-lab-web/data ./data
 
-RUN mkdir -p /var/data
+RUN mkdir -p /api/health
 
 EXPOSE ${PORT}
 
