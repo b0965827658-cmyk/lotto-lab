@@ -42,13 +42,22 @@ class AnalysisJobTests(unittest.TestCase):
         self.assertEqual(1, len({response[0]["job_id"] for response in responses}))
         self.assertTrue(all(status == 202 for _, status in responses))
 
-    def test_different_games_can_run_separately(self):
+    def test_different_games_run_in_single_queue(self):
         release = threading.Event()
         calls = []
+        active = 0
+        peak_active = 0
+        active_lock = threading.Lock()
 
         def loader(game, limit, optimize=False):
+            nonlocal active, peak_active
+            with active_lock:
+                active += 1
+                peak_active = max(peak_active, active)
             calls.append(game)
             release.wait(1)
+            with active_lock:
+                active -= 1
             return {"gameResult": game}
 
         tw, tw_status = server.start_analysis_job("tw539", 180, loader=loader)
@@ -59,7 +68,8 @@ class AnalysisJobTests(unittest.TestCase):
         self.assertEqual(202, tw_status)
         self.assertEqual(202, ca_status)
         self.assertNotEqual(tw["job_id"], ca["job_id"])
-        self.assertCountEqual(["tw539", "ca-fantasy5"], calls)
+        self.assertEqual(["tw539", "ca-fantasy5"], calls)
+        self.assertEqual(1, peak_active)
 
     def test_completed_result_is_stable_and_hot_request_is_cached(self):
         calls = 0

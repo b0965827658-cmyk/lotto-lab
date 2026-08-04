@@ -17,6 +17,7 @@ import time
 import traceback
 import uuid
 import posixpath
+import queue
 import urllib.error
 import urllib.request
 import zipfile
@@ -142,8 +143,34 @@ WARM_CACHE_LIMITS = tuple(
 )
 WARM_CACHE_POLL_SECONDS = max(30, int(os.environ.get("LOTTO_WARM_CACHE_POLL_SECONDS", "60")))
 warm_cache_lock = threading.Lock()
-warm_cache_execution_lock = threading.Lock()
 warm_cache_jobs: set[str] = set()
+analysis_work_queue: queue.Queue[tuple[Any, tuple[Any, ...]]] = queue.Queue()
+analysis_worker_lock = threading.Lock()
+analysis_worker_started = False
+
+
+def _analysis_queue_worker() -> None:
+    while True:
+        task, args = analysis_work_queue.get()
+        try:
+            task(*args)
+        except Exception:
+            traceback.print_exc()
+        finally:
+            analysis_work_queue.task_done()
+
+
+def enqueue_analysis_work(task, *args) -> None:
+    global analysis_worker_started
+    with analysis_worker_lock:
+        if not analysis_worker_started:
+            threading.Thread(
+                target=_analysis_queue_worker,
+                name="lotto-analysis-queue",
+                daemon=True,
+            ).start()
+            analysis_worker_started = True
+    analysis_work_queue.put((task, args))
 
 
 def clamp_int(value: str, default: int, minimum: int, maximum: int) -> int:
@@ -426,23 +453,22 @@ def store_warm_result(game: str, limit: int, signature: str, result: dict[str, A
 def _run_warm_cache(game: str, signature: str, limits: tuple[int, ...], loader=None) -> None:
     job_key = f"{game}:{signature}"
     try:
-        with warm_cache_execution_lock:
-            missing = [
-                limit
-                for limit in limits
-                if not ((entry := get_warm_analysis(game, limit)) and entry.get("repositorySignature") == signature)
-            ]
-            if missing:
-                canonical_limit = max(missing)
-                build_warm_cache(game, canonical_limit, signature, loader=loader)
-                canonical = get_warm_analysis(game, canonical_limit)
-                for limit in missing:
-                    if limit == canonical_limit:
-                        continue
-                    result = json.loads(json.dumps(canonical["result"], ensure_ascii=False))
-                    result["history"] = result.get("history", [])[:limit]
-                    result.get("analysis", {}).get("metadata", {})["analysisLimit"] = limit
-                    store_warm_result(game, limit, signature, result)
+        missing = [
+            limit
+            for limit in limits
+            if not ((entry := get_warm_analysis(game, limit)) and entry.get("repositorySignature") == signature)
+        ]
+        if missing:
+            canonical_limit = max(missing)
+            build_warm_cache(game, canonical_limit, signature, loader=loader)
+            canonical = get_warm_analysis(game, canonical_limit)
+            for limit in missing:
+                if limit == canonical_limit:
+                    continue
+                result = json.loads(json.dumps(canonical["result"], ensure_ascii=False))
+                result["history"] = result.get("history", [])[:limit]
+                result.get("analysis", {}).get("metadata", {})["analysisLimit"] = limit
+                store_warm_result(game, limit, signature, result)
         print(f"warm cache completed ({game}) {signature}")
     except Exception as exc:
         # Entries are replaced only after success, so the previous good cache remains.
@@ -466,12 +492,7 @@ def start_warm_cache(game: str, signature: str, limits: tuple[int, ...] | None =
         ):
             return False
         warm_cache_jobs.add(job_key)
-    threading.Thread(
-        target=_run_warm_cache,
-        args=(game, signature, limits, loader),
-        name=f"warm-cache-{game}",
-        daemon=True,
-    ).start()
+    enqueue_analysis_work(_run_warm_cache, game, signature, limits, loader)
     return True
 
 
@@ -4501,12 +4522,7 @@ def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=Non
         }
         analysis_jobs[job_id] = job
         analysis_job_keys[request_key] = job_id
-    threading.Thread(
-        target=_run_analysis_job,
-        args=(job_id, loader, persist_warm),
-        name=f"lotto-analysis-{game}-{job_id[:8]}",
-        daemon=True,
-    ).start()
+    enqueue_analysis_work(_run_analysis_job, job_id, loader, persist_warm)
     return _analysis_job_response(job), 202
 
 

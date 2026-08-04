@@ -95,6 +95,31 @@ class WarmCacheTests(unittest.TestCase):
         self.assertEqual(10, len(small["result"]["history"]))
         self.assertEqual(10, small["result"]["analysis"]["metadata"]["analysisLimit"])
 
+    def test_tw539_finishes_before_fantasy5_starts(self):
+        calls = []
+        active = 0
+        peak_active = 0
+        active_lock = threading.Lock()
+
+        def loader(game, limit, optimize=False):
+            nonlocal active, peak_active
+            with active_lock:
+                active += 1
+                peak_active = max(peak_active, active)
+            calls.append(game)
+            time.sleep(0.02)
+            with active_lock:
+                active -= 1
+            return self.payload(6)
+
+        self.assertTrue(server.start_warm_cache("tw539", "tw-sig", (90,), loader))
+        self.assertTrue(server.start_warm_cache("ca-fantasy5", "ca-sig", (90,), loader))
+        deadline = time.time() + 2
+        while server.warm_cache_jobs and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(["tw539", "ca-fantasy5"], calls)
+        self.assertEqual(1, peak_active)
+
     def test_cache_file_is_valid_json(self):
         server.build_warm_cache("ca-fantasy5", 10, "sig", lambda *args, **kwargs: self.payload(3))
         document = json.loads(server.WARM_CACHE_FILE.read_text(encoding="utf-8"))
