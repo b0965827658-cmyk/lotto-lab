@@ -2611,7 +2611,7 @@ function updateNotificationUi() {
 async function getServiceWorkerRegistration() {
   if (!notificationSupported()) return null;
   if (!state.serviceWorkerRegistration) {
-    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=80", {
+    state.serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js?v=83", {
       updateViaCache: "none",
     });
   }
@@ -2704,7 +2704,7 @@ async function toggleNotifications() {
   }
 }
 
-async function showLocalTestNotification(title = "摘星狙擊手開獎通知", body = "這是一則測試通知。", options = {}) {
+async function showLocalTestNotification(title = "摘星引擎開獎通知", body = "這是一則測試通知。", options = {}) {
   if (!notificationSupported()) {
     setStatus("這個瀏覽器目前不支援通知。", true);
     return;
@@ -2733,7 +2733,7 @@ async function notifyIfLatestChanged(latest, previousKey) {
   const nextKey = drawKey(latest);
   if (!latest || !nextKey || !previousKey || previousKey === nextKey) return;
   if (Notification.permission !== "granted") return;
-  const title = `${latest.name || "摘星狙擊手"} 已更新`;
+  const title = `${latest.name || "摘星引擎"} 已更新`;
   const body = `第 ${latest.period || "-"} 期：${(latest.numbers || []).map(pad).join("、")}`;
   await showLocalTestNotification(title, body, { silent: true });
 }
@@ -3068,7 +3068,7 @@ if (els.notifyToggle) {
 if (els.notifyTest) {
   els.notifyTest.addEventListener("click", () => {
     const latest = state.latest;
-    const title = latest ? `${latest.name} 最新開獎通知` : "摘星狙擊手開獎通知";
+    const title = latest ? `${latest.name} 最新開獎通知` : "摘星引擎開獎通知";
     const body = latest ? `第 ${latest.period || "-"} 期：${latest.numbers.map(pad).join("、")}` : "這是一則測試通知。";
     showLocalTestNotification(title, body);
   });

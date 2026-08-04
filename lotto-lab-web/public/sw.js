@@ -1,11 +1,14 @@
-const CACHE_NAME = "lotto-lab-v82";
+const CACHE_NAME = "lotto-lab-v83-branding";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/styles.css?v=84",
-  "/app.js?v=80",
+  "/app.js?v=83",
   "/manifest.webmanifest",
   "/icon.svg",
+  "/icon-180.png",
+  "/icon-192.png",
+  "/icon-512.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -58,9 +61,9 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { title: "摘星狙擊手開獎通知", body: event.data ? event.data.text() : "最新開獎已更新。" };
+    payload = { title: "摘星引擎開獎通知", body: event.data ? event.data.text() : "最新開獎已更新。" };
   }
-  const title = payload.title || "摘星狙擊手開獎通知";
+  const title = payload.title || "摘星引擎開獎通知";
   const options = {
     body: payload.body || "最新開獎已更新。",
     icon: payload.icon || "/icon-192.png",

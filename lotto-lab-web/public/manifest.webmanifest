@@ -1,7 +1,7 @@
 {
-  "name": "摘星狙擊手",
-  "short_name": "摘星狙擊手",
-  "description": "今彩 539 與加州天天樂開獎號碼、歷史資料與統計參考選號。",
+  "name": "摘星引擎｜彩券邏輯推理引擎",
+  "short_name": "摘星引擎",
+  "description": "摘星引擎｜彩券邏輯推理引擎",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -19,12 +19,6 @@
       "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
       "purpose": "any maskable"
     }
   ]
