@@ -49,6 +49,11 @@ try:
 except Exception:  # pragma: no cover - explainability is additive and optional at startup
     feature_importance = None
 
+try:
+    import operations_v11
+except Exception:  # pragma: no cover - operations reporting must never block Production startup
+    operations_v11 = None
+
 _ORIGINAL_GETADDRINFO = socket.getaddrinfo
 
 
@@ -4882,6 +4887,17 @@ def main():
     server = ThreadingHTTPServer((host, port), Handler)
     threading.Thread(target=warm_cache_monitor_loop, name="lotto-warm-cache-monitor", daemon=True).start()
     print(f"warm cache monitor enabled every {WARM_CACHE_POLL_SECONDS}s for limits {WARM_CACHE_LIMITS}")
+    if operations_v11 is not None and os.environ.get("LOTTO_OPERATIONS_V11_ENABLED", "1").lower() not in {"0", "false", "off"}:
+        threading.Thread(
+            target=operations_v11.daemon_loop,
+            kwargs={
+                "interval": int(os.environ.get("LOTTO_OPERATIONS_V11_INTERVAL", "86400")),
+                "initial_delay": int(os.environ.get("LOTTO_OPERATIONS_V11_INITIAL_DELAY", "60")),
+            },
+            name="lotto-operations-v11",
+            daemon=True,
+        ).start()
+        print("operations v1.1 daily audit enabled")
     if AUTO_NOTIFY_ENABLED:
         threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
         print(f"auto notify enabled every {max(30, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")

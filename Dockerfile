@@ -15,7 +15,7 @@ WORKDIR /app
 COPY lotto-lab-web/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY lotto-lab-web/server.py lotto-lab-web/analysis_v2.py lotto-lab-web/prediction_journal_v3.py ./
+COPY lotto-lab-web/server.py lotto-lab-web/analysis_v2.py lotto-lab-web/prediction_journal_v3.py lotto-lab-web/operations_v11.py ./
 COPY lotto-lab-web/public ./public
 COPY lotto-lab-web/data ./data
 
