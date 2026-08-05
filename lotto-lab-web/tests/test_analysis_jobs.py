@@ -1,16 +1,26 @@
 import threading
 import time
 import unittest
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import server
 
 
 class AnalysisJobTests(unittest.TestCase):
     def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.original_analysis_lock = server.ANALYSIS_EXECUTION_LOCK_FILE
+        server.ANALYSIS_EXECUTION_LOCK_FILE = Path(self.directory.name) / "analysis.lock"
         with server.analysis_job_lock:
             server.analysis_jobs.clear()
             server.analysis_job_keys.clear()
+
+    def tearDown(self):
+        server.analysis_work_queue.join()
+        server.ANALYSIS_EXECUTION_LOCK_FILE = self.original_analysis_lock
+        self.directory.cleanup()
 
     def wait_for_job(self, job_id, timeout=2):
         deadline = time.time() + timeout

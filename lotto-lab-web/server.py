@@ -152,13 +152,107 @@ warm_cache_jobs: set[str] = set()
 analysis_work_queue: queue.Queue[tuple[Any, tuple[Any, ...]]] = queue.Queue()
 analysis_worker_lock = threading.Lock()
 analysis_worker_started = False
+analysis_worker_context = threading.local()
+ANALYSIS_EXECUTION_LOCK_FILE = Path(
+    os.environ.get("LOTTO_ANALYSIS_LOCK_FILE", PERSISTENT_DATA / "analysis_execution.lock")
+)
+
+
+class AnalysisExecutionFileLock:
+    """One non-blocking Production analysis lock shared by every process."""
+
+    def __init__(self, path: Path | None = None):
+        self.path = Path(path or ANALYSIS_EXECUTION_LOCK_FILE)
+        self.stream = None
+        self.acquired = False
+
+    def acquire(self) -> bool:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.stream = self.path.open("a+", encoding="utf-8")
+        try:
+            if os.name == "nt":  # pragma: no cover - Render uses Linux; exercised on Windows CI
+                import msvcrt
+
+                self.stream.seek(0, os.SEEK_END)
+                if self.stream.tell() == 0:
+                    self.stream.write("0")
+                    self.stream.flush()
+                self.stream.seek(0)
+                msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self.stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.acquired = True
+            return True
+        except (BlockingIOError, OSError):
+            self.stream.close()
+            self.stream = None
+            return False
+
+    def release(self) -> None:
+        if not self.stream:
+            return
+        try:
+            if self.acquired:
+                if os.name == "nt":  # pragma: no cover - Render uses Linux
+                    import msvcrt
+
+                    self.stream.seek(0)
+                    msvcrt.locking(self.stream.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(self.stream.fileno(), fcntl.LOCK_UN)
+        finally:
+            self.acquired = False
+            self.stream.close()
+            self.stream = None
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc):
+        self.release()
+
+
+def _analysis_task_busy(task, args: tuple[Any, ...]) -> None:
+    """Resolve a skipped cross-process task without blocking or loading models."""
+    if task is _run_analysis_job:
+        job_id = args[0]
+        with analysis_job_lock:
+            job = analysis_jobs.get(job_id)
+            if job:
+                job.update(
+                    status="failed",
+                    completed_at=time.time(),
+                    error={
+                        "message": "another Production process owns the analysis lock",
+                        "type": "AnalysisBusy",
+                        "retryable": True,
+                    },
+                )
+    elif task is _run_warm_cache:
+        game, signature = args[:2]
+        with warm_cache_lock:
+            warm_cache_jobs.discard(f"{game}:{signature}")
+        print(f"warm cache skipped; analysis lock held by another process ({game})")
 
 
 def _analysis_queue_worker() -> None:
     while True:
         task, args = analysis_work_queue.get()
         try:
-            task(*args)
+            with AnalysisExecutionFileLock() as execution_lock:
+                if not execution_lock.acquired:
+                    _analysis_task_busy(task, args)
+                    continue
+                analysis_worker_context.active = True
+                try:
+                    task(*args)
+                finally:
+                    analysis_worker_context.active = False
         except Exception:
             traceback.print_exc()
         finally:
@@ -439,8 +533,14 @@ def build_warm_cache(game: str, limit: int, signature: str, loader=None) -> bool
     return True
 
 
-def store_warm_result(game: str, limit: int, signature: str, result: dict[str, Any]) -> None:
-    key = _warm_cache_key(game, limit, False)
+def store_warm_result(
+    game: str,
+    limit: int,
+    signature: str,
+    result: dict[str, Any],
+    optimize: bool = False,
+) -> None:
+    key = _warm_cache_key(game, limit, optimize)
     with warm_cache_lock:
         document = _warm_json_load()
         document.setdefault("entries", {})[key] = {
@@ -4381,6 +4481,8 @@ def attach_deep_sniper_analysis(
 
 
 def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, Any]:
+    if not getattr(analysis_worker_context, "active", False):
+        raise RuntimeError("full analysis must run inside the Production analysis queue worker")
     if analysis_v2 is None:
         raise RuntimeError("v2 分析引擎尚未載入；請確認 scikit-learn 與 joblib 已安裝")
     if game == "tw539":
@@ -4439,6 +4541,7 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
 def _analysis_job_response(job: dict[str, Any], include_result: bool = True) -> dict[str, Any]:
     response = {
         "status": job["status"],
+        "completed": job["status"] == "completed",
         "job_id": job["job_id"],
         "game": job["game"],
         "retry_after_seconds": ANALYSIS_JOB_RETRY_SECONDS,
@@ -4469,7 +4572,7 @@ def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
             latest = result.get("latest", {})
             draw_count = result.get("analysis", {}).get("drawCount", len(result.get("history", [])))
             signature = f"{game}:{draw_count}:{latest.get('date', '')}:{latest.get('period', '')}"
-            store_warm_result(game, limit, signature, result)
+            store_warm_result(game, limit, signature, result, optimize=optimize)
         with analysis_job_lock:
             job = analysis_jobs[job_id]
             job.update(status="completed", result=result, completed_at=time.time(), error=None)
@@ -4487,13 +4590,19 @@ def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
 def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=None) -> tuple[dict[str, Any], int]:
     persist_warm = loader is None
     loader = loader or build_payload
-    request_key = f"{game}:{limit}:{int(optimize)}"
+    if persist_warm:
+        history = taiwan_history(5000) if game == "tw539" else california_history(5000)
+        repository_signature = _repository_signature(game, history)
+    else:
+        repository_signature = f"test:{game}"
+    request_key = f"{game}:{limit}:{int(optimize)}:{repository_signature}"
     now = time.time()
-    if persist_warm and not optimize:
-        warm = get_warm_analysis(game, limit)
-        if warm:
+    if persist_warm:
+        warm = get_warm_analysis(game, limit, optimize)
+        if warm and warm.get("repositorySignature") == repository_signature:
             return {
                 "status": "completed",
+                "completed": True,
                 "job_id": f"warm-{hashlib.sha256(request_key.encode()).hexdigest()[:24]}",
                 "game": game,
                 "retry_after_seconds": ANALYSIS_JOB_RETRY_SECONDS,
@@ -4518,6 +4627,7 @@ def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=Non
             "game": game,
             "limit": limit,
             "optimize": optimize,
+            "repository_signature": repository_signature,
             "status": "processing",
             "created_at": now,
             "completed_at": 0.0,
@@ -4529,6 +4639,22 @@ def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=Non
         analysis_job_keys[request_key] = job_id
     enqueue_analysis_work(_run_analysis_job, job_id, loader, persist_warm)
     return _analysis_job_response(job), 202
+
+
+def analysis_get_response(job: dict[str, Any]) -> dict[str, Any]:
+    """Keep legacy completed payload fields while exposing queue lifecycle metadata."""
+    if job.get("status") == "completed" and isinstance(job.get("result"), dict):
+        return {
+            **job["result"],
+            "status": "completed",
+            "completed": True,
+            "cached": bool(job.get("cached", False)),
+            "stale": bool(job.get("stale", False)),
+            "job_id": job.get("job_id"),
+            "retry_after_seconds": job.get("retry_after_seconds", ANALYSIS_JOB_RETRY_SECONDS),
+            "error": None,
+        }
+    return {**job, "completed": False}
 
 
 def get_analysis_job(job_id: str) -> dict[str, Any] | None:
@@ -4674,8 +4800,9 @@ class Handler(SimpleHTTPRequestHandler):
                 if requested != route_game:
                     raise ValueError("分析 API 彩種與路徑不一致")
                 limit = clamp_int(params.get("limit", ["365"])[0], 365, 1, 365)
-                payload = build_payload(route_game, limit)
-                self.send_json({"ok": True, "game": route_game, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
+                job, status = start_analysis_job(route_game, limit, optimize=False)
+                headers = {"Retry-After": str(job["retry_after_seconds"])} if status == 202 else None
+                self.send_json(analysis_get_response(job), status=status, extra_headers=headers)
             except ValueError as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
             except Exception as exc:
@@ -4687,8 +4814,9 @@ class Handler(SimpleHTTPRequestHandler):
                 game = clean_game(params.get("game", ["tw539"])[0])
                 limit = clamp_int(params.get("limit", ["180"])[0], 180, 1, 365)
                 optimize = params.get("optimize", ["0"])[0].strip().lower() in {"1", "true", "yes"}
-                payload = build_payload(game, limit, optimize=optimize)
-                self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **payload})
+                job, status = start_analysis_job(game, limit, optimize=optimize)
+                headers = {"Retry-After": str(job["retry_after_seconds"])} if status == 202 else None
+                self.send_json(analysis_get_response(job), status=status, extra_headers=headers)
             except ValueError as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
             except Exception as exc:

@@ -4,6 +4,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import server
 
@@ -11,13 +12,17 @@ import server
 class WarmCacheTests(unittest.TestCase):
     def setUp(self):
         self.original_file = server.WARM_CACHE_FILE
+        self.original_analysis_lock = server.ANALYSIS_EXECUTION_LOCK_FILE
         self.directory = tempfile.TemporaryDirectory()
         server.WARM_CACHE_FILE = Path(self.directory.name) / "warm.json"
+        server.ANALYSIS_EXECUTION_LOCK_FILE = Path(self.directory.name) / "analysis.lock"
         with server.warm_cache_lock:
             server.warm_cache_jobs.clear()
 
     def tearDown(self):
+        server.analysis_work_queue.join()
         server.WARM_CACHE_FILE = self.original_file
+        server.ANALYSIS_EXECUTION_LOCK_FILE = self.original_analysis_lock
         self.directory.cleanup()
 
     @staticmethod
@@ -36,11 +41,14 @@ class WarmCacheTests(unittest.TestCase):
             calls += 1
             return self.payload(7)
 
-        server.build_warm_cache("tw539", 90, "tw539:5000:2026-08-04:p1", loader)
+        history = [self.payload(7)["latest"]]
+        signature = server._repository_signature("tw539", history)
+        server.build_warm_cache("tw539", 90, signature, loader)
         entry = server.get_warm_analysis("tw539", 90)
         self.assertEqual([7] * 5, entry["result"]["analysis"]["candidateTiers"]["top5"])
         self.assertEqual(1, calls)
-        response, status = server.start_analysis_job("tw539", 90)
+        with patch.object(server, "taiwan_history", return_value=history):
+            response, status = server.start_analysis_job("tw539", 90)
         self.assertEqual(200, status)
         self.assertEqual("completed", response["status"])
         self.assertTrue(response["cached"])
