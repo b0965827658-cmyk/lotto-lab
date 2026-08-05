@@ -156,6 +156,9 @@ analysis_worker_context = threading.local()
 ANALYSIS_EXECUTION_LOCK_FILE = Path(
     os.environ.get("LOTTO_ANALYSIS_LOCK_FILE", PERSISTENT_DATA / "analysis_execution.lock")
 )
+SHADOW_CANDIDATE_A_ENABLED_DEFAULT = False
+shadow_candidate_runner = None
+shadow_baseline_runner = None
 
 
 class AnalysisExecutionFileLock:
@@ -4554,13 +4557,61 @@ def _analysis_job_response(job: dict[str, Any], include_result: bool = True) -> 
     return response
 
 
+def _shadow_candidate_a_enabled() -> bool:
+    return os.environ.get("SHADOW_CANDIDATE_A_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _run_shadow_tail(job_id: str, result: dict[str, Any], current_completed_at: str) -> None:
+    """Run optional Shadow after Current publication, inside the existing worker/flock."""
+    if not _shadow_candidate_a_enabled():
+        return
+    shadow_started_perf = time.perf_counter()
+    shadow_started_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    with analysis_job_lock:
+        analysis_jobs[job_id]["shadow_started_at"] = shadow_started_at
+    try:
+        if shadow_candidate_runner is None or shadow_baseline_runner is None:
+            raise RuntimeError("Frozen Candidate A runners are not configured")
+        # Delayed import is an explicit default-off guarantee: flag=false does
+        # not load config code, validate its hash or touch the shadow path.
+        import shadow_integration
+
+        shadow_integration.run_shadow_tail(
+            game=analysis_jobs[job_id]["game"],
+            current_result=result,
+            current_completed_at=current_completed_at,
+            candidate_runner=shadow_candidate_runner,
+            baseline_runner=shadow_baseline_runner,
+        )
+        shadow_completed_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        with analysis_job_lock:
+            analysis_jobs[job_id].update(
+                shadow_completed_at=shadow_completed_at,
+                shadow_failed_at=None,
+                shadow_latency_ms=round((time.perf_counter() - shadow_started_perf) * 1000, 3),
+            )
+    except Exception as exc:
+        shadow_failed_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        with analysis_job_lock:
+            analysis_jobs[job_id].update(
+                shadow_failed_at=shadow_failed_at,
+                shadow_latency_ms=round((time.perf_counter() - shadow_started_perf) * 1000, 3),
+                shadow_error={"message": str(exc), "type": type(exc).__name__},
+            )
+        print(f"Frozen Candidate A Shadow isolated ({job_id}): {type(exc).__name__}: {exc}")
+
+
 def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
+    worker_started_perf = time.perf_counter()
+    current_started_perf = worker_started_perf
+    current_started_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     try:
         with analysis_job_lock:
             job = analysis_jobs[job_id]
             game = job["game"]
             limit = job["limit"]
             optimize = job["optimize"]
+            job["current_started_at"] = current_started_at
         payload = loader(game, limit, optimize=optimize)
         result = {
             "ok": True,
@@ -4573,9 +4624,24 @@ def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
             draw_count = result.get("analysis", {}).get("drawCount", len(result.get("history", [])))
             signature = f"{game}:{draw_count}:{latest.get('date', '')}:{latest.get('period', '')}"
             store_warm_result(game, limit, signature, result, optimize=optimize)
+        current_completed_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         with analysis_job_lock:
             job = analysis_jobs[job_id]
-            job.update(status="completed", result=result, completed_at=time.time(), error=None)
+            job.update(
+                status="completed",
+                result=result,
+                completed_at=time.time(),
+                current_completed_at=current_completed_at,
+                current_latency_ms=round((time.perf_counter() - current_started_perf) * 1000, 3),
+                error=None,
+            )
+        # Current is now atomically visible to API readers. Shadow remains in
+        # this same queue worker and under the same cross-process flock.
+        _run_shadow_tail(job_id, result, current_completed_at)
+        with analysis_job_lock:
+            analysis_jobs[job_id]["total_worker_occupancy_ms"] = round(
+                (time.perf_counter() - worker_started_perf) * 1000, 3
+            )
     except Exception as exc:
         error_traceback = traceback.format_exc()
         with analysis_job_lock:

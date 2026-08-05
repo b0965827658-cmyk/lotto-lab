@@ -1,0 +1,26 @@
+{
+  "candidate_name": "Candidate A",
+  "version": "v2-shadow-candidate-a-1.0.0",
+  "created_date": "2026-08-05",
+  "git_commit_sha": "65d4a59bc6eb4cc89fa484679bd22281f460069e",
+  "data_version_sha256": "c0316d553b79baadadf249466406bcab13a94549d64338030dad8cca805be329",
+  "random_seed": 20260801,
+  "number_range": [1, 39],
+  "pick_count": 5,
+  "retained_features": ["recent100", "recent300", "recent1000", "recent5000", "omissionFit", "returnRate", "cooccurrence", "repeatRate", "neighborSignal", "tailBalance", "zoneBalance", "routeBalance"],
+  "removed_features": ["recent30", "oddBalance", "sizeBalance", "previousRepeat", "primeBalance"],
+  "fixed_weight_policy": {
+    "feature_neutral_value": 0.5,
+    "removed_feature_weight": 0.0,
+    "retained_feature_multiplier": 1.0,
+    "ensemble_policy": "existing-offline-dynamic-model-weight-rule-frozen-at-git-commit"
+  },
+  "tiers": [5, 10, 15],
+  "ranking_rule": "descending score",
+  "tie_breaking_rule": "ascending lottery number",
+  "immutable": true,
+  "production_eligible": false,
+  "minimum_valid_draws": 100,
+  "recommended_valid_draws": 200,
+  "definition_sha256": "b49be8a60a7ed45a014ed4f2e4f5f00216b5966865501b2b07a7c10973182240"
+}
