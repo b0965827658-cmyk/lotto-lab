@@ -12,6 +12,7 @@ import threading
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable
 
 EXPECTED_CONFIG_HASH = "b49be8a60a7ed45a014ed4f2e4f5f00216b5966865501b2b07a7c10973182240"
@@ -26,6 +27,19 @@ def canonical_hash(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+class _FrozenList(tuple):
+    def __eq__(self, other: Any) -> bool:
+        return tuple(self) == tuple(other) if isinstance(other, (list, tuple)) else False
+
+
+def _readonly(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _readonly(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return _FrozenList(_readonly(item) for item in value)
+    return value
+
+
 def load_candidate_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     payload = {key: item for key, item in value.items() if key != "definition_sha256"}
@@ -36,7 +50,7 @@ def load_candidate_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     expected_removed = ["recent30", "oddBalance", "sizeBalance", "previousRepeat", "primeBalance"]
     if value.get("removed_features") != expected_removed:
         raise ValueError("Candidate A removed-feature contract mismatch")
-    return deepcopy(value)
+    return _readonly(value)
 
 
 def persistent_journal_path(environ: dict[str, str] | None = None) -> Path:
@@ -132,31 +146,57 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+def _runner_payload(value: Any, *, game: str, draw_id: str, version: str) -> tuple[dict[str, list[int]], dict[str, Any]]:
+    """Normalize real runner contracts while retaining test-injection compatibility."""
+    if hasattr(value, "prediction") and hasattr(value, "to_dict"):
+        return _tiers(list(value.prediction)), value.to_dict()
+    tiers = _tiers(list(value))
+    return tiers, {
+        "lottery": game, "draw_id": draw_id, "version": version,
+        "prediction": list(value), "top5": tiers["top5"], "top10": tiers["top10"],
+        "top15": tiers["top15"], "status": "completed", "latency_ms": None,
+    }
+
+
 def run_shadow_tail(
     *,
     game: str,
     current_result: dict[str, Any],
     current_completed_at: str,
-    candidate_runner: Callable[[str, dict[str, Any]], list[int]],
-    baseline_runner: Callable[[str, dict[str, Any]], list[int]],
+    candidate_runner: Callable[..., Any],
+    baseline_runner: Callable[..., Any],
     environ: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run Candidate then baseline sequentially in the caller's worker/flock."""
     config = load_candidate_config()
     journal_path = persistent_journal_path(environ)
-    candidate = _tiers(candidate_runner(game, current_result))
-    baseline = _tiers(baseline_runner(game, current_result))
+    from shadow_runners import build_analysis_context
+    context = build_analysis_context(game, current_result)
     latest = current_result.get("latest") or {}
     draw_id = str(latest.get("period") or latest.get("drawId") or latest.get("date") or "")
     if not draw_id:
         raise ValueError("Shadow draw_id is missing")
+    candidate_result = baseline_result = None
+    candidate_error = baseline_error = None
+    try:
+        candidate_result = candidate_runner(context, current_result, config)
+    except Exception as exc:
+        candidate_error = {"type": type(exc).__name__, "message": str(exc)}
+    try:
+        baseline_result = baseline_runner(context, current_result)
+    except Exception as exc:
+        baseline_error = {"type": type(exc).__name__, "message": str(exc)}
+    if candidate_result is None and baseline_result is None:
+        raise RuntimeError("all Shadow runners failed")
+    candidate, candidate_data = _runner_payload(candidate_result, game=game, draw_id=draw_id, version=config["version"]) if candidate_result is not None else (None, None)
+    baseline, baseline_data = _runner_payload(baseline_result, game=game, draw_id=draw_id, version="uniform") if baseline_result is not None else (None, None)
     created_at = _iso_now()
     data_complete = bool((current_result.get("dataStatus") or {}).get("validated", True))
     official_draw_time = current_result.get("_shadow_official_draw_time")
     late = bool(official_draw_time and created_at >= str(official_draw_time))
     status = "invalid" if late or not data_complete else "locked"
     invalid_reason = "late_prediction" if late else "incomplete_source_data" if not data_complete else None
-    prediction_hash = canonical_hash(candidate)
+    prediction_hash = canonical_hash(candidate) if candidate is not None else None
     record = {
         "lottery": game,
         "draw_id": draw_id,
@@ -165,6 +205,16 @@ def run_shadow_tail(
         "prediction": candidate,
         "prediction_hash": prediction_hash,
         "baseline_prediction": baseline,
+        "candidate_result": candidate_data,
+        "baseline_result": baseline_data,
+        "candidate_status": candidate_data.get("status") if candidate_data else "failed",
+        "baseline_status": baseline_data.get("status") if baseline_data else "failed",
+        "candidate_latency_ms": candidate_data.get("latency_ms") if candidate_data else None,
+        "baseline_latency_ms": baseline_data.get("latency_ms") if baseline_data else None,
+        "candidate_error": candidate_error,
+        "baseline_error": baseline_error,
+        "runtime_version": context.runtime_version,
+        "context_dataset_sha256": context.dataset_sha256,
         "created_at": created_at,
         "current_completed_at": current_completed_at,
         "shadow_started_at": created_at,
@@ -177,4 +227,7 @@ def run_shadow_tail(
         "settled_at": None,
     }
     saved, inserted = ShadowJournal(journal_path).record(record)
-    return {"record": saved, "inserted": inserted, "path": str(journal_path)}
+    return {
+        "record": saved, "inserted": inserted, "path": str(journal_path),
+        "candidate_error": candidate_error, "baseline_error": baseline_error,
+    }

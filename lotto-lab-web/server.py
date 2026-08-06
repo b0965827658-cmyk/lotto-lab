@@ -4570,24 +4570,31 @@ def _run_shadow_tail(job_id: str, result: dict[str, Any], current_completed_at: 
     with analysis_job_lock:
         analysis_jobs[job_id]["shadow_started_at"] = shadow_started_at
     try:
-        if shadow_candidate_runner is None or shadow_baseline_runner is None:
-            raise RuntimeError("Frozen Candidate A runners are not configured")
         # Delayed import is an explicit default-off guarantee: flag=false does
         # not load config code, validate its hash or touch the shadow path.
         import shadow_integration
+        candidate_runner = shadow_candidate_runner
+        baseline_runner = shadow_baseline_runner
+        if candidate_runner is None or baseline_runner is None:
+            from shadow_runners import get_shadow_runners
+            runners = get_shadow_runners(analysis_jobs[job_id]["game"], True)
+            if len(runners) != 2:
+                raise RuntimeError("Frozen Candidate A runners are unavailable for this lottery")
+            candidate_runner, baseline_runner = runners
 
-        shadow_integration.run_shadow_tail(
+        shadow_outcome = shadow_integration.run_shadow_tail(
             game=analysis_jobs[job_id]["game"],
             current_result=result,
             current_completed_at=current_completed_at,
-            candidate_runner=shadow_candidate_runner,
-            baseline_runner=shadow_baseline_runner,
+            candidate_runner=candidate_runner,
+            baseline_runner=baseline_runner,
         )
         shadow_completed_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         with analysis_job_lock:
             analysis_jobs[job_id].update(
                 shadow_completed_at=shadow_completed_at,
-                shadow_failed_at=None,
+                shadow_failed_at=shadow_completed_at if shadow_outcome.get("candidate_error") or shadow_outcome.get("baseline_error") else None,
+                shadow_error=shadow_outcome.get("candidate_error") or shadow_outcome.get("baseline_error"),
                 shadow_latency_ms=round((time.perf_counter() - shadow_started_perf) * 1000, 3),
             )
     except Exception as exc:
