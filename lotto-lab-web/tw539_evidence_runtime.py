@@ -468,12 +468,21 @@ def run_tw539_daily_evidence(
 
 def _main() -> int:
     parser = argparse.ArgumentParser(description="Run deterministic TW539 daily evidence settlement")
-    parser.add_argument("--manifest", required=True, type=Path, help="JSON manifest containing predictions, actuals and registry state")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--manifest", type=Path, help="TEST/RESEARCH ONLY: JSON manifest containing predictions, actuals and registry state")
+    mode.add_argument("--auto", action="store_true", help="Production-compatible fixed-source no-argument provenance mode")
     parser.add_argument("--now", help="timezone-aware evidence cutoff; defaults to current UTC")
     parser.add_argument("--local-test-directory", type=Path, help="explicit test-only output directory")
     arguments = parser.parse_args()
     try:
-        result = run_tw539_daily_evidence(arguments.manifest, test_directory=arguments.local_test_directory, now=arguments.now)
+        if arguments.auto:
+            if arguments.local_test_directory is not None or arguments.now is not None:
+                raise EvidenceError("--auto does not accept test directory or time overrides")
+            from tw539_evidence_provenance import run_tw539_daily_evidence_auto
+
+            result = run_tw539_daily_evidence_auto()
+        else:
+            result = run_tw539_daily_evidence(arguments.manifest, test_directory=arguments.local_test_directory, now=arguments.now)
     except EvidenceError as exc:
         print(canonical_json({"status": "safe_error", "error": type(exc).__name__, "message": str(exc)}))
         return 2

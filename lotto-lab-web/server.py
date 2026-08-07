@@ -54,6 +54,11 @@ try:
 except Exception:  # pragma: no cover - operations reporting must never block Production startup
     operations_v11 = None
 
+try:
+    import tw539_evidence_trigger
+except Exception:  # pragma: no cover - Evidence trigger must never block Current startup
+    tw539_evidence_trigger = None
+
 _ORIGINAL_GETADDRINFO = socket.getaddrinfo
 
 
@@ -106,6 +111,7 @@ API_RATE_LIMITS = {
     "/api/config": (120, 60),
     "/api/push-subscription": (20, 60),
     "/api/notify-latest": (5, 600),
+    "/api/internal/tw539-evidence-cycle": (4, 3600),
     "/prediction": (60, 60),
 }
 ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
@@ -4973,6 +4979,21 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if not self.verify_origin():
             self.send_json({"ok": False, "error": "不允許的請求來源"}, status=403)
+            return
+        if parsed.path == "/api/internal/tw539-evidence-cycle":
+            if tw539_evidence_trigger is None:
+                self.send_json({"status": "PERMANENT_FAILURE", "error_category": "runtime_unavailable"}, status=503)
+                return
+            try:
+                payload = self.read_json_body()
+                supplied = self.headers.get(tw539_evidence_trigger.TRIGGER_HEADER, "")
+                status, response = tw539_evidence_trigger.invoke_current_evidence_cycle(
+                    supplied_secret=supplied,
+                    payload=payload,
+                )
+                self.send_json(response, status=status)
+            except Exception:
+                self.send_json({"status": "PERMANENT_FAILURE", "error_category": "request_error"}, status=500)
             return
         if parsed.path in {"/api/analyze/tw539", "/api/analyze/ca-fantasy5"}:
             try:

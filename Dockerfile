@@ -19,6 +19,8 @@ COPY lotto-lab-web/server.py lotto-lab-web/analysis_v2.py lotto-lab-web/predicti
 COPY lotto-lab-web/shadow_integration.py ./shadow_integration.py
 COPY lotto-lab-web/shadow_runners.py ./shadow_runners.py
 COPY lotto-lab-web/tw539_evidence_runtime.py ./tw539_evidence_runtime.py
+COPY lotto-lab-web/tw539_evidence_provenance.py ./tw539_evidence_provenance.py
+COPY lotto-lab-web/tw539_evidence_trigger.py ./tw539_evidence_trigger.py
 COPY lotto-lab-web/frozen_shadow_test/candidate_a.json ./frozen_shadow_test/candidate_a.json
 COPY lotto-lab-web/public ./public
 COPY lotto-lab-web/data ./data
