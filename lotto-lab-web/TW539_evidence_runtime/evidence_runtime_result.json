@@ -1,0 +1,18 @@
+{
+  "verdict": "A",
+  "runtime_entry": "tw539_evidence_runtime.run_tw539_daily_evidence() / python -m tw539_evidence_runtime --manifest <file>",
+  "runtime_version": "tw539-evidence-runtime-v1.0.0",
+  "evidence_unique_key": "lottery|draw_id|subject_version|evidence_schema_version",
+  "prediction_before_actual": "timezone-aware prediction_created_at and locked_at must both be earlier than trusted actual_available_at; prediction_hash must match immutable prediction core",
+  "candidate_c_isolated": true,
+  "ten_replays_one_record_per_subject": true,
+  "crash_recovery": true,
+  "eps_valid_live_only": true,
+  "dashboard_journal_read_model_only": true,
+  "recommended_cloud_scheduler": "existing Render Web Service controlled scheduler, only after Staging-only approval",
+  "local_codex_heartbeat": "LOCAL_DEVELOPMENT_ONLY; unchanged",
+  "s4": "still awaiting new-draw RSS and Current early-return evidence",
+  "s5": "LOCKED",
+  "production_impact": false,
+  "git_actions": {"commit": false, "push": false, "deploy": false}
+}

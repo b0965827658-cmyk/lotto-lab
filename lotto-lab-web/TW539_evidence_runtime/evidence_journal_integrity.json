@@ -1,0 +1,20 @@
+{
+  "journal_version": "tw539-evidence-journal-v1.0.0",
+  "path_policy": "${LOTTO_PERSISTENT_DATA_DIR}/evidence/tw539_evidence_journal.json",
+  "repository_fallback": false,
+  "append_only": "PASS",
+  "deduplication": "PASS",
+  "immutable_conflict_rejection": "PASS",
+  "record_sha256": "PASS",
+  "journal_sha256": "PASS",
+  "atomic_tempfile_same_directory": "PASS",
+  "file_fsync": "PASS",
+  "os_replace": "PASS",
+  "directory_fsync": "POSIX; NTFS relies on same-volume atomic os.replace",
+  "process_mutex": "PASS",
+  "cross_process_nonblocking_file_lock": "PASS",
+  "corruption_isolation": "PASS",
+  "crash_temp_recovery": "PASS",
+  "restart_deduplication": "PASS",
+  "formal_data_modified": false
+}

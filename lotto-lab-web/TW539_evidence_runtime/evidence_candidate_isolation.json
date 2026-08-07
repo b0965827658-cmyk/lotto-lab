@@ -1,0 +1,12 @@
+{
+  "candidate_c_registry_state": "PROTOTYPE",
+  "dashboard_state": "Prototype / Awaiting Shadow",
+  "accepted_live_states": ["SHADOW_RUNTIME", "OBSERVATION"],
+  "requires_matching_pre_draw_prediction": true,
+  "prototype_walk_forward_accepted_as_live": false,
+  "archived_candidate_accepted_as_live": false,
+  "prototype_test": "PASS; no Candidate record written",
+  "shadow_runtime_test": "PASS; valid pre-draw Candidate accepted",
+  "observation_test": "PASS; valid pre-draw Candidate accepted",
+  "candidate_c_modified": false
+}

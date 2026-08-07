@@ -1,0 +1,11 @@
+{
+  "input_source": "verified Evidence Journal aggregation only",
+  "accepted_validity_status": ["valid"],
+  "rejected_sources": ["prototype", "walk-forward", "invalid", "late prediction", "corrupted", "missing actual", "unverified prediction"],
+  "minimum_live_draws_before_formal_observation": 100,
+  "score_before_runtime_and_regression_gates": null,
+  "automatic_promotion": false,
+  "invalid_record_exclusion_test": "PASS",
+  "candidate_under_100_test": "PASS; score remains null",
+  "s5": "LOCKED"
+}

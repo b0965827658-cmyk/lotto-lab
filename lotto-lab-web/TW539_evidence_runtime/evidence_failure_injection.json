@@ -1,0 +1,19 @@
+{
+  "scope": "pytest temporary directories only",
+  "formal_data_touched": false,
+  "cases": {
+    "crash_after_tempfile_fsync": "PASS; old journal remains and temp is removed",
+    "crash_after_atomic_replace": "PASS; complete new file remains readable",
+    "corrupted_journal": "PASS; content-addressed quarantine and safe stop",
+    "duplicate_execution": "PASS",
+    "invalid_prediction_hash": "PASS; invalid, no hits or EPS",
+    "late_prediction": "PASS; invalid_late_prediction",
+    "missing_actual": "PASS; no_settled_draw and no journal",
+    "candidate_prototype": "PASS; isolated",
+    "lock_contention": "PASS; nonblocking safe error",
+    "stale_temp_file": "PASS; recovered before journal load",
+    "fsync_exception": "PASS",
+    "replace_exception": "PASS"
+  },
+  "result": "PASS"
+}
