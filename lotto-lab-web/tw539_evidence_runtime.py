@@ -271,7 +271,7 @@ def _record_for(prediction: dict[str, Any], actual: dict[str, Any]) -> dict[str,
     validity = "valid"
     invalid_reason = None
     if supplied_hash != expected_hash:
-        validity, invalid_reason = "invalid", "invalid_prediction_hash"
+        validity, invalid_reason = "integrity_error", "invalid_prediction_hash"
     elif locked < created:
         validity, invalid_reason = "invalid", "lock_before_prediction"
     elif not (created < available and locked < available):

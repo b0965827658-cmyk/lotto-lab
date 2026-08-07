@@ -118,8 +118,17 @@ def test_invalid_prediction_hash_is_rejected(tmp_path):
     value["predictions"][0]["prediction_hash"] = "bad"
     run(value, tmp_path)
     record = next(record for record in read_journal(tmp_path)["records"] if record["subject_type"] == "current")
+    assert record["validity_status"] == "integrity_error"
     assert record["invalid_reason"] == "invalid_prediction_hash"
     assert record["hits_top5"] is None
+    assert record["hits_top10"] is None
+    assert record["hits_top15"] is None
+    aggregation = json.loads((tmp_path / "evidence_registry_stats.json").read_text(encoding="utf-8"))
+    assert "current-v1" not in aggregation["subjects"]
+    assert "baseline-v1" in aggregation["subjects"]
+    dashboard = json.loads((tmp_path / "evidence_dashboard.json").read_text(encoding="utf-8"))
+    assert "current-v1" not in dashboard["aggregation"]["subjects"]
+    assert "baseline-v1" in dashboard["aggregation"]["subjects"]
 
 
 def test_missing_actual_is_safe_noop(tmp_path):

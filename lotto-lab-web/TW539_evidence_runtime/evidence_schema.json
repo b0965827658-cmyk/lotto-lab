@@ -23,7 +23,7 @@
     "hits_top10": {"type": ["integer", "null"]},
     "hits_top15": {"type": ["integer", "null"]},
     "win_tie_lose": {"enum": ["win", "tie", "loss", null]},
-    "validity_status": {"enum": ["valid", "invalid"]},
+    "validity_status": {"enum": ["valid", "invalid", "integrity_error"]},
     "invalid_reason": {"type": ["string", "null"]},
     "settled_at": {"type": "string", "format": "date-time"},
     "runtime_version": {"const": "tw539-evidence-runtime-v1.0.0"},
