@@ -54,3 +54,14 @@ def test_private_health_is_read_only_and_post_denied():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_validation_processor_runs_real_full_loop(tmp_path):
+    fixture = Path(__file__).resolve().parents[2]
+    result = cloud_service.validation_process_once(tmp_path, fixture)
+    processor = result["processor"]
+    assert processor["status"] == "PROCESSED_RETURNED_TO_SLEEP"
+    assert processor["rq_opened"] == 1
+    assert processor["experiments_started"] == 1
+    assert processor["result"]["status"] == "COMPLETED_RETURNED_TO_SLEEP"
+    assert processor["returned_to_sleep"] is True

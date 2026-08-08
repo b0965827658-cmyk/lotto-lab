@@ -8,6 +8,7 @@ explicit later activation gate sets RESEARCH_BRAIN_ENABLED=true.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import signal
 import sys
@@ -88,7 +89,7 @@ def process_once(root: Path | None = None) -> dict[str, object]:
         wake_lock_path=Path(paths["audit"]) / "wake.lock",
         prior_by_context={},
         knowledge_by_context={},
-        source_hash_resolver=lambda event: event["source_hash"],
+        source_hash_resolver=lambda _event: digest,
         sandbox_executor=lambda context, rq, key: {
             "status": "SANDBOX_PROPOSAL_RECORDED",
             "context": context,
@@ -100,6 +101,45 @@ def process_once(root: Path | None = None) -> dict[str, object]:
     if result.get("status") == "SAFE_NOOP_SLEEPING":
         result = {**result, "status": "SAFE_NOOP_DISABLED"}
     return {"runtime_version": RUNTIME_VERSION, **result}
+
+
+def validation_process_once(root: Path, fixture: Path) -> dict[str, object]:
+    """Exercise the real Inbox -> Materiality -> Full Loop chain in quarantine."""
+    gate = validation_root(root) / "processor_validation"
+    paths = {name: gate / name for name in ("inbox", "knowledge", "output", "audit", "holdout")}
+    for path in paths.values():
+        path.mkdir(parents=True, exist_ok=True)
+    adapter = ResearchEvidenceEventAdapter(paths["inbox"] / "events.json")
+    manifest = fixture / "approved_inputs.json"
+    if not manifest.exists():
+        manifest = fixture / "research_sandbox" / "approved_inputs.json"
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    source = {
+        "lottery_context": "TW539", "event_type": "VALID_LIVE_EVIDENCE",
+        "source_id": "CLOUD-FULL-LOOP-VALIDATION", "source_version": "v1",
+        "source_hash": digest, "computed_source_hash": digest,
+        "source_quality": "OOS_RESEARCH", "evidence_grade": "E2",
+        "created_at": "2026-08-08T00:00:00Z", "provenance": "validation_fixture",
+        "timing_valid": True, "validation_only": True,
+        "materiality_inputs": {"sample_size": 730, "validation_only": True},
+        "affected_knowledge_ids": ["K-TW539-0001"],
+    }
+    enqueue = adapter.adapt(source)
+    interface = DataInterface(fixture, manifest)
+    result = process_research_inbox_once(
+        adapter,
+        state_path=paths["knowledge"] / "automation_state.json",
+        wake_lock_path=paths["audit"] / "wake.lock",
+        prior_by_context={"TW539": {source["source_id"]: {"sample_size": 700, "quality": "OOS_RESEARCH"}}},
+        knowledge_by_context={"TW539": [{"knowledge_id": "K-TW539-0001", "result": "NO_EDGE_FOUND", "do_not_repeat": "requires new material evidence"}]},
+        source_hash_resolver=lambda event: event["source_hash"],
+        sandbox_executor=lambda context, rq, key: run_full_loop(
+            opened_rq=rq, interface=interface, gate_root=gate,
+            experiment_key=key,
+        ) if context == "TW539" else {"status": "DATA_QUALITY_BLOCKED", "experiments": 0, "knowledge_key": key},
+        enabled=True, kill_switch=False,
+    )
+    return {"enqueue": enqueue, "processor": result, "validation_root": str(gate)}
 
 
 def status(root: Path | None = None) -> dict[str, object]:
@@ -165,6 +205,7 @@ def main() -> int:
         root = _root(); gate = validation_root(root)
         before = formal_manifest(root)
         fixture = Path("/app/research_fixture")
+        processor_validation = validation_process_once(root, fixture)
         interface = DataInterface(fixture, fixture / "approved_inputs.json")
         opened = {"rq_id": "RQ-TW539-OBS-validation", "question": "Does the approved validation fixture complete the frozen Research Loop?", "trigger_evidence_hash": "validation-event-sha256"}
         result = run_full_loop(opened_rq=opened, interface=interface, gate_root=gate, experiment_key="VALIDATION|TW539|FULL_LOOP|v1")
@@ -196,7 +237,8 @@ def main() -> int:
         write_artifact(gate / "local_cloud_parity.json", parity_result)
         write_artifact(gate / "permission_validation.json", permissions)
         write_artifact(gate / "formal_store_diff.json", formal_diff)
-        evidence = {**result, "formal_store_unchanged": formal_unchanged, "permission_validation": permissions, "failure_injection_passed": all(x["status"] == "SAFE_STOP" for x in failure_results.values()), "crash_recovery_passed": crash_result["passed"], "local_cloud_parity": parity_result["passed"], "kill_switch": True, "running_brain_count": 0}
+        processor = processor_validation["processor"]
+        evidence = {**result, "processor_validation": processor_validation, "processor_full_loop_passed": processor.get("rq_opened") == 1 and processor.get("experiments_started") == 1 and processor.get("returned_to_sleep") is True, "formal_store_unchanged": formal_unchanged, "permission_validation": permissions, "failure_injection_passed": all(x["status"] == "SAFE_STOP" for x in failure_results.values()), "crash_recovery_passed": crash_result["passed"], "local_cloud_parity": parity_result["passed"], "kill_switch": True, "running_brain_count": 0}
         write_artifact(gate / "full_loop_result.json", evidence)
         print(json.dumps(evidence, ensure_ascii=False, sort_keys=True)); return 0 if formal_unchanged else 3
     if len(sys.argv) > 1 and sys.argv[1] == "--validation-manifest":
