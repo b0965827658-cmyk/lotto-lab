@@ -1,0 +1,1 @@
+{"cases":["unavailable","timeout","401","403","hash_mismatch","partial_response","duplicate_response","restart"],"behavior":"retryable_or_rejected_without_event_loss","prediction_impact":false}

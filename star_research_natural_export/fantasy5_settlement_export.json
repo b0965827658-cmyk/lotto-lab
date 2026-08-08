@@ -1,0 +1,1 @@
+{"source_type":"FANTASY5_FORWARD_SETTLEMENT","requires":["snapshot_sha256","settlement_sha256"],"validation_only":false,"read_only":true}

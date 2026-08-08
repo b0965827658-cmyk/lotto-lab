@@ -1,0 +1,1 @@
+{"filesystem_traversal":"DENIED","arbitrary_path":"DENIED","unsupported_source":"DENIED","wrong_lottery":"DENIED","invalid_auth":"DENIED","oversized_request":"DENIED","command_injection":"NO_SURFACE","url_injection":"DENIED","rq_injection":"NO_SURFACE","hypothesis_injection":"NO_SURFACE","post_mutation":"NO_ROUTE"}

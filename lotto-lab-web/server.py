@@ -75,6 +75,11 @@ try:
 except Exception:  # pragma: no cover - Evidence trigger must never block Current startup
     tw539_evidence_trigger = None
 
+try:
+    import research_evidence_export
+except Exception:  # pragma: no cover - exporter must never block Prediction startup
+    research_evidence_export = None
+
 _ORIGINAL_GETADDRINFO = socket.getaddrinfo
 
 
@@ -128,6 +133,7 @@ API_RATE_LIMITS = {
     "/api/push-subscription": (20, 60),
     "/api/notify-latest": (5, 600),
     "/api/internal/tw539-evidence-cycle": (4, 3600),
+    "/api/internal/research-evidence": (120, 3600),
     "/prediction": (60, 60),
 }
 ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
@@ -5004,6 +5010,8 @@ class Handler(SimpleHTTPRequestHandler):
             rate_path = "/api/analyze/status"
         elif path.startswith("/api/analyze/"):
             rate_path = "/api/analyze"
+        elif path.startswith("/api/internal/research-evidence/"):
+            rate_path = "/api/internal/research-evidence"
         limit = API_RATE_LIMITS.get(rate_path)
         if not limit:
             return False, 0
@@ -5035,6 +5043,24 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/internal/research-evidence/"):
+            if research_evidence_export is None or not research_evidence_export.authorized(
+                parsed.path,
+                self.headers.get("X-Research-Evidence-Read-Secret"),
+                self.headers.get("Host"),
+            ):
+                self.send_json({"ok": False, "error": "forbidden"}, status=403)
+                return
+            if self.reject_if_rate_limited(parsed.path):
+                return
+            try:
+                query = parse_qs(parsed.query)
+                cursor = int(query.get("cursor", ["0"])[0])
+                limit = int(query.get("limit", ["25"])[0])
+                self.send_json(research_evidence_export.export_page(parsed.path, PERSISTENT_DATA, cursor=cursor, limit=limit))
+            except Exception:
+                self.send_json({"ok": False, "error": "export unavailable"}, status=503)
+            return
         if parsed.path.startswith("/api/") and self.reject_if_rate_limited(parsed.path):
             return
         if parsed.path.startswith("/prediction/") and self.reject_if_rate_limited("/prediction"):

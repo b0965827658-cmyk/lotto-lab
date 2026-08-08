@@ -1,0 +1,1 @@
+{"source_type":"TW539_TELEMETRY_MILESTONE","source":"job_telemetry/jobs/*.json","milestones":[5,10,30,60],"heartbeat_exported":false,"once_only_downstream":true}

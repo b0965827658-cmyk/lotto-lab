@@ -22,6 +22,7 @@ from automation import process_research_inbox_once
 from inbox_adapter import ResearchEvidenceEventAdapter
 from brain import DataInterface
 from full_loop import formal_manifest, permission_validation, run_full_loop, safe_failure_run, validation_root, write_artifact
+from natural_evidence import configured_client, reconcile_natural_research_events_once
 
 RUNTIME_VERSION = "star-research-cloud-v1"
 ROOT_ENV = "STAR_RESEARCH_PERSISTENT_ROOT"
@@ -119,6 +120,14 @@ def process_once(
     root = _root() if root is None else root.resolve()
     paths = ensure_quarantine(root)
     adapter = ResearchEvidenceEventAdapter(Path(paths["inbox"]) / "events.json")
+    client = configured_client()
+    if client is None:
+        reconciliation = {"status": "SAFE_NOOP_EXPORT_NOT_CONFIGURED", "records_added": 0}
+    else:
+        try:
+            reconciliation = reconcile_natural_research_events_once(root, client)
+        except Exception as exc:
+            reconciliation = {"status": "NATURAL_EXPORT_RETRYABLE", "records_added": 0, "error_type": type(exc).__name__}
     result = process_research_inbox_once(
         adapter,
         state_path=Path(paths["knowledge"]) / "automation_state.json",
@@ -132,7 +141,7 @@ def process_once(
     )
     if result.get("status") == "SAFE_NOOP_SLEEPING":
         result = {**result, "status": "SAFE_NOOP_DISABLED"}
-    return {"runtime_version": RUNTIME_VERSION, **result}
+    return {"runtime_version": RUNTIME_VERSION, "reconciliation": reconciliation, **result}
 
 
 def validation_process_once(root: Path, fixture: Path) -> dict[str, object]:
