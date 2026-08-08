@@ -1,0 +1,15 @@
+{
+  "measurement": "local preflight; separate Python processes; 20 iterations each; 2ms RSS sampling",
+  "off": {"mean_latency_ms": 30.60283, "rss_before_bytes": 168673280, "rss_peak_bytes": 168796160, "rss_after_bytes": 168771584},
+  "on": {"mean_latency_ms": 33.12093, "rss_before_bytes": 168820736, "rss_peak_bytes": 169598976, "rss_after_bytes": 169574400},
+  "latency_increase_ms": 2.51810,
+  "latency_increase_percent": 8.23,
+  "observed_peak_rss_delta_bytes": 802816,
+  "observed_peak_rss_delta_mib": 0.765625,
+  "trace_bytes_per_draw": 153049,
+  "projected_365_draw_bytes": 55862885,
+  "projected_3_year_bytes": 167588655,
+  "new_workers": 0,
+  "new_processes": 0,
+  "parallel_scoring": false
+}

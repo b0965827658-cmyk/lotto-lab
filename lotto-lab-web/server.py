@@ -50,6 +50,11 @@ except Exception:  # pragma: no cover - explainability is additive and optional 
     feature_importance = None
 
 try:
+    import tw539_score_trace
+except Exception:  # pragma: no cover - score tracing must never block Current startup
+    tw539_score_trace = None
+
+try:
     import operations_v11
 except Exception:  # pragma: no cover - operations reporting must never block Production startup
     operations_v11 = None
@@ -3131,6 +3136,19 @@ def _mm_feature_rows(stats: dict[str, Any], max_number: int = 39) -> tuple[list[
             "previousRepeat": 0.2 if number in latest and stats["currentRun"].get(number, 0) >= 2 else 0.75 if number in latest else 0.48,
             "neighborSignal": _mm_clamp(stats["cooccurrence"].get(number, 0) / max_cooccurrence),
         }
+        if tw539_score_trace is not None:
+            tw539_score_trace.record_features(number, rows[number], {
+                "window_counts": {str(window): windows.get(window, {}).get(number, 0) for window in MODEL_WINDOWS},
+                "omission": omission_value,
+                "average_omission": avg_gap.get(number),
+                "maximum_omission": max_gap.get(number),
+                "return_rate": stats["returnRate"].get(number, 0),
+                "repeat_rate": stats["repeatRate"].get(number, 0),
+                "cooccurrence": stats["cooccurrence"].get(number, 0),
+                "tail_count": tail_counts.get(tail, 0),
+                "latest_draw_member": number in latest,
+                "current_run": stats["currentRun"].get(number, 0),
+            })
         # The same feature rows are used by all models; every window still
         # keeps its own evidence and is never collapsed into one frequency.
     return list(keys), rows
@@ -3162,13 +3180,29 @@ def _mm_model_scores(stats: dict[str, Any], max_number: int = 39) -> tuple[dict[
     models = {name: {} for name in MODEL_NAMES}
     target_values = {number: _mm_clamp(stats["windows"][300].get(number, 0) / max(1, min(300, stats["count"]))) for number in features}
     for number, row in features.items():
-        windows_score = 0.34 * row["recent30"] + 0.26 * row["recent100"] + 0.18 * row["recent300"] + 0.13 * row["recent1000"] + 0.09 * row["recent5000"]
-        models["bayesian"][number] = _mm_clamp(windows_score * 0.65 + row["returnRate"] * 0.12 + row["omissionFit"] * 0.12 + row["tailBalance"] * 0.11)
-        logistic_value = logistic["intercept"] + sum(logistic[key] * row[key] for key in keys)
-        models["logistic"][number] = _mm_clamp(1 / (1 + math.exp(-max(-12, min(12, logistic_value)))))
-        models["boosted"][number] = _mm_clamp(0.42 * windows_score + 0.18 * row["cooccurrence"] + 0.15 * row["zoneBalance"] + 0.13 * row["tailBalance"] + 0.12 * row["omissionFit"])
-        transition = 0.35 * row["neighborSignal"] + 0.25 * row["returnRate"] + 0.2 * row["repeatRate"] + 0.2 * row["previousRepeat"]
-        models["markov"][number] = _mm_clamp(transition * 0.68 + windows_score * 0.32)
+        window_terms = {"recent30": 0.34 * row["recent30"], "recent100": 0.26 * row["recent100"], "recent300": 0.18 * row["recent300"], "recent1000": 0.13 * row["recent1000"], "recent5000": 0.09 * row["recent5000"]}
+        windows_score = window_terms["recent30"] + window_terms["recent100"] + window_terms["recent300"] + window_terms["recent1000"] + window_terms["recent5000"]
+        bayesian_terms = {"windows_score": windows_score * 0.65, "returnRate": row["returnRate"] * 0.12, "omissionFit": row["omissionFit"] * 0.12, "tailBalance": row["tailBalance"] * 0.11}
+        bayesian_raw = bayesian_terms["windows_score"] + bayesian_terms["returnRate"] + bayesian_terms["omissionFit"] + bayesian_terms["tailBalance"]
+        models["bayesian"][number] = _mm_clamp(bayesian_raw)
+        logistic_terms = {key: logistic[key] * row[key] for key in keys}
+        logistic_value = logistic["intercept"] + sum(logistic_terms[key] for key in keys)
+        logistic_bounded = max(-12, min(12, logistic_value))
+        logistic_sigmoid = 1 / (1 + math.exp(-logistic_bounded))
+        models["logistic"][number] = _mm_clamp(logistic_sigmoid)
+        boosted_terms = {"windows_score": 0.42 * windows_score, "cooccurrence": 0.18 * row["cooccurrence"], "zoneBalance": 0.15 * row["zoneBalance"], "tailBalance": 0.13 * row["tailBalance"], "omissionFit": 0.12 * row["omissionFit"]}
+        boosted_raw = boosted_terms["windows_score"] + boosted_terms["cooccurrence"] + boosted_terms["zoneBalance"] + boosted_terms["tailBalance"] + boosted_terms["omissionFit"]
+        models["boosted"][number] = _mm_clamp(boosted_raw)
+        transition_terms = {"neighborSignal": 0.35 * row["neighborSignal"], "returnRate": 0.25 * row["returnRate"], "repeatRate": 0.2 * row["repeatRate"], "previousRepeat": 0.2 * row["previousRepeat"]}
+        transition = transition_terms["neighborSignal"] + transition_terms["returnRate"] + transition_terms["repeatRate"] + transition_terms["previousRepeat"]
+        markov_terms = {**{key: value * 0.68 for key, value in transition_terms.items()}, **{f"window.{key}": value * 0.32 for key, value in window_terms.items()}}
+        markov_raw = transition * 0.68 + windows_score * 0.32
+        models["markov"][number] = _mm_clamp(markov_raw)
+        if tw539_score_trace is not None:
+            tw539_score_trace.record_model(number, "tw-bayesian", feature_weights={"windows_score":0.65,"returnRate":0.12,"omissionFit":0.12,"tailBalance":0.11}, weighted_terms=bayesian_terms, raw_score=bayesian_raw, transformed_score=models["bayesian"][number], transform={"type":"clamp","input":bayesian_raw,"output":models["bayesian"][number],"delta":models["bayesian"][number]-bayesian_raw})
+            tw539_score_trace.record_model(number, "tw-logistic", feature_weights={key:logistic[key] for key in keys}, weighted_terms=logistic_terms, bias=logistic["intercept"], raw_score=logistic_value, transformed_score=models["logistic"][number], transform={"type":"bounded_sigmoid_then_clamp","input":logistic_value,"bounded_input":logistic_bounded,"sigmoid_output":logistic_sigmoid,"output":models["logistic"][number],"delta":models["logistic"][number]-logistic_value})
+            tw539_score_trace.record_model(number, "tw-boosted", feature_weights={"windows_score":0.42,"cooccurrence":0.18,"zoneBalance":0.15,"tailBalance":0.13,"omissionFit":0.12}, weighted_terms=boosted_terms, raw_score=boosted_raw, transformed_score=models["boosted"][number], transform={"type":"clamp","input":boosted_raw,"output":models["boosted"][number],"delta":models["boosted"][number]-boosted_raw})
+            tw539_score_trace.record_model(number, "tw-markov", feature_weights={"transition":0.68,"windows_score":0.32}, weighted_terms=markov_terms, raw_score=markov_raw, transformed_score=models["markov"][number], transform={"type":"clamp","input":markov_raw,"output":models["markov"][number],"delta":models["markov"][number]-markov_raw})
     return models, features, {"logisticCoefficients": logistic, "featureKeys": keys, "targetRate": target_values}
 
 
@@ -4391,11 +4425,15 @@ def _formal_analysis(game: str, rows: list[dict[str, Any]], max_number: int = 39
     backtest = _formal_backtest(source_rows, game, max_number, pick_count)
     profiles = backtest.get("modelProfiles", [])
     weights = backtest.get("dynamicWeights") or _formal_weights_from_profiles(game, profiles)
+    trace_token = tw539_score_trace.begin(game) if tw539_score_trace is not None else None
     model_scores, features, meta = _formal_scores(game, source_rows, max_number)
     common_stats = meta.get("stats") or _mm_stats(source_rows, max_number)
     ensemble_scores = {number: sum(weights[name] * model_scores[name][number] for name in FORMAL_MODEL_NAMES[game]) for number in range(1, max_number + 1)}
     pool = _mm_select_pool(ensemble_scores, common_stats, max_number, 15)
     ranked = sorted(ensemble_scores, key=lambda number: (-ensemble_scores[number], number))
+    if tw539_score_trace is not None:
+        tw539_score_trace.finalize(weights, ensemble_scores, ranked)
+        tw539_score_trace.finish(trace_token)
     model_top15 = {name: sorted(scores, key=lambda number: (-scores[number], number))[:15] for name, scores in model_scores.items()}
     details = []
     for rank, number in enumerate(pool, start=1):

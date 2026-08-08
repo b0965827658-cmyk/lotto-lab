@@ -1,0 +1,10 @@
+{
+  "fixture_rows": 1000,
+  "numbers": 39,
+  "method": "Sum dynamic ensemble weight times captured transformed model score.",
+  "max_absolute_error": 0.0,
+  "mean_absolute_error": 0.0,
+  "final_score_reconstruction": "EXACT",
+  "feature_attribution": "PARTIAL_ATTRIBUTION",
+  "note": "Exact final reconstruction does not imply that sigmoid or clamp deltas are attributable to individual Features."
+}

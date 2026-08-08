@@ -1,0 +1,13 @@
+{
+  "capture_location": "server.py::_mm_model_scores",
+  "capture_timing": "same invocation as scoring",
+  "models": {
+    "tw-bayesian": {"terms": ["windows_score", "returnRate", "omissionFit", "tailBalance"], "space": "pre-clamp"},
+    "tw-logistic": {"terms": "all 19 active Features", "space": "logit"},
+    "tw-boosted": {"terms": ["windows_score", "cooccurrence", "zoneBalance", "tailBalance", "omissionFit"], "space": "pre-clamp"},
+    "tw-markov": {"terms": ["neighborSignal", "returnRate", "repeatRate", "previousRepeat", "five window terms"], "space": "pre-clamp"}
+  },
+  "post_final_score_reverse_engineering": false,
+  "active_features_have_capture_point": true,
+  "composite_terms_present": true
+}

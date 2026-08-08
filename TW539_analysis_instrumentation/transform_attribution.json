@@ -1,0 +1,11 @@
+{
+  "status": "PARTIAL_ATTRIBUTION",
+  "transforms": [
+    {"model": "tw-logistic", "type": "bounded_sigmoid_then_clamp", "captured": ["input", "bounded_input", "sigmoid_output", "output", "delta"], "distributed_to_features": false},
+    {"model": "tw-bayesian", "type": "clamp", "captured": ["input", "output", "delta"], "distributed_to_features": false},
+    {"model": "tw-boosted", "type": "clamp", "captured": ["input", "output", "delta"], "distributed_to_features": false},
+    {"model": "tw-markov", "type": "clamp", "captured": ["input", "output", "delta"], "distributed_to_features": false}
+  ],
+  "unattributed_component": true,
+  "reason": "Nonlinear and clipping deltas are intentionally not apportioned to Features."
+}

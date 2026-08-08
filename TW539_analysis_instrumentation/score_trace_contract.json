@@ -1,0 +1,19 @@
+{
+  "version": "tw539-score-trace-1.0.0",
+  "flag": "TW539_SCORE_TRACE_ENABLED",
+  "default_enabled": false,
+  "scope": "tw539 only",
+  "per_number_fields": [
+    "raw_features", "normalized_features", "models", "final_score",
+    "final_rank", "reconstructed_final_score", "absolute_error"
+  ],
+  "per_model_fields": [
+    "feature_weights", "weighted_terms", "bias", "model_raw_score",
+    "model_transformed_score", "transform"
+  ],
+  "observer_only": true,
+  "returned_by_analysis": false,
+  "written_to_journal": false,
+  "complete_final_score_attribution": false,
+  "attribution_status": "PARTIAL_ATTRIBUTION"
+}

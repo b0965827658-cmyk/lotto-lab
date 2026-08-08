@@ -1,0 +1,15 @@
+{
+  "targeted": {"passed": 6, "failed": 0},
+  "full_pytest": {"passed": 108, "subtests_passed": 2, "failed": 0, "duration_seconds": 9.19},
+  "python_compile": "PASS",
+  "git_diff_check": "PASS",
+  "tests_cover": [
+    "flag false zero side effect", "ON/OFF score and ranking identity",
+    "39 number containers", "19 active Features", "four model transforms",
+    "exact ensemble reconstruction", "defensive-copy immutability",
+    "collector failure isolation", "Fantasy 5 isolation"
+  ],
+  "commit": false,
+  "push": false,
+  "deploy": false
+}

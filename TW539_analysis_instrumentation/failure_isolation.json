@@ -1,0 +1,10 @@
+{
+  "collector_exception_injected": true,
+  "current_model_scores_unchanged": true,
+  "current_ensemble_scores_unchanged": true,
+  "current_ranking_unchanged": true,
+  "collector_errors_are_internal": true,
+  "fantasy5_capture_blocked": true,
+  "journal_serialization_not_added": true,
+  "memory_pressure_journal_test": "NOT_APPLICABLE_NO_JOURNAL_IN_THIS_GATE"
+}

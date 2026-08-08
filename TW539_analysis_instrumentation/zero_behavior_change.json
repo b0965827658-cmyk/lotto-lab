@@ -1,0 +1,16 @@
+{
+  "same_fixture": true,
+  "instrumentation_off_vs_on": {
+    "model_scores_identical": true,
+    "ensemble_scores_identical": true,
+    "top5_identical": true,
+    "top10_identical": true,
+    "top15_identical": true,
+    "ranking39_identical": true
+  },
+  "api_schema_changed": false,
+  "warm_cache_changed": false,
+  "prediction_journal_behavior_changed": false,
+  "trace_added_to_analysis_payload": false,
+  "flag_false_trace": null
+}

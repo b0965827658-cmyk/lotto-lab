@@ -1,0 +1,23 @@
+{
+  "gate": "TW539 Analysis Instrumentation",
+  "verdict": "B",
+  "status": "PARTIAL_ATTRIBUTION",
+  "numbers_traced": 39,
+  "active_features": 19,
+  "weighted_terms_captured": true,
+  "nonlinear_transforms_separate": true,
+  "unattributed_components_remain": true,
+  "max_final_score_reconstruction_error": 0.0,
+  "on_off_ranking_identical": true,
+  "on_off_top15_identical": true,
+  "flag_default": false,
+  "current_modified": false,
+  "api_schema_changed": false,
+  "warm_cache_changed": false,
+  "production_modified": false,
+  "e4_manual_triggered": false,
+  "candidate_c": "Prototype / Awaiting Shadow",
+  "s5": "LOCKED",
+  "staging_delivery_eligible": true,
+  "delivery_condition": "Must retain PARTIAL_ATTRIBUTION label and remain Staging-only."
+}
