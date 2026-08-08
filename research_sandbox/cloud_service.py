@@ -11,7 +11,9 @@ import json
 import os
 import signal
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from automation import process_research_inbox_once
@@ -22,8 +24,36 @@ ROOT_ENV = "STAR_RESEARCH_PERSISTENT_ROOT"
 DEFAULT_ROOT = "/var/data/star-research"
 INTERVAL_ENV = "RESEARCH_BRAIN_WAKE_INTERVAL_SECONDS"
 DEFAULT_INTERVAL_SECONDS = 4 * 60 * 60
+DEFAULT_PORT = 10000
 
 _stopping = False
+
+
+class HealthHandler(BaseHTTPRequestHandler):
+    """Private-network liveness only. No trigger or management surface."""
+
+    def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
+        if self.path != "/health":
+            self.send_error(404)
+            return
+        payload = json.dumps({"status": "ok", "brain_enabled": _flag("RESEARCH_BRAIN_ENABLED")}, separators=(",", ":")).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_POST(self) -> None:  # noqa: N802 - explicitly deny trigger surface
+        self.send_error(405)
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+
+def start_health_server(port: int | None = None) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer(("0.0.0.0", port if port is not None else int(os.environ.get("PORT", DEFAULT_PORT))), HealthHandler)
+    threading.Thread(target=server.serve_forever, name="research-health", daemon=True).start()
+    return server
 
 
 def _flag(name: str, default: bool = False) -> bool:
@@ -101,16 +131,21 @@ def serve() -> int:
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
     root = _root()
+    health_server = start_health_server()
     print(json.dumps({"event": "RESEARCH_SERVICE_STARTED", **status(root)}, sort_keys=True), flush=True)
     # First invocation proves Disabled/Kill behavior without waiting four hours.
     print(json.dumps({"event": "RESEARCH_WAKE_RESULT", **process_once(root)}, sort_keys=True), flush=True)
     interval = max(60, int(os.environ.get(INTERVAL_ENV, DEFAULT_INTERVAL_SECONDS)))
-    while not _stopping:
-        deadline = time.monotonic() + interval
-        while not _stopping and time.monotonic() < deadline:
-            time.sleep(min(1.0, deadline - time.monotonic()))
-        if not _stopping:
-            print(json.dumps({"event": "RESEARCH_WAKE_RESULT", **process_once(root)}, sort_keys=True), flush=True)
+    try:
+        while not _stopping:
+            deadline = time.monotonic() + interval
+            while not _stopping and time.monotonic() < deadline:
+                time.sleep(min(1.0, deadline - time.monotonic()))
+            if not _stopping:
+                print(json.dumps({"event": "RESEARCH_WAKE_RESULT", **process_once(root)}, sort_keys=True), flush=True)
+    finally:
+        health_server.shutdown()
+        health_server.server_close()
     print(json.dumps({"event": "RESEARCH_SERVICE_STOPPED"}), flush=True)
     return 0
 

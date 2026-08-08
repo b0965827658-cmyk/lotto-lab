@@ -1,4 +1,6 @@
 import json
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import cloud_service
@@ -34,3 +36,21 @@ def test_only_quarantine_directories_are_materialized(tmp_path):
     paths = cloud_service.ensure_quarantine(tmp_path)
     assert set(paths) == {"inbox", "knowledge", "output", "audit"}
     assert all(Path(value).parent == tmp_path for value in paths.values())
+
+
+def test_private_health_is_read_only_and_post_denied():
+    server = cloud_service.start_health_server(0)
+    port = server.server_address[1]
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health") as response:
+            assert response.status == 200
+            assert json.loads(response.read())["status"] == "ok"
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/health", method="POST")
+        try:
+            urllib.request.urlopen(request)
+            raise AssertionError("POST unexpectedly accepted")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 405
+    finally:
+        server.shutdown()
+        server.server_close()
