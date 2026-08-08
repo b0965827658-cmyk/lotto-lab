@@ -14,7 +14,12 @@ from typing import Any
 
 VERSION = "star-research-sandbox-v1"
 ALLOWED_CONTEXTS = {"TW539", "FANTASY5"}
-DENIED_ACTIONS = {"production_write", "deploy", "git_push", "promotion", "shadow_enable", "cloud_create", "formal_journal_write", "formal_dataset_write"}
+DENIED_ACTIONS = {
+    "production_write", "staging_prediction_write", "deploy", "git_push",
+    "promotion", "shadow_enable", "cloud_create", "formal_journal_write",
+    "formal_dataset_write", "dataset_mutation", "prediction_journal_mutation",
+    "evidence_mutation", "snapshot_mutation",
+}
 MAX_EXPERIMENTS = 3
 
 
@@ -216,12 +221,16 @@ def knowledge_record(run_id: str, rq: dict[str, Any], hypotheses: list[dict[str,
     record = {
         "knowledge_id": "K-TW539-0001", "brain_run_id": run_id, "rq_id": rq["rq_id"],
         "question": rq["question"], "hypotheses": hypotheses, "experiment_id": protocol["experiment_id"],
+        "protocol_sha256": protocol["protocol_sha256"],
+        "experiments": [{"experiment_id": result["experiment_id"], "result_sha256": sha(result)}],
+        "falsification": result["falsification_test"],
         "result": result["conclusion"], "evidence_grade": result["evidence_grade"],
         "what_worked": "Deterministic OOS distribution, Random, Baseline, and fixed-seed bootstrap comparison.",
         "what_failed": "Current did not establish a stable material edge.",
         "limitations": ["Aggregated OOS evidence cannot identify diversity causality.", "No independent untouched holdout."],
         "do_not_repeat": "Do not rerun the same distribution comparison without new OOS evidence or a genuinely independent holdout.",
         "next_questions": ["Revisit diversity causality only after per-draw full-ranking provenance exists."],
+        "next_decision": "STOP" if result["conclusion"] == "REJECTED" else "ESCALATE",
     }
     record["record_sha256"] = sha(record)
     return record

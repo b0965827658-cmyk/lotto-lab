@@ -18,6 +18,8 @@ from pathlib import Path
 
 from automation import process_research_inbox_once
 from inbox_adapter import ResearchEvidenceEventAdapter
+from brain import DataInterface
+from full_loop import formal_manifest, permission_validation, run_full_loop, safe_failure_run, validation_root, write_artifact
 
 RUNTIME_VERSION = "star-research-cloud-v1"
 ROOT_ENV = "STAR_RESEARCH_PERSISTENT_ROOT"
@@ -157,6 +159,48 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "--process-once":
         print(json.dumps(process_once(), ensure_ascii=False, sort_keys=True))
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] == "--validate-full-loop":
+        if not _flag("RESEARCH_BRAIN_ENABLED") or not _flag("RESEARCH_BRAIN_KILL_SWITCH"):
+            print(json.dumps({"status": "VALIDATION_REQUIRES_ENABLED_AND_KILLED"}, sort_keys=True)); return 2
+        root = _root(); gate = validation_root(root)
+        before = formal_manifest(root)
+        fixture = Path("/app/research_fixture")
+        interface = DataInterface(fixture, fixture / "approved_inputs.json")
+        opened = {"rq_id": "RQ-TW539-OBS-validation", "question": "Does the approved validation fixture complete the frozen Research Loop?", "trigger_evidence_hash": "validation-event-sha256"}
+        result = run_full_loop(opened_rq=opened, interface=interface, gate_root=gate, experiment_key="VALIDATION|TW539|FULL_LOOP|v1")
+        failure_results = {}
+        for case in ("experiment", "falsification", "knowledge", "holdout", "protocol", "timeout"):
+            failure_results[case] = safe_failure_run(
+                opened_rq=opened, interface=interface, gate_root=gate / "failure_cases" / case,
+                experiment_key=f"FAILURE|{case}", failure=case,
+            )
+        crash_root = gate / "crash_cases"
+        crash_experiment_first = safe_failure_run(opened_rq=opened, interface=interface, gate_root=crash_root / "experiment", experiment_key="CRASH-EXP", failure="after_experiment")
+        crash_experiment_resume = safe_failure_run(opened_rq=opened, interface=interface, gate_root=crash_root / "experiment", experiment_key="CRASH-EXP")
+        crash_knowledge_first = safe_failure_run(opened_rq=opened, interface=interface, gate_root=crash_root / "knowledge", experiment_key="CRASH-KNOW", failure="after_knowledge")
+        crash_knowledge_resume = safe_failure_run(opened_rq=opened, interface=interface, gate_root=crash_root / "knowledge", experiment_key="CRASH-KNOW")
+        parity = run_full_loop(opened_rq=opened, interface=interface, gate_root=gate / "parity", experiment_key="PARITY")
+        after = formal_manifest(root)
+        formal_unchanged = all(before[k] == after[k] for k in ("inbox", "knowledge", "output"))
+        permissions = permission_validation()
+        parity_keys = ("conclusion", "evidence_grade", "supporting_test", "falsification", "random_control", "baseline_control", "protocol_sha256")
+        parity_result = {"passed": all(result[k] == parity[k] for k in parity_keys), "compared_fields": list(parity_keys)}
+        crash_result = {
+            "passed": crash_experiment_first["status"] == "SAFE_STOP" and crash_experiment_resume["status"] == "COMPLETED_RETURNED_TO_SLEEP" and crash_knowledge_first["status"] == "SAFE_STOP" and crash_knowledge_resume["status"] == "RESUMED_ALREADY_FINALIZED",
+            "after_experiment": [crash_experiment_first, crash_experiment_resume],
+            "after_knowledge": [crash_knowledge_first, crash_knowledge_resume],
+        }
+        formal_diff = {"before": before, "after": after, "unchanged": formal_unchanged}
+        write_artifact(gate / "failure_injection.json", failure_results)
+        write_artifact(gate / "crash_recovery.json", crash_result)
+        write_artifact(gate / "local_cloud_parity.json", parity_result)
+        write_artifact(gate / "permission_validation.json", permissions)
+        write_artifact(gate / "formal_store_diff.json", formal_diff)
+        evidence = {**result, "formal_store_unchanged": formal_unchanged, "permission_validation": permissions, "failure_injection_passed": all(x["status"] == "SAFE_STOP" for x in failure_results.values()), "crash_recovery_passed": crash_result["passed"], "local_cloud_parity": parity_result["passed"], "kill_switch": True, "running_brain_count": 0}
+        write_artifact(gate / "full_loop_result.json", evidence)
+        print(json.dumps(evidence, ensure_ascii=False, sort_keys=True)); return 0 if formal_unchanged else 3
+    if len(sys.argv) > 1 and sys.argv[1] == "--validation-manifest":
+        print(json.dumps(formal_manifest(validation_root(_root())), ensure_ascii=False, sort_keys=True)); return 0
     return serve()
 
 

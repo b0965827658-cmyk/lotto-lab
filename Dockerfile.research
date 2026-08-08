@@ -16,6 +16,10 @@ ENV NUMEXPR_NUM_THREADS=1
 WORKDIR /app
 
 COPY research_sandbox/*.py ./research_sandbox/
+COPY research_sandbox/approved_inputs.json /app/research_fixture/approved_inputs.json
+COPY TW539_top15_failure_audit/hit_distribution.csv /app/research_fixture/TW539_top15_failure_audit/hit_distribution.csv
+COPY TW539_top15_failure_audit/random_theoretical_distribution.json /app/research_fixture/TW539_top15_failure_audit/random_theoretical_distribution.json
+COPY TW539_top15_failure_audit/ranking_concentration.json /app/research_fixture/TW539_top15_failure_audit/ranking_concentration.json
 
 EXPOSE 10000
 
