@@ -130,6 +130,7 @@ def _canonical_rq(opened_rq: dict[str, Any]) -> dict[str, Any]:
 def run_full_loop(
     *, opened_rq: dict[str, Any], interface: DataInterface, gate_root: Path,
     experiment_key: str, failure: str | None = None,
+    result_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run/resume exactly one isolated validation RQ using the local engine."""
     started = time.monotonic(); started_cpu = time.process_time()
@@ -220,7 +221,7 @@ def run_full_loop(
         "next_decision": next_decision, "returned_to_sleep": True, "resource_usage": usage,
         "call_chain_sha256": sha(chain),
     }
-    _atomic(gate_root / "full_loop_result.json", result)
+    _atomic(result_path or gate_root / "full_loop_result.json", result)
     _atomic(gate_root / "falsification.json", falsification)
     _atomic(gate_root / "knowledge_validation.json", knowledge)
     _atomic(gate_root / "next_decision.json", {"decision": next_decision, "returned_to_sleep": True})

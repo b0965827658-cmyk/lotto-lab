@@ -65,3 +65,35 @@ def test_validation_processor_runs_real_full_loop(tmp_path):
     assert processor["experiments_started"] == 1
     assert processor["result"]["status"] == "COMPLETED_RETURNED_TO_SLEEP"
     assert processor["returned_to_sleep"] is True
+
+
+def test_formal_open_rq_binds_executor_without_formal_research_writes(tmp_path):
+    paths = cloud_service.ensure_quarantine(tmp_path)
+    adapter = cloud_service.ResearchEvidenceEventAdapter(Path(paths["inbox"]) / "events.json")
+    digest = "a" * 64
+    adapter.adapt({
+        "lottery_context": "TW539", "event_type": "VALID_LIVE_EVIDENCE",
+        "source_id": "binding-only", "source_version": "v1", "source_hash": digest,
+        "computed_source_hash": digest, "source_quality": "OOS_RESEARCH",
+        "evidence_grade": "E2", "created_at": "2026-08-09T00:00:00Z",
+        "provenance": "validation_binding", "timing_valid": True,
+        "materiality_inputs": {"sample_size": 730}, "affected_knowledge_ids": [],
+    })
+    calls = []
+
+    def executor(context, rq, key):
+        calls.append((context, rq["rq_id"], key))
+        return {"status": "BINDING_CONFIRMED", "experiments": 0, "knowledge_key": key, "returned_to_sleep": True}
+
+    result = cloud_service.process_once(
+        tmp_path, enabled=True, kill_switch=False,
+        prior_by_context={"TW539": {"binding-only": {"sample_size": 700, "quality": "OOS_RESEARCH"}}},
+        source_hash_resolver=lambda _event: digest,
+        sandbox_executor=executor,
+    )
+    assert result["rq_opened"] == 1
+    assert len(calls) == 1
+    assert result["result"]["status"] == "BINDING_CONFIRMED"
+    assert result["returned_to_sleep"] is True
+    assert not list((tmp_path / "knowledge").glob("K-*.json"))
+    assert not list((tmp_path / "output").glob("experiment*.json"))

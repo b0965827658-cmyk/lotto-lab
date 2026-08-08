@@ -16,6 +16,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Callable
 
 from automation import process_research_inbox_once
 from inbox_adapter import ResearchEvidenceEventAdapter
@@ -79,7 +80,42 @@ def ensure_quarantine(root: Path) -> dict[str, str]:
     return allowed
 
 
-def process_once(root: Path | None = None) -> dict[str, object]:
+def formal_full_loop_executor(root: Path) -> Callable[[str, dict[str, object], str], dict[str, object]]:
+    """Bind formal OPEN_RQ handling to the approved Full Research Loop.
+
+    A natural source export must already exist under the formal inbox.  The
+    Research service never reaches into another Render service's disk and never
+    manufactures research inputs from an Inbox event.
+    """
+    source_root = root / "inbox" / "source_exports"
+    manifest = source_root / "approved_inputs.json"
+
+    def execute(context: str, rq: dict[str, object], experiment_key: str) -> dict[str, object]:
+        if context != "TW539":
+            return {"status": "DATA_QUALITY_BLOCKED", "experiments": 0, "knowledge_key": experiment_key}
+        if not manifest.is_file():
+            raise RuntimeError("NATURAL_EVIDENCE_READ_PATH_UNAVAILABLE")
+        return run_full_loop(
+            opened_rq=rq,
+            interface=DataInterface(source_root, manifest),
+            gate_root=root,
+            experiment_key=experiment_key,
+            result_path=root / "output" / "full_loop_result.json",
+        )
+
+    return execute
+
+
+def process_once(
+    root: Path | None = None,
+    *,
+    enabled: bool | None = None,
+    kill_switch: bool | None = None,
+    prior_by_context: dict[str, dict[str, dict[str, object]]] | None = None,
+    knowledge_by_context: dict[str, list[dict[str, object]]] | None = None,
+    source_hash_resolver: Callable[[dict[str, object]], str] | None = None,
+    sandbox_executor: Callable[[str, dict[str, object], str], dict[str, object]] | None = None,
+) -> dict[str, object]:
     root = _root() if root is None else root.resolve()
     paths = ensure_quarantine(root)
     adapter = ResearchEvidenceEventAdapter(Path(paths["inbox"]) / "events.json")
@@ -87,16 +123,12 @@ def process_once(root: Path | None = None) -> dict[str, object]:
         adapter,
         state_path=Path(paths["knowledge"]) / "automation_state.json",
         wake_lock_path=Path(paths["audit"]) / "wake.lock",
-        prior_by_context={},
-        knowledge_by_context={},
-        source_hash_resolver=lambda _event: digest,
-        sandbox_executor=lambda context, rq, key: {
-            "status": "SANDBOX_PROPOSAL_RECORDED",
-            "context": context,
-            "rq_id": rq["rq_id"],
-            "experiments": 0,
-            "knowledge_key": key,
-        },
+        prior_by_context=prior_by_context or {},
+        knowledge_by_context=knowledge_by_context or {},
+        source_hash_resolver=source_hash_resolver or (lambda _event: "SOURCE_EXPORT_NOT_READABLE"),
+        sandbox_executor=sandbox_executor or formal_full_loop_executor(root),
+        enabled=enabled,
+        kill_switch=kill_switch,
     )
     if result.get("status") == "SAFE_NOOP_SLEEPING":
         result = {**result, "status": "SAFE_NOOP_DISABLED"}
