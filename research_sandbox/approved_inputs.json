@@ -1,0 +1,10 @@
+{
+  "version": "star-sandbox-inputs-v1",
+  "sources": [
+    {"source_id":"TW539-HIT-DISTRIBUTION","lottery":"TW539","path":"TW539_top15_failure_audit/hit_distribution.csv","version":"top15-audit-v1","provenance":"strict OOS audit artifact","quality":"OOS_RESEARCH","time_range":"700 draws","eligibility":"offline_distribution_research","research_only":true},
+    {"source_id":"TW539-RANDOM-THEORY","lottery":"TW539","path":"TW539_top15_failure_audit/random_theoretical_distribution.json","version":"hypergeometric-v1","provenance":"deterministic theoretical control","quality":"THEORETICAL_CONTROL","time_range":"not_applicable","eligibility":"random_control","research_only":true},
+    {"source_id":"TW539-CONCENTRATION","lottery":"TW539","path":"TW539_top15_failure_audit/ranking_concentration.json","version":"top15-audit-v1","provenance":"strict OOS audit artifact","quality":"OOS_RESEARCH","time_range":"700 draws","eligibility":"observation_only","research_only":true},
+    {"source_id":"F5-REGIME-RESULT","lottery":"FANTASY5","path":"fantasy5_regime_discovery/regime_result.json","version":"regime-discovery-v1","provenance":"exploratory research artifact","quality":"DATA_CONFIDENCE_SENSITIVE","time_range":"95 verified / 275 provisional","eligibility":"E1_exploratory_only","research_only":true},
+    {"source_id":"F5-MEMORY-RESULT","lottery":"FANTASY5","path":"fantasy5_memory_window_audit/memory_window_result.json","version":"memory-audit-v1","provenance":"verified-only audit artifact","quality":"INSUFFICIENT_SAMPLE","time_range":"95 verified","eligibility":"data_quality_assessment_only","research_only":true}
+  ]
+}
