@@ -1,0 +1,1 @@
+{"interval_seconds":10,"active_only":true,"active_phases":["starting","processing"],"compact_representation":true,"fields_preserved":["first_heartbeat_at","last_heartbeat_at","heartbeat_count","owner identity","running_count","lock_state"],"failure_isolated":true,"triggers_recovery":false}

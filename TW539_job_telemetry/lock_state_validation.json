@@ -1,0 +1,1 @@
+{"states":["HELD","AVAILABLE","UNKNOWN"],"file_exists_means_held":false,"lock_owner_pid":null,"owner_status":"FLOCK_OWNER_NOT_AUTHORITATIVE","second_lock_added":false,"analysis_lock_behavior_modified":false,"telemetry_observation_only":true}

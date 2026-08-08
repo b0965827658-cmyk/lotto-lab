@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from job_telemetry import HEARTBEAT_INTERVAL_SECONDS, TelemetryJournal, runtime_owner, utc_now
 from urllib.parse import parse_qs, unquote, urlparse
 
 try:
@@ -170,6 +171,62 @@ ANALYSIS_EXECUTION_LOCK_FILE = Path(
 SHADOW_CANDIDATE_A_ENABLED_DEFAULT = False
 shadow_candidate_runner = None
 shadow_baseline_runner = None
+TW539_JOB_TELEMETRY_ENABLED = os.environ.get("TW539_JOB_TELEMETRY_ENABLED", "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+TW539_JOB_TELEMETRY_ROOT = Path(
+    os.environ.get("TW539_JOB_TELEMETRY_ROOT", PERSISTENT_DATA / "job_telemetry")
+)
+job_telemetry = TelemetryJournal(TW539_JOB_TELEMETRY_ROOT, enabled=TW539_JOB_TELEMETRY_ENABLED)
+telemetry_running_lock = threading.Lock()
+telemetry_running_count = 0
+telemetry_max_running_observed = 0
+telemetry_heartbeat_started = False
+telemetry_heartbeat_lock = threading.Lock()
+
+
+def _telemetry_emit(event_type: str, job: dict[str, Any], **fields: Any) -> None:
+    try:
+        job_telemetry.emit(event_type, dict(job), **fields)
+    except Exception as exc:
+        print(f"TW539 job telemetry isolated ({job.get('job_id')}): {type(exc).__name__}: {exc}")
+
+
+def _telemetry_heartbeat_loop() -> None:
+    while True:
+        time.sleep(HEARTBEAT_INTERVAL_SECONDS)
+        if not TW539_JOB_TELEMETRY_ENABLED:
+            continue
+        with analysis_job_lock:
+            active = [dict(job) for job in analysis_jobs.values() if job.get("telemetry_active")]
+        with telemetry_running_lock:
+            running = telemetry_running_count
+        for job in active:
+            timestamp = utc_now()
+            with analysis_job_lock:
+                current = analysis_jobs.get(job["job_id"])
+                if current:
+                    current["last_heartbeat_at"] = timestamp
+                    job = dict(current)
+            _telemetry_emit(
+                "HEARTBEAT",
+                job,
+                timestamp=timestamp,
+                worker_id=job.get("worker_id"),
+                running_count=running,
+                lock_state="HELD",
+            )
+
+
+def ensure_telemetry_heartbeat() -> None:
+    global telemetry_heartbeat_started
+    if not TW539_JOB_TELEMETRY_ENABLED:
+        return
+    with telemetry_heartbeat_lock:
+        if telemetry_heartbeat_started:
+            return
+        threading.Thread(target=_telemetry_heartbeat_loop, name="tw539-job-telemetry", daemon=True).start()
+        telemetry_heartbeat_started = True
 
 
 class AnalysisExecutionFileLock:
@@ -241,12 +298,14 @@ def _analysis_task_busy(task, args: tuple[Any, ...]) -> None:
                 job.update(
                     status="failed",
                     completed_at=time.time(),
+                    failed_at=utc_now(),
                     error={
                         "message": "another Production process owns the analysis lock",
                         "type": "AnalysisBusy",
                         "retryable": True,
                     },
                 )
+                _telemetry_emit("FAILED", job, running_count=0, lock_state="AVAILABLE")
     elif task is _run_warm_cache:
         game, signature = args[:2]
         with warm_cache_lock:
@@ -255,6 +314,7 @@ def _analysis_task_busy(task, args: tuple[Any, ...]) -> None:
 
 
 def _analysis_queue_worker() -> None:
+    global telemetry_running_count, telemetry_max_running_observed
     while True:
         task, args = analysis_work_queue.get()
         try:
@@ -263,9 +323,56 @@ def _analysis_queue_worker() -> None:
                     _analysis_task_busy(task, args)
                     continue
                 analysis_worker_context.active = True
+                job_id = args[0] if task is _run_analysis_job else None
+                telemetry_job_id = None
+                if job_id and TW539_JOB_TELEMETRY_ENABLED:
+                    with analysis_job_lock:
+                        candidate = analysis_jobs.get(job_id)
+                        if candidate and candidate.get("game") == "tw539":
+                            telemetry_job_id = job_id
+                if telemetry_job_id:
+                    timestamp = utc_now()
+                    with telemetry_running_lock:
+                        telemetry_running_count += 1
+                        telemetry_max_running_observed = max(telemetry_max_running_observed, telemetry_running_count)
+                        running = telemetry_running_count
+                    with analysis_job_lock:
+                        current = analysis_jobs.get(job_id)
+                        if current:
+                            current.update(
+                                current_started_at=timestamp,
+                                telemetry_active=TW539_JOB_TELEMETRY_ENABLED and current.get("game") == "tw539",
+                                worker_id=threading.current_thread().name,
+                                **runtime_owner(),
+                            )
+                            current_snapshot = dict(current)
+                        else:
+                            current_snapshot = None
+                    if current_snapshot:
+                        _telemetry_emit(
+                            "STARTED", current_snapshot, timestamp=timestamp,
+                            worker_id=threading.current_thread().name, running_count=running, lock_state="HELD"
+                        )
                 try:
                     task(*args)
                 finally:
+                    if telemetry_job_id:
+                        timestamp = utc_now()
+                        with analysis_job_lock:
+                            current = analysis_jobs.get(job_id)
+                            if current:
+                                current.update(worker_released_at=timestamp, telemetry_active=False)
+                                current_snapshot = dict(current)
+                            else:
+                                current_snapshot = None
+                        with telemetry_running_lock:
+                            telemetry_running_count = max(0, telemetry_running_count - 1)
+                            running = telemetry_running_count
+                        if current_snapshot:
+                            _telemetry_emit(
+                                "WORKER_RELEASED", current_snapshot, timestamp=timestamp,
+                                worker_id=threading.current_thread().name, running_count=running, lock_state="HELD"
+                            )
                     analysis_worker_context.active = False
         except Exception:
             traceback.print_exc()
@@ -4655,13 +4762,13 @@ def _run_shadow_tail(job_id: str, result: dict[str, Any], current_completed_at: 
 def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
     worker_started_perf = time.perf_counter()
     current_started_perf = worker_started_perf
-    current_started_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     try:
         with analysis_job_lock:
             job = analysis_jobs[job_id]
             game = job["game"]
             limit = job["limit"]
             optimize = job["optimize"]
+            current_started_at = job.get("current_started_at") or utc_now()
             job["current_started_at"] = current_started_at
         payload = loader(game, limit, optimize=optimize)
         result = {
@@ -4682,10 +4789,18 @@ def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
                 status="completed",
                 result=result,
                 completed_at=time.time(),
+                completed_at_utc=current_completed_at,
                 current_completed_at=current_completed_at,
                 current_latency_ms=round((time.perf_counter() - current_started_perf) * 1000, 3),
                 error=None,
             )
+            current_snapshot = dict(job)
+        with telemetry_running_lock:
+            running = telemetry_running_count
+        _telemetry_emit(
+            "CURRENT_COMPLETED", current_snapshot, timestamp=current_completed_at,
+            worker_id=current_snapshot.get("worker_id"), running_count=running, lock_state="HELD"
+        )
         # Current is now atomically visible to API readers. Shadow remains in
         # this same queue worker and under the same cross-process flock.
         _run_shadow_tail(job_id, result, current_completed_at)
@@ -4697,11 +4812,20 @@ def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
         error_traceback = traceback.format_exc()
         with analysis_job_lock:
             job = analysis_jobs[job_id]
+            failed_at = utc_now()
             job.update(
                 status="failed",
                 completed_at=time.time(),
+                failed_at=failed_at,
                 error={"message": str(exc), "type": type(exc).__name__, "traceback": error_traceback},
             )
+            failed_snapshot = dict(job)
+        with telemetry_running_lock:
+            running = telemetry_running_count
+        _telemetry_emit(
+            "FAILED", failed_snapshot, timestamp=failed_at,
+            worker_id=failed_snapshot.get("worker_id"), running_count=running, lock_state="HELD"
+        )
 
 
 def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=None) -> tuple[dict[str, Any], int]:
@@ -4747,6 +4871,10 @@ def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=Non
             "repository_signature": repository_signature,
             "status": "processing",
             "created_at": now,
+            "created_at_utc": utc_now(),
+            "queued_at": utc_now(),
+            "draw_id": (history[0].get("period") or history[0].get("draw_id")) if persist_warm and history else None,
+            "attempt": 1,
             "completed_at": 0.0,
             "cached": False,
             "error": None,
@@ -4754,6 +4882,9 @@ def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=Non
         }
         analysis_jobs[job_id] = job
         analysis_job_keys[request_key] = job_id
+        queued_snapshot = dict(job)
+    _telemetry_emit("QUEUED", queued_snapshot, timestamp=job["queued_at"], running_count=0, lock_state="UNKNOWN")
+    ensure_telemetry_heartbeat()
     enqueue_analysis_work(_run_analysis_job, job_id, loader, persist_warm)
     return _analysis_job_response(job), 202
 

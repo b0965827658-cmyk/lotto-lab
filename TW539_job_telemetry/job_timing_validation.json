@@ -1,0 +1,1 @@
+{"captured":["queued_at","started_at","current_completed_at","worker_released_at"],"derived":["queue_wait_ms","current_analysis_ms","shadow_tail_ms","worker_occupation_ms"],"source":"server lifecycle UTC timestamps","file_mtime_used":false,"http_client_time_used":false,"retrospective_log_guessing":false}

@@ -1,0 +1,1 @@
+{"observed_at":["STARTED","CURRENT_COMPLETED","WORKER_RELEASED","HEARTBEAT"],"local_max_observed":1,"expected_max":1,"new_analysis_worker":false,"new_thread_pool":false,"new_process":false,"telemetry_thread":"one daemon heartbeat observer when enabled"}

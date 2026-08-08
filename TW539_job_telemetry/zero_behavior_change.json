@@ -1,0 +1,1 @@
+{"top5_equal":true,"top10_equal":true,"top15_equal":true,"full39_equal":true,"final_scores_equal":true,"api_schema_equal":true,"warm_cache_contract_equal":true,"prediction_journal_contract_equal":true,"shadow_journal_contract_equal":true,"evidence_runtime_contract_equal":true,"telemetry_participates_in_ranking":false,"telemetry_participates_in_api_decision":false}

@@ -1,0 +1,1 @@
+{"flag":"TW539_JOB_TELEMETRY_ENABLED","default":false,"heartbeat_interval_seconds":10,"lottery":"tw539","timestamps":"UTC server lifecycle clock","events":["QUEUED","STARTED","HEARTBEAT","CURRENT_COMPLETED","WORKER_RELEASED","FAILED"],"automatic_recovery":false,"stale_transition":false,"orphan_cleanup":false,"analysis_reexecution":false}
