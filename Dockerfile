@@ -24,6 +24,8 @@ COPY lotto-lab-web/tw539_evidence_trigger.py ./tw539_evidence_trigger.py
 COPY lotto-lab-web/tw539_evidence_cron.py ./tw539_evidence_cron.py
 COPY lotto-lab-web/tw539_score_trace.py ./tw539_score_trace.py
 COPY lotto-lab-web/job_telemetry.py ./job_telemetry.py
+COPY lotto-lab-web/fantasy5_lifecycle_telemetry.py ./fantasy5_lifecycle_telemetry.py
+COPY lotto-lab-web/fantasy5_partial_capture.py ./fantasy5_partial_capture.py
 COPY lotto-lab-web/frozen_shadow_test/candidate_a.json ./frozen_shadow_test/candidate_a.json
 COPY lotto-lab-web/public ./public
 COPY lotto-lab-web/data ./data

@@ -46,6 +46,16 @@ except Exception:  # pragma: no cover - journal is optional during static-only s
     prediction_journal_v3 = None
 
 try:
+    import fantasy5_lifecycle_telemetry
+except Exception:  # pragma: no cover - observer must never block runtime startup
+    fantasy5_lifecycle_telemetry = None
+
+try:
+    import fantasy5_partial_capture
+except Exception:  # pragma: no cover - default-off observer must never block startup
+    fantasy5_partial_capture = None
+
+try:
     import feature_importance
 except Exception:  # pragma: no cover - explainability is additive and optional at startup
     feature_importance = None
@@ -631,6 +641,8 @@ def build_warm_cache(game: str, limit: int, signature: str, loader=None) -> bool
     """Build one cache entry and publish it only after the full payload succeeds."""
     loader = loader or build_payload
     key = _warm_cache_key(game, limit, False)
+    if game == "ca-fantasy5" and fantasy5_lifecycle_telemetry is not None:
+        fantasy5_lifecycle_telemetry.emit("CACHE_WRITE_STARTED", details={"limit": limit, "repository_signature": signature})
     payload = loader(game, limit, optimize=False)
     result = {
         "ok": True,
@@ -651,6 +663,8 @@ def build_warm_cache(game: str, limit: int, signature: str, loader=None) -> bool
         }
         document["schemaVersion"] = WARM_CACHE_SCHEMA_VERSION
         _warm_json_save(document)
+    if game == "ca-fantasy5" and fantasy5_lifecycle_telemetry is not None:
+        fantasy5_lifecycle_telemetry.emit("CACHE_WRITE_COMPLETED", details={"limit": limit, "repository_signature": signature})
     return True
 
 
@@ -1117,6 +1131,8 @@ def parse_california_history(source_html: str) -> list[dict[str, Any]]:
 
 def california_history(limit: int = 180) -> list[dict[str, Any]]:
     def load():
+        if fantasy5_lifecycle_telemetry is not None:
+            fantasy5_lifecycle_telemetry.emit("DATA_UPDATE_STARTED", details={"source": CALIFORNIA_FANTASY5_URL})
         bundled: list[dict[str, Any]] = []
         # Prefer the formal production database, while retaining the v2 bundle
         # as a compatibility source for deployments that still contain it.
@@ -1135,6 +1151,11 @@ def california_history(limit: int = 180) -> list[dict[str, Any]]:
             live = []
         merged = dedupe_draws(live + bundled)
         merged.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
+        if fantasy5_lifecycle_telemetry is not None:
+            fantasy5_lifecycle_telemetry.emit("DATA_UPDATE_COMPLETED", draw_id=merged[0].get("period") if merged else None, details={"source": CALIFORNIA_FANTASY5_URL, "row_count": len(merged), "live_row_count": len(live)})
+            observed_actuals = fantasy5_lifecycle_telemetry.observe_actuals(merged, source=CALIFORNIA_FANTASY5_URL)
+            if fantasy5_partial_capture is not None:
+                fantasy5_partial_capture.settle_observed_actuals(merged, observed_actuals)
         return merged
 
     return cached("california-history", load)[:limit]
@@ -4668,6 +4689,8 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
             raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
         draws = history[:limit]
         analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
+        if fantasy5_lifecycle_telemetry is not None:
+            fantasy5_lifecycle_telemetry.emit("RANKING_STARTED", draw_id=history[0].get("period"), details={"data_cutoff_draw_id": history[0].get("period")})
         analysis = cached(analysis_key, lambda: analysis_v2.analyze_ca_fantasy5(history))
         latest = history[0]
         status = data_health(game, latest, draws)
@@ -4682,9 +4705,34 @@ def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, An
         analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
         if feature_importance is not None and not analysis.get("dataInsufficient"):
             analysis["featureImportance"] = feature_importance.capture_prediction(game, analysis, latest, history)
+        try:
+            target_draw_id = str(int(str(latest.get("period"))) + 1)
+        except (TypeError, ValueError):
+            target_draw_id = f"next-after:{latest.get('period', '')}"
+        try:
+            dataset_sha256 = analysis_v2.source_hash(game, history)
+        except Exception:
+            dataset_sha256 = None
+        if fantasy5_lifecycle_telemetry is not None:
+            fantasy5_lifecycle_telemetry.prediction_finalized(target_draw_id, dataset_sha256, analysis)
+            fantasy5_lifecycle_telemetry.emit("PREDICTION_OBJECT_CREATED", draw_id=target_draw_id, dataset_sha256=dataset_sha256)
+        if fantasy5_partial_capture is not None:
+            fantasy5_partial_capture.capture_finalized(
+                target_draw_id,
+                analysis,
+                dataset_sha256=dataset_sha256 or "unknown",
+                data_cutoff_draw_id=latest.get("period"),
+                source_quality=status,
+                history=history,
+            )
         analysis["predictionHistory"] = _mm_save_prediction(game, analysis, latest, history)
         if prediction_journal_v3 is not None:
+            if fantasy5_lifecycle_telemetry is not None:
+                fantasy5_lifecycle_telemetry.emit("PREDICTION_LOCK_READY", draw_id=target_draw_id, dataset_sha256=dataset_sha256)
+                fantasy5_lifecycle_telemetry.emit("PREDICTION_JOURNAL_WRITE_STARTED", draw_id=target_draw_id, dataset_sha256=dataset_sha256)
             analysis["predictionJournal"] = prediction_journal_v3.record_live_prediction(game, analysis, latest, history)
+            if fantasy5_lifecycle_telemetry is not None:
+                fantasy5_lifecycle_telemetry.emit("PREDICTION_JOURNAL_WRITE_COMPLETED", draw_id=target_draw_id, dataset_sha256=dataset_sha256)
         payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="ca-fantasy5")
@@ -4770,6 +4818,9 @@ def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
             optimize = job["optimize"]
             current_started_at = job.get("current_started_at") or utc_now()
             job["current_started_at"] = current_started_at
+        if game == "ca-fantasy5" and fantasy5_lifecycle_telemetry is not None:
+            fantasy5_lifecycle_telemetry.set_job_context(job_id)
+            fantasy5_lifecycle_telemetry.emit("ANALYSIS_STARTED", draw_id=job.get("draw_id"), details={"limit": limit})
         payload = loader(game, limit, optimize=optimize)
         result = {
             "ok": True,
@@ -4826,6 +4877,10 @@ def _run_analysis_job(job_id: str, loader, persist_warm: bool = True) -> None:
             "FAILED", failed_snapshot, timestamp=failed_at,
             worker_id=failed_snapshot.get("worker_id"), running_count=running, lock_state="HELD"
         )
+    finally:
+        if 'game' in locals() and game == "ca-fantasy5" and fantasy5_lifecycle_telemetry is not None:
+            fantasy5_lifecycle_telemetry.emit("WORKER_RELEASED", draw_id=job.get("draw_id") if 'job' in locals() else None)
+            fantasy5_lifecycle_telemetry.clear_job_context()
 
 
 def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=None) -> tuple[dict[str, Any], int]:
@@ -4884,6 +4939,8 @@ def start_analysis_job(game: str, limit: int, optimize: bool = False, loader=Non
         analysis_job_keys[request_key] = job_id
         queued_snapshot = dict(job)
     _telemetry_emit("QUEUED", queued_snapshot, timestamp=job["queued_at"], running_count=0, lock_state="UNKNOWN")
+    if game == "ca-fantasy5" and fantasy5_lifecycle_telemetry is not None:
+        fantasy5_lifecycle_telemetry.emit("ANALYSIS_QUEUED", draw_id=job.get("draw_id"), details={"limit": limit, "optimize": optimize})
     ensure_telemetry_heartbeat()
     enqueue_analysis_work(_run_analysis_job, job_id, loader, persist_warm)
     return _analysis_job_response(job), 202
