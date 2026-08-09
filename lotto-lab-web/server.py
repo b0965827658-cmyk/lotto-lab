@@ -5298,7 +5298,18 @@ class Handler(SimpleHTTPRequestHandler):
                         payload.get("game", "all"),
                         user_agent=self.headers.get("User-Agent", ""),
                     )
-                    self.send_json({"ok": True, "subscriberCount": count})
+                    validation = {"records_added": 0, "provider_accepted": 0, "failed": 0}
+                    if notification_delivery and push_server_ready():
+                        event_id = f"validation-subscription-{subscription_id(subscription)}"
+                        validation["records_added"] = notification_delivery.enqueue(
+                            event_id,
+                            "TEST_NOTIFICATION",
+                            "INFO",
+                            "Staging notification delivery validation",
+                            validation_only=True,
+                        )
+                        validation.update(notification_delivery.dispatch(send_push_message))
+                    self.send_json({"ok": True, "subscriberCount": count, "validation": validation})
                     return
                 if action == "unsubscribe":
                     count = remove_push_subscription(subscription)
