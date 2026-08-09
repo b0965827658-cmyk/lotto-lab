@@ -1,0 +1,1 @@
+{"api":["subscribe","unsubscribe","status_via_config"],"required":["endpoint","p256dh","auth"],"metadata":["created_at","updated_at","user_agent","enabled","failure_count"]}

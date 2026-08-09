@@ -1,0 +1,1 @@
+{"maxAttempts":3,"invalidSubscriptionDisabled":true,"dedup":"event_id|subscription_id","stormPrevention":true}
