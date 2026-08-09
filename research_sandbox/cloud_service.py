@@ -134,7 +134,7 @@ def process_once(
         wake_lock_path=Path(paths["audit"]) / "wake.lock",
         prior_by_context=prior_by_context or {},
         knowledge_by_context=knowledge_by_context or {},
-        source_hash_resolver=source_hash_resolver or (lambda _event: "SOURCE_EXPORT_NOT_READABLE"),
+        source_hash_resolver=source_hash_resolver or (client.resolve_event_source_hash if client is not None else (lambda _event: "SOURCE_EXPORT_NOT_READABLE")),
         sandbox_executor=sandbox_executor or formal_full_loop_executor(root),
         enabled=enabled,
         kill_switch=kill_switch,

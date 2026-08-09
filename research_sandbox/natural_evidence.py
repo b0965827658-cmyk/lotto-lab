@@ -12,6 +12,10 @@ from typing import Any
 from inbox_adapter import ResearchEvidenceEventAdapter
 
 SCHEMA_VERSION = "star-research-natural-export-v1"
+CANONICALIZATION_VERSION = "canonical-evidence-bytes-v1"
+INTEGRITY_CONTRACT_VERSION = "source-integrity-v1"
+HASH_ALGORITHM = "sha256"
+SOURCE_HASH_TYPE = "RECORD_HASH"
 ENDPOINTS = {
     "TW539_VALID_LIVE_EVIDENCE": "/api/internal/research-evidence/tw539/evidence",
     "TW539_TELEMETRY_MILESTONE": "/api/internal/research-evidence/tw539/milestones",
@@ -26,9 +30,14 @@ EVENT_TYPES = {
 }
 
 
-def _sha(value: Any) -> str:
+def canonical_evidence_bytes_v1(value: Any) -> bytes:
+    """Frozen semantic JSON representation used for individual evidence records."""
     raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(raw.encode()).hexdigest()
+    return raw.encode("utf-8")
+
+
+def _sha(value: Any) -> str:
+    return hashlib.sha256(canonical_evidence_bytes_v1(value)).hexdigest()
 
 
 class NaturalEvidenceReadClient:
@@ -58,6 +67,20 @@ class NaturalEvidenceReadClient:
                 raise ValueError("REJECTED_SOURCE_INTEGRITY")
         return {**value, "export_sha256": export_hash}
 
+    def resolve_event_source_hash(self, event: dict[str, Any]) -> str:
+        """Re-read the authenticated export and return only a verified RECORD_HASH."""
+        source_type = str(event.get("source_id", "")).split(":", 1)[0]
+        if source_type not in ENDPOINTS:
+            return "SOURCE_EXPORT_NOT_READABLE"
+        cursor: int | None = 0
+        while cursor is not None:
+            page = self.fetch(source_type, cursor)
+            for item in page.get("records", []):
+                if item.get("record_hash") == event.get("source_hash"):
+                    return str(item["record_hash"])
+            cursor = page["pagination"]["next_cursor"]
+        return "SOURCE_RECORD_NOT_FOUND"
+
 
 def reconcile_natural_research_events_once(root: Path, client: NaturalEvidenceReadClient) -> dict[str, Any]:
     adapter = ResearchEvidenceEventAdapter(root / "inbox" / "events.json")
@@ -83,6 +106,10 @@ def reconcile_natural_research_events_once(root: Path, client: NaturalEvidenceRe
                     "provenance": "authenticated_read_only_export", "timing_valid": timing_valid,
                     "materiality_inputs": {"sample_size": payload.get("qualified_sample_count", milestone), "milestone": milestone, "forward_verified_count": 1 if source_type.startswith("FANTASY5") else 0},
                     "affected_knowledge_ids": [],
+                    "integrity_contract_version": INTEGRITY_CONTRACT_VERSION,
+                    "canonicalization_version": CANONICALIZATION_VERSION,
+                    "hash_algorithm": HASH_ALGORITHM,
+                    "source_hash_type": SOURCE_HASH_TYPE,
                 }
                 result = adapter.adapt(source)
                 added += int(result.get("records_added", 0)); duplicates += int(result.get("status") in {"DUPLICATE_DEDUPED", "MILESTONE_ALREADY_EMITTED"})

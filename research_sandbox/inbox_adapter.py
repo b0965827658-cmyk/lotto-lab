@@ -12,7 +12,7 @@ from typing import Any
 
 from observation import observe_inbox
 
-ADAPTER_VERSION = "star-research-event-adapter-v1"
+ADAPTER_VERSION = "star-research-event-adapter-v2"
 EVENT_STATUSES = {"NEW", "REJECTED_AT_ADAPTER", "IGNORED_NO_MATERIAL_CHANGE", "OBSERVED", "RESEARCH_OPENED", "CONSUMED"}
 TW_TYPES = {"VALID_LIVE_EVIDENCE", "TELEMETRY_MILESTONE", "FULL_RANKING_SETTLEMENT", "SETTLED_MISS_PATTERN", "CANDIDATE_RESEARCH_RESULT", "DATA_QUALITY_CHANGE"}
 F5_TYPES = {"NATURAL_FORWARD_SNAPSHOT", "FORWARD_SETTLEMENT", "FORWARD_MILESTONE", "VERIFIED_DATASET_QUALITY_CHANGE", "VALID_RESEARCH_RESULT"}
@@ -149,7 +149,21 @@ class ResearchEvidenceEventAdapter:
             "materiality_inputs": source.get("materiality_inputs", {}),
             "affected_knowledge_ids": source.get("affected_knowledge_ids", []),
             "adapter_version": ADAPTER_VERSION, "status": "NEW",
+            "integrity_contract_version": source.get("integrity_contract_version", "legacy-unspecified"),
+            "canonicalization_version": source.get("canonicalization_version", "legacy-unspecified"),
+            "hash_algorithm": source.get("hash_algorithm", "sha256"),
+            "source_hash_type": source.get("source_hash_type", "LEGACY_UNSPECIFIED"),
         }
+        # Preserve the immutable legacy event and make the repair lineage explicit.
+        legacy = None
+        existing = _safe_read(self.inbox_path)
+        for candidate in existing["events"]:
+            if candidate.get("source_id") == event["source_id"] and candidate.get("source_hash") == event["source_hash"]:
+                legacy = candidate
+                break
+        if legacy and legacy.get("adapter_version") != ADAPTER_VERSION:
+            event["supersedes_event_id"] = legacy["event_id"]
+            event["supersede_reason"] = "SOURCE_INTEGRITY_CONTRACT_REPAIRED"
         event["event_sha256"] = _sha(event)
         with _LOCK, FileLock(self.lock_path):
             journal = _safe_read(self.inbox_path)
