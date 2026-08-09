@@ -1,0 +1,9 @@
+{
+  "brain_logic_zero_change": true,
+  "context_isolation": true,
+  "kill": false,
+  "operating_mode": "AUTONOMOUS_OBSERVATION",
+  "prediction_zero_change": true,
+  "read_only": true,
+  "verdict": "A"
+}

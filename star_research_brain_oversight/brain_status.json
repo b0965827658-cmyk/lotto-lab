@@ -1,0 +1,29 @@
+{
+  "current_experiment": null,
+  "current_rq": null,
+  "current_state": "SLEEPING",
+  "daily_budget_remaining": 3,
+  "enabled": true,
+  "experiments_today": 0,
+  "fantasy5_evidence_status": {
+    "events": 0,
+    "latest_event_id": null
+  },
+  "kill": false,
+  "knowledge_count": 0,
+  "last_event_id": null,
+  "last_event_source": null,
+  "last_lottery": null,
+  "last_materiality_decision": null,
+  "last_wake_at": null,
+  "operating_mode": "AUTONOMOUS_OBSERVATION",
+  "persistent_disk_usage_bytes": 0,
+  "production_model_changed": false,
+  "running_brain_count": 0,
+  "shadow_recommendations_pending": 0,
+  "tw539_evidence_status": {
+    "events": 0,
+    "latest_event_id": null
+  },
+  "version": "star-research-oversight-v1"
+}

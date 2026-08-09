@@ -23,6 +23,7 @@ from inbox_adapter import ResearchEvidenceEventAdapter
 from brain import DataInterface
 from full_loop import formal_manifest, permission_validation, run_full_loop, safe_failure_run, validation_root, write_artifact
 from natural_evidence import configured_client, reconcile_natural_research_events_once
+from oversight import snapshot as oversight_snapshot, write_artifacts as write_oversight_artifacts
 
 RUNTIME_VERSION = "star-research-cloud-v1"
 ROOT_ENV = "STAR_RESEARCH_PERSISTENT_ROOT"
@@ -38,10 +39,14 @@ class HealthHandler(BaseHTTPRequestHandler):
     """Private-network liveness only. No trigger or management surface."""
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
-        if self.path != "/health":
+        if self.path == "/health":
+            body = {"status": "ok", "brain_enabled": _flag("RESEARCH_BRAIN_ENABLED")}
+        elif self.path == "/oversight":
+            body = oversight_snapshot(_root())
+        else:
             self.send_error(404)
             return
-        payload = json.dumps({"status": "ok", "brain_enabled": _flag("RESEARCH_BRAIN_ENABLED")}, separators=(",", ":")).encode()
+        payload = json.dumps(body, separators=(",", ":")).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -239,6 +244,12 @@ def main() -> int:
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "--process-once":
         print(json.dumps(process_once(), ensure_ascii=False, sort_keys=True))
+        return 0
+    if len(sys.argv) > 1 and sys.argv[1] == "--oversight":
+        print(json.dumps(oversight_snapshot(_root()), ensure_ascii=False, sort_keys=True))
+        return 0
+    if len(sys.argv) > 2 and sys.argv[1] == "--write-oversight":
+        print(json.dumps(write_oversight_artifacts(_root(), Path(sys.argv[2])), ensure_ascii=False, sort_keys=True))
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "--validate-full-loop":
         if not _flag("RESEARCH_BRAIN_ENABLED") or not _flag("RESEARCH_BRAIN_KILL_SWITCH"):

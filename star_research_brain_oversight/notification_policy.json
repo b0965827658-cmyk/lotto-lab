@@ -1,0 +1,15 @@
+{
+  "daily_digest_if_no_material_research": "NO_MATERIAL_RESEARCH",
+  "do_not_notify": [
+    "NORMAL_WAKE",
+    "OBSERVE_ONLY",
+    "REJECTED_EXPERIMENT"
+  ],
+  "notify": [
+    "SHADOW_RECOMMENDED",
+    "EMERGENCY_KILL",
+    "INTEGRITY_FAILURE",
+    "PERSISTENT_STORAGE_RISK",
+    "REPEATED_AUTONOMY_FAILURE"
+  ]
+}

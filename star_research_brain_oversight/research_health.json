@@ -1,0 +1,12 @@
+{
+  "data_quality_blocked": 0,
+  "duplicate_research_blocked": 0,
+  "emergency_kills": 0,
+  "experiment_count": 0,
+  "integrity_failures": 0,
+  "over_research_warning": false,
+  "resource_budget_violations": 0,
+  "rq_count": 0,
+  "version": "star-research-oversight-v1",
+  "wake_count": 0
+}

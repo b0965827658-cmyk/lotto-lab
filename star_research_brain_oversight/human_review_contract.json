@@ -1,0 +1,12 @@
+{
+  "allowed": [
+    "APPROVE_SHADOW_REVIEW",
+    "REJECT",
+    "REQUEST_MORE_EVIDENCE"
+  ],
+  "direct_deploy": false,
+  "direct_promotion": false,
+  "knowledge_modify": false,
+  "model_modify": false,
+  "secrets_visible": false
+}

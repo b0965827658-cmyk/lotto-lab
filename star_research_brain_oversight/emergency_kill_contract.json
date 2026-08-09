@@ -1,0 +1,6 @@
+{
+  "action": "SET_RESEARCH_BRAIN_KILL_SWITCH_TRUE",
+  "prediction_heart_affected": false,
+  "restart_required_for_environment_reload": true,
+  "target": "RESEARCH_BRAIN_ONLY"
+}
