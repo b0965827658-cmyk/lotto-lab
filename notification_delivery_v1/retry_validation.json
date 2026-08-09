@@ -1,0 +1,1 @@
+{"transient_retry":true,"max_attempts":3,"invalid_subscription_disabled":true,"storm_prevention":true,"local_test":"PASS"}

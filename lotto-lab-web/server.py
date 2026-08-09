@@ -80,6 +80,11 @@ try:
 except Exception:  # pragma: no cover - exporter must never block Prediction startup
     research_evidence_export = None
 
+try:
+    from notification_delivery import NotificationDelivery
+except Exception:  # pragma: no cover - notification delivery must never block Prediction startup
+    NotificationDelivery = None
+
 _ORIGINAL_GETADDRINFO = socket.getaddrinfo
 
 
@@ -144,7 +149,11 @@ PUSH_CONTACT_EMAIL = os.environ.get("LOTTO_PUSH_CONTACT_EMAIL", "admin@example.c
 NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
 SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", PERSISTENT_DATA / "push_subscriptions.json"))
 NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", PERSISTENT_DATA / "notify_state.json"))
-AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+NOTIFICATION_DELIVERY_ROOT = Path(
+    os.environ.get("LOTTO_NOTIFICATION_DELIVERY_ROOT", PERSISTENT_DATA / "notification_delivery")
+)
+NOTIFICATION_TEST_SECRET = os.environ.get("LOTTO_NOTIFICATION_TEST_SECRET", "").strip()
+AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "0").strip().lower() not in {"0", "false", "no", "off"}
 AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "30"))
 AUTO_NOTIFY_GAMES = [
     game.strip()
@@ -162,6 +171,7 @@ class CacheItem:
 cache: dict[str, CacheItem] = {}
 rate_limit_hits: dict[tuple[str, str], list[float]] = {}
 notify_lock = threading.Lock()
+notification_delivery = NotificationDelivery(NOTIFICATION_DELIVERY_ROOT) if NotificationDelivery else None
 analysis_job_lock = threading.Lock()
 analysis_jobs: dict[str, dict[str, Any]] = {}
 analysis_job_keys: dict[str, str] = {}
@@ -434,6 +444,8 @@ def validate_push_subscription(subscription: dict[str, Any]) -> None:
 
 
 def load_push_subscriptions() -> list[dict[str, Any]]:
+    if notification_delivery:
+        return notification_delivery.subscriptions()
     try:
         if not SUBSCRIPTIONS_FILE.exists():
             return []
@@ -444,6 +456,12 @@ def load_push_subscriptions() -> list[dict[str, Any]]:
 
 
 def save_push_subscriptions(subscriptions: list[dict[str, Any]]) -> None:
+    if notification_delivery:
+        notification_delivery.subscriptions_path.parent.mkdir(parents=True, exist_ok=True)
+        temp = notification_delivery.subscriptions_path.with_suffix(".json.tmp")
+        temp.write_text(json.dumps(subscriptions, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temp, notification_delivery.subscriptions_path)
+        return
     SUBSCRIPTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SUBSCRIPTIONS_FILE.write_text(json.dumps(subscriptions, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -453,10 +471,12 @@ def subscription_id(subscription: dict[str, Any]) -> str:
     return hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
 
 
-def upsert_push_subscription(subscription: dict[str, Any], game: str = "all") -> int:
+def upsert_push_subscription(subscription: dict[str, Any], game: str = "all", user_agent: str = "") -> int:
     if not isinstance(subscription, dict) or not subscription.get("endpoint"):
         raise ValueError("缺少有效的通知訂閱資料")
     validate_push_subscription(subscription)
+    if notification_delivery:
+        return notification_delivery.upsert(subscription, user_agent=user_agent, game=game if game in ALLOWED_GAMES else "all")
     subscriptions = load_push_subscriptions()
     if len(subscriptions) >= MAX_PUSH_SUBSCRIPTIONS and subscription_id(subscription) not in {item.get("id") for item in subscriptions}:
         raise ValueError("通知訂閱數已達上限")
@@ -470,6 +490,8 @@ def upsert_push_subscription(subscription: dict[str, Any], game: str = "all") ->
 
 
 def remove_push_subscription(subscription: dict[str, Any]) -> int:
+    if notification_delivery:
+        return notification_delivery.remove(subscription)
     item_id = subscription_id(subscription)
     subscriptions = [item for item in load_push_subscriptions() if item.get("id") != item_id]
     save_push_subscriptions(subscriptions)
@@ -5077,6 +5099,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(result)
             return
         if parsed.path == "/api/config":
+            delivery_status = notification_delivery.status() if notification_delivery else {}
             self.send_json(
                 {
                     "ok": True,
@@ -5100,6 +5123,9 @@ class Handler(SimpleHTTPRequestHandler):
                         "autoNotifyGames": AUTO_NOTIFY_GAMES,
                         "publicKey": PUSH_PUBLIC_KEY,
                         "subscriberCount": len(load_push_subscriptions()),
+                        "queueReady": bool(notification_delivery),
+                        "providerAcceptedCount": delivery_status.get("provider_accepted", 0),
+                        "clientReceivedCount": delivery_status.get("client_received", 0),
                     },
                 }
             )
@@ -5267,7 +5293,11 @@ class Handler(SimpleHTTPRequestHandler):
                 action = payload.get("action", "subscribe")
                 subscription = payload.get("subscription", {})
                 if action == "subscribe":
-                    count = upsert_push_subscription(subscription, payload.get("game", "all"))
+                    count = upsert_push_subscription(
+                        subscription,
+                        payload.get("game", "all"),
+                        user_agent=self.headers.get("User-Agent", ""),
+                    )
                     self.send_json({"ok": True, "subscriberCount": count})
                     return
                 if action == "unsubscribe":
@@ -5278,6 +5308,37 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
                 return
+        if parsed.path == "/api/notification-receipt":
+            try:
+                if not notification_delivery:
+                    raise RuntimeError("notification delivery unavailable")
+                payload = self.read_json_body()
+                notification_delivery.receipt(str(payload.get("notification_id", "")), str(payload.get("state", "")))
+                self.send_json({"ok": True})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            return
+        if parsed.path == "/api/notification-validation":
+            try:
+                supplied = self.headers.get("X-Notification-Test-Secret", "")
+                if not NOTIFICATION_TEST_SECRET or supplied != NOTIFICATION_TEST_SECRET:
+                    self.send_json({"ok": False, "error": "forbidden"}, status=403)
+                    return
+                if not notification_delivery or not push_server_ready():
+                    raise RuntimeError("notification provider unavailable")
+                event_id = f"validation-{uuid.uuid4().hex}"
+                added = notification_delivery.enqueue(
+                    event_id,
+                    "TEST_NOTIFICATION",
+                    "INFO",
+                    "Staging notification delivery validation",
+                    validation_only=True,
+                )
+                dispatch = notification_delivery.dispatch(send_push_message)
+                self.send_json({"ok": True, "validation_only": True, "event_id": event_id, "records_added": added, **dispatch})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            return
         if parsed.path == "/api/notify-latest":
             try:
                 payload = self.read_json_body()

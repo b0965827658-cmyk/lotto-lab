@@ -1,15 +1,5 @@
-const CACHE_NAME = "lotto-lab-v83-branding";
-const APP_SHELL = [
-  "/",
-  "/index.html",
-  "/styles.css?v=84",
-  "/app.js?v=83",
-  "/manifest.webmanifest",
-  "/icon.svg",
-  "/icon-180.png",
-  "/icon-192.png",
-  "/icon-512.png",
-];
+const CACHE_NAME = "lotto-lab-product-v2";
+const APP_SHELL = ["/", "/index.html", "/product.css?v=2", "/product-v2.css?v=2", "/product.js?v=2", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -17,11 +7,7 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))),
-  );
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))));
   self.clients.claim();
 });
 
@@ -31,66 +17,60 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(fetch(event.request));
     return;
   }
-
   if (event.request.mode === "navigate") {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("/", copy));
-          return response;
-        })
-        .catch(() => caches.match("/") || caches.match("/index.html")),
-    );
+    event.respondWith(fetch(event.request).then((response) => {
+      caches.open(CACHE_NAME).then((cache) => cache.put("/", response.clone()));
+      return response;
+    }).catch(() => caches.match("/") || caches.match("/index.html")));
     return;
   }
-
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return response;
-      })
-      .catch(() => caches.match(event.request)),
-  );
+  event.respondWith(fetch(event.request).then((response) => {
+    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
+    return response;
+  }).catch(() => caches.match(event.request)));
 });
+
+function postReceipt(notificationId, state) {
+  if (!notificationId) return Promise.resolve();
+  return fetch("/api/notification-receipt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notification_id: notificationId, state }),
+  }).catch(() => undefined);
+}
 
 self.addEventListener("push", (event) => {
   let payload = {};
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { title: "摘星引擎開獎通知", body: event.data ? event.data.text() : "最新開獎已更新。" };
+    payload = { title: "Star Engine", summary: event.data ? event.data.text() : "New approved notification" };
   }
-  const title = payload.title || "摘星引擎開獎通知";
   const options = {
-    body: payload.body || "最新開獎已更新。",
-    icon: payload.icon || "/icon-192.png",
-    badge: payload.badge || "/icon-192.png",
-    tag: payload.tag || "lotto-lab-latest",
-    renotify: true,
+    body: payload.summary || payload.body || "New approved notification",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    tag: payload.notification_id || "star-engine-notification",
+    renotify: false,
     requireInteraction: true,
     timestamp: Date.now(),
-    data: {
-      url: payload.url || "/",
-    },
+    data: { url: payload.url || "/#system", notification_id: payload.notification_id || "" },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(payload.title || "Star Engine", options),
+    postReceipt(payload.notification_id, "CLIENT_RECEIVED"),
+  ]));
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || "/";
-  event.waitUntil(
+  const url = event.notification.data?.url || "/#system";
+  event.waitUntil(Promise.all([
+    postReceipt(event.notification.data?.notification_id, "USER_OPENED"),
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       const existing = clientList.find((client) => client.url.includes(self.location.origin));
-      if (existing) {
-        existing.focus();
-        existing.navigate(url);
-        return;
-      }
+      if (existing) return existing.focus().then(() => existing.navigate(url));
       return clients.openWindow(url);
     }),
-  );
+  ]));
 });

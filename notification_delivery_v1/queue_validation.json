@@ -1,0 +1,1 @@
+{"persistent":true,"states":["QUEUED","SENDING","PROVIDER_ACCEPTED","FAILED","EXPIRED"],"dedup_key":"event_id|subscription_id","max_attempts":3}
