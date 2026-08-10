@@ -1,0 +1,44 @@
+{
+  "browser": "Playwright + Google Chrome",
+  "desktop": {
+    "status": "PASS",
+    "twEntrypoints": 7,
+    "f5Entrypoints": 7,
+    "twUniverse": 39,
+    "backtests": 5,
+    "legacyMigrated": 1,
+    "activeBefore": 1,
+    "pendingDoesNotUseZero": true,
+    "duplicateGuard": true,
+    "overflow": 0,
+    "legacyIndependentEntry": 0,
+    "researchStorageLeak": false
+  },
+  "mobile": {
+    "status": "PASS",
+    "twEntrypoints": 7,
+    "f5Entrypoints": 7,
+    "twUniverse": 39,
+    "backtests": 5,
+    "legacyMigrated": 1,
+    "activeBefore": 1,
+    "pendingDoesNotUseZero": true,
+    "duplicateGuard": true,
+    "overflow": 0,
+    "legacyIndependentEntry": 0,
+    "researchStorageLeak": false
+  },
+  "lifecycle": {
+    "settledStatus": "SETTLED",
+    "hitCount": 3,
+    "matched": [
+      1,
+      7,
+      21
+    ],
+    "archivedStatus": "ARCHIVED",
+    "historyPreserved": true
+  },
+  "errors": [],
+  "status": "PASS"
+}

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "fields": ["record_id", "user_id", "device_id", "lottery", "target_draw_id", "numbers", "created_at", "status", "actual_numbers", "matched_numbers", "hit_count", "settled_at", "archived_at", "hidden_at"],
+  "user_id": {"nullable": true, "current_value": null},
+  "statuses": ["ACTIVE", "WAITING_DRAW", "SETTLED", "ARCHIVED", "HIDDEN"],
+  "model_internal_fields_allowed": false
+}

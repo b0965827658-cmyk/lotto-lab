@@ -27,7 +27,8 @@ def test_backtest_has_all_5_legacy_groups():
 
 def test_legacy_routes_present():
     assert (PUBLIC / "legacy-tools.html").exists()
-    assert INDEX.count("/legacy-tools.html?game=") == 2
+    assert INDEX.count("/legacy-tools.html?game=") == 0
+    assert CONTRACT["unified_workspace"]["independent_legacy_product_entry"] is False
     assert "data-game=\"tw539\"" in LEGACY
     assert "data-game=\"ca-fantasy5\"" in LEGACY
 
@@ -41,7 +42,8 @@ def test_legacy_feature_expected_counts():
 def test_auto_match_legacy_fields():
     for field in CONTRACT["required_auto_match_fields"]:
         assert field in PRODUCT_JS
-    assert "selected.size < 39" in PRODUCT_JS
+    assert "等待開獎；尚未結算，不以 0 代替結果" in PRODUCT_JS
+    assert "matched_numbers" in PRODUCT_JS
 
 
 def test_history_legacy_fields():
@@ -58,7 +60,7 @@ def test_no_frontend_data_truncation():
 
 
 def test_disclaimer_is_not_reduced_to_one_sentence():
-    for panel in ("tw-guide", "f5-guide"):
+    for panel in ("tw-research", "f5-research"):
         start = INDEX.index(f'data-feature-panel="{panel}"')
         fragment = INDEX[start:start + 1200]
         assert fragment.count("<p>") >= 3

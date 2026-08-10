@@ -1,0 +1,7 @@
+{
+  "workspace_model": "ONE_LOTTERY_WORKSPACE",
+  "lotteries": ["tw539", "ca-fantasy5"],
+  "sections": ["本期分析", "冷熱號", "模型驗證", "歷史開獎", "自動對號", "我的號碼", "研究資訊"],
+  "independent_complete_analysis_entry": false,
+  "legacy_compatibility_route_retained": true
+}

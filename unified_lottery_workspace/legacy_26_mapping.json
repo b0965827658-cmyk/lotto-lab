@@ -1,0 +1,7 @@
+{
+  "legacy_total": 26,
+  "mapped": 26,
+  "missing": 0,
+  "mapping_strategy": "原功能依彩種移入七個語意分頁；舊相容route保留但不再作產品入口",
+  "contract": "lotto-lab-web/public/legacy_product_contract.json"
+}

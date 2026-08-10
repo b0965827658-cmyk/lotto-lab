@@ -1,0 +1,14 @@
+{
+  "actual_storage": "browser localStorage",
+  "keys_found": ["lotto-lab-saved-picks", "star-picks-tw", "star-picks-f5"],
+  "new_key": "star-saved-number-records-v1",
+  "indexed_db": false,
+  "server_storage": false,
+  "persistent_disk": false,
+  "database": false,
+  "authentication": false,
+  "user_id": false,
+  "cross_device_sync": false,
+  "product_label": "我的號碼紀錄",
+  "member_cloud_history_claimed": false
+}

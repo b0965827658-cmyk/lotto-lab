@@ -3,7 +3,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const locale = window.STAR_LOCALES?.['zh-TW'];
 const pages = ['overview', 'tw539', 'fantasy5', 'brain', 'evidence', 'knowledge', 'notifications', 'system'];
 let notificationConfig = {};
-const legacyData = { tw: { game: 'tw539', history: [], journal: [], analysis: null }, f5: { game: 'ca-fantasy5', history: [], journal: [], analysis: null } };
+const legacyData = { tw: { game: 'tw539', history: [], journal: [], analysis: null, latest: null }, f5: { game: 'ca-fantasy5', history: [], journal: [], analysis: null, latest: null } };
 
 function activate(page) {
   if (!pages.includes(page)) page = 'overview';
@@ -32,6 +32,7 @@ function setNumbers(id, numbers = []) {
 
 function setDraw(prefix, data) {
   const latest = data?.latest || {};
+  legacyData[prefix].latest = latest;
   const numbers = latest.numbers || [];
   const period = latest.period || '--';
   $(`#${prefix}Draw`).textContent = `最新期別 ${period}`;
@@ -140,40 +141,83 @@ function renderMatch(prefix) {
   const target = $(`#${prefix === 'tw' ? 'tw' : 'f5'}Match`);
   const record = settledRecords(prefix)[0] || legacyData[prefix].journal[0];
   if (!record) {
-    target.innerHTML = '<p class="empty-state">目前尚無可比對的預測紀錄。</p>' + pickManagerHtml(prefix);
-    bindPickManager(prefix);
+    target.innerHTML = '<p class="empty-state">目前尚無可比對的系統預測紀錄。</p>' + savedMatchSummary(prefix);
     return;
   }
   const snapshot = record.snapshot || {};
   const outcome = record.outcome;
   if (!outcome) {
-    target.innerHTML = `<div class="match-head"><div><span>目標日期</span><b>${displayDate(record.targetDate)}</b></div><strong>等待開獎結果</strong></div><p>預測已於開獎前保存；開獎資料尚未結算，不以 0 代替結果。</p><p class="overline">完整觀察 15 碼</p>${numberChips(snapshot.full15 || [])}` + pickManagerHtml(prefix);
-    bindPickManager(prefix);
+    target.innerHTML = `<div class="match-head"><div><span>目標日期</span><b>${displayDate(record.targetDate)}</b></div><strong>等待開獎結果</strong></div><p>預測已於開獎前保存；開獎資料尚未結算，不以 0 代替結果。</p><p class="overline">完整觀察 15 碼</p>${numberChips(snapshot.full15 || [])}` + savedMatchSummary(prefix);
     return;
   }
   const actual = outcome.numbers || [];
-  target.innerHTML = `<div class="match-head"><div><span>第 ${escapeHtml(outcome.period || '--')} 期</span><b>${displayDate(outcome.date)}</b></div><strong>已完成對號</strong></div><p class="overline">實際開獎號碼</p>${numberChips(actual)}<div class="hit-summary"><span>Top 5 命中<b>${Number(outcome.hits5 ?? 0)}</b></span><span>Top 10 命中<b>${Number(outcome.hits10 ?? 0)}</b></span><span>Top 15 命中<b>${Number(outcome.hits15 ?? 0)}</b></span></div><p class="overline">完整觀察 15 碼</p>${numberChips(snapshot.full15 || [], actual)}` + pickManagerHtml(prefix);
-  bindPickManager(prefix);
+  target.innerHTML = `<div class="match-head"><div><span>第 ${escapeHtml(outcome.period || '--')} 期</span><b>${displayDate(outcome.date)}</b></div><strong>已完成對號</strong></div><p class="overline">實際開獎號碼</p>${numberChips(actual)}<div class="hit-summary"><span>Top 5 命中<b>${Number(outcome.hits5 ?? 0)}</b></span><span>Top 10 命中<b>${Number(outcome.hits10 ?? 0)}</b></span><span>Top 15 命中<b>${Number(outcome.hits15 ?? 0)}</b></span></div><p class="overline">完整觀察 15 碼</p>${numberChips(snapshot.full15 || [], actual)}` + savedMatchSummary(prefix);
 }
 
-function pickManagerHtml(prefix) {
-  return `<details class="pick-manager"><summary>我的自選號碼</summary><p>可從 1–39 保存完整自選組合，只儲存在這台裝置，不會改變模型或推薦。</p><div class="pick-grid">${Array.from({ length: 39 }, (_, index) => `<button type="button" data-pick="${prefix}" data-number="${index + 1}">${String(index + 1).padStart(2, '0')}</button>`).join('')}</div><div class="pick-actions"><button type="button" data-save-picks="${prefix}">儲存自選號碼</button><button type="button" data-clear-picks="${prefix}">清除</button><span data-pick-state="${prefix}">尚未選擇</span></div></details>`;
+const savedNumberLabels = { ACTIVE: '本期使用中', WAITING_DRAW: '等待開獎', SETTLED: '已完成對號', ARCHIVED: '歷史紀錄', HIDDEN: '已隱藏' };
+
+function savedRecords(prefix) {
+  const service = window.StarSavedNumbers;
+  return service ? service.load().filter((record) => record.lottery === legacyData[prefix].game && record.status !== service.STATUS.HIDDEN) : [];
 }
 
-function bindPickManager(prefix) {
-  const key = `star-picks-${prefix}`;
-  let selected;
-  try { selected = new Set(JSON.parse(localStorage.getItem(key) || '[]').map(Number)); } catch { selected = new Set(); }
-  const root = $(`[data-pick="${prefix}"]`)?.closest('.pick-manager');
-  if (!root) return;
-  const refreshPicks = () => {
-    $$(`[data-pick="${prefix}"]`, root).forEach((button) => button.classList.toggle('selected', selected.has(Number(button.dataset.number))));
-    $(`[data-pick-state="${prefix}"]`, root).textContent = selected.size ? `已選 ${[...selected].sort((a,b) => a-b).join('、')}` : '尚未選擇';
+function savedMatchSummary(prefix) {
+  const records = savedRecords(prefix);
+  const pending = records.filter((record) => ['ACTIVE', 'WAITING_DRAW'].includes(record.status));
+  const finished = records.filter((record) => ['SETTLED', 'ARCHIVED'].includes(record.status)).slice(0, 3);
+  return `<section class="member-match-summary"><p class="overline">我的號碼對號</p>${pending.length ? pending.map((record) => `<article><span>第 ${escapeHtml(record.target_draw_id || '待指定')} 期</span>${numberChips(record.numbers)}<b>等待開獎</b></article>`).join('') : '<p class="empty-state">目前沒有等待開獎的自選號碼。</p>'}${finished.map((record) => `<article><span>${record.migration_status === 'LEGACY_UNASSIGNED' ? '舊版未指定期別' : `第 ${escapeHtml(record.target_draw_id || '--')} 期`}</span>${numberChips(record.numbers, record.actual_numbers || [])}<b>${record.hit_count == null ? '無法判定對號結果' : `命中 ${Number(record.hit_count)} 顆`}</b></article>`).join('')}</section>`;
+}
+
+function targetDrawId(prefix) {
+  const open = legacyData[prefix].journal.find((record) => !record.outcome && !['closed', 'completed', 'settled'].includes(String(record.status || '').toLowerCase()));
+  return String(open?.draw_id || open?.drawId || open?.target_draw_id || open?.targetDrawId || open?.targetDate || '');
+}
+
+function savedRecordCard(record, editable) {
+  const legacy = record.migration_status === 'LEGACY_UNASSIGNED';
+  const outcome = legacy
+    ? '<p>舊版紀錄無法判定目標期別，不會冒充正式對號。</p>'
+    : record.actual_numbers?.length
+      ? `<p>開獎號碼</p>${numberChips(record.actual_numbers)}<p>命中 ${Number(record.hit_count)} 顆：${(record.matched_numbers || []).map((number) => String(number).padStart(2, '0')).join('、') || '無'}</p>`
+      : '<p>等待開獎；尚未結算，不以 0 代替結果。</p>';
+  return `<article class="saved-record" data-saved-record="${escapeHtml(record.record_id)}"><header><span>${savedNumberLabels[record.status] || '歷史紀錄'}</span><b>${legacy ? '舊版未指定期別' : `第 ${escapeHtml(record.target_draw_id || '--')} 期`}</b></header>${numberChips(record.numbers, record.actual_numbers || [])}${outcome}<footer><small>${displayDate(record.created_at)}</small>${editable ? `<button type="button" data-edit-saved="${escapeHtml(record.record_id)}">編輯</button><button type="button" data-delete-saved="${escapeHtml(record.record_id)}">刪除</button>` : `<button type="button" data-hide-saved="${escapeHtml(record.record_id)}">從我的紀錄隱藏</button>`}</footer></article>`;
+}
+
+function renderSavedNumbers(prefix) {
+  const service = window.StarSavedNumbers;
+  const target = $(`#${prefix === 'tw' ? 'tw' : 'f5'}SavedNumbers`);
+  if (!service || !target) return;
+  service.reconcile(legacyData[prefix].game, legacyData[prefix].history);
+  const records = savedRecords(prefix);
+  const active = records.filter((record) => ['ACTIVE', 'WAITING_DRAW'].includes(record.status));
+  const settled = records.filter((record) => record.status === 'SETTLED');
+  const archived = records.filter((record) => record.status === 'ARCHIVED');
+  const drawId = targetDrawId(prefix);
+  target.innerHTML = `<section class="saved-create"><h4>新增本期號碼</h4><p>${drawId ? `將綁定第 ${escapeHtml(drawId)} 期` : '目前沒有可安全綁定的開獎期別，暫時不能新增。'}</p><div class="pick-grid">${Array.from({ length: 39 }, (_, index) => `<button type="button" data-saved-pick="${prefix}" data-number="${index + 1}">${String(index + 1).padStart(2, '0')}</button>`).join('')}</div><div class="pick-actions"><button type="button" data-save-record="${prefix}" ${drawId ? '' : 'disabled'}>儲存這組號碼</button><button type="button" data-clear-record="${prefix}">清除選擇</button><span data-saved-state="${prefix}">尚未選擇</span></div></section><section data-saved-section="active"><h4>本期號碼</h4>${active.length ? active.map((record) => savedRecordCard(record, true)).join('') : '<p class="empty-state">目前沒有等待開獎的自選號碼。</p>'}</section><section data-saved-section="settled"><h4>已完成對號</h4>${settled.length ? settled.map((record) => savedRecordCard(record, false)).join('') : '<p class="empty-state">目前沒有剛完成的對號結果。</p>'}</section><section data-saved-section="archived"><h4>歷史紀錄</h4>${archived.length ? archived.map((record) => savedRecordCard(record, false)).join('') : '<p class="empty-state">目前尚無歷史紀錄。</p>'}</section>`;
+  bindSavedNumberWorkspace(prefix);
+}
+
+function bindSavedNumberWorkspace(prefix) {
+  const service = window.StarSavedNumbers;
+  const root = $(`#${prefix === 'tw' ? 'tw' : 'f5'}SavedNumbers`);
+  if (!service || !root) return;
+  let selected = new Set();
+  let editing = null;
+  const refresh = (message) => {
+    $$(`[data-saved-pick="${prefix}"]`, root).forEach((button) => button.classList.toggle('selected', selected.has(Number(button.dataset.number))));
+    $(`[data-saved-state="${prefix}"]`, root).textContent = message || (selected.size ? `已選 ${[...selected].sort((a, b) => a - b).join('、')}` : '尚未選擇');
   };
-  $$(`[data-pick="${prefix}"]`, root).forEach((button) => { button.onclick = () => { const number = Number(button.dataset.number); if (selected.has(number)) selected.delete(number); else if (selected.size < 39) selected.add(number); refreshPicks(); }; });
-  $(`[data-save-picks="${prefix}"]`, root).onclick = () => { localStorage.setItem(key, JSON.stringify([...selected].sort((a,b) => a-b))); refreshPicks(); };
-  $(`[data-clear-picks="${prefix}"]`, root).onclick = () => { selected.clear(); localStorage.removeItem(key); refreshPicks(); };
-  refreshPicks();
+  $$(`[data-saved-pick="${prefix}"]`, root).forEach((button) => { button.onclick = () => { const number = Number(button.dataset.number); selected.has(number) ? selected.delete(number) : selected.add(number); refresh(); }; });
+  $(`[data-clear-record="${prefix}"]`, root).onclick = () => { selected.clear(); editing = null; refresh(); };
+  $(`[data-save-record="${prefix}"]`, root).onclick = () => {
+    const result = editing ? service.updateActive(editing, [...selected]) : service.save({ lottery: legacyData[prefix].game, target_draw_id: targetDrawId(prefix), numbers: [...selected] });
+    if (!result.ok) { refresh(result.reason === 'DUPLICATE' ? '這組號碼已儲存' : '請先選擇號碼'); return; }
+    renderSavedNumbers(prefix); renderMatch(prefix);
+  };
+  $$('[data-edit-saved]', root).forEach((button) => { button.onclick = () => { const record = service.load().find((item) => item.record_id === button.dataset.editSaved); if (!record) return; editing = record.record_id; selected = new Set(record.numbers); refresh('編輯中；完成後請按儲存'); root.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; });
+  $$('[data-delete-saved]', root).forEach((button) => { button.onclick = () => { service.removeActive(button.dataset.deleteSaved); renderSavedNumbers(prefix); renderMatch(prefix); }; });
+  $$('[data-hide-saved]', root).forEach((button) => { button.onclick = () => { service.hide(button.dataset.hideSaved); renderSavedNumbers(prefix); renderMatch(prefix); }; });
+  refresh();
 }
 
 async function loadLegacyData(prefix) {
@@ -186,6 +230,9 @@ async function loadLegacyData(prefix) {
   renderHistory(prefix);
   renderColdHot(prefix, 30);
   renderValidation(prefix);
+  window.StarSavedNumbers?.migrateLegacy();
+  window.StarSavedNumbers?.reconcile(state.game, state.history);
+  renderSavedNumbers(prefix);
   renderMatch(prefix);
 }
 
@@ -194,9 +241,9 @@ function activateFeature(button) {
   const page = button.closest('[data-page-panel]');
   $$('[data-feature]', page).forEach((node) => node.classList.toggle('active', node === button));
   $$('[data-feature-panel]', page).forEach((node) => node.classList.toggle('active', node.dataset.featurePanel === feature));
-  if (feature.startsWith('tw-')) loadLegacyData('tw').catch((error) => { console.error('legacy data', error); ['twHistory', 'twColdHot', 'twValidation', 'twMatch'].forEach((id) => { const node = $(`#${id}`); if (node) node.innerHTML = '<p class="empty-state">資料暫時無法載入，請稍後再試。</p>'; }); });
+  if (feature.startsWith('tw-')) loadLegacyData('tw').then(() => { if (feature === 'tw-saved') renderSavedNumbers('tw'); }).catch((error) => { console.error('legacy data', error); ['twHistory', 'twColdHot', 'twValidation', 'twMatch', 'twSavedNumbers'].forEach((id) => { const node = $(`#${id}`); if (node) node.innerHTML = '<p class="empty-state">資料暫時無法載入，請稍後再試。</p>'; }); });
   if (feature === 'tw-validation') loadValidationAnalysis('tw').catch((error) => { console.error('model validation data', error); });
-  if (feature.startsWith('f5-')) loadLegacyData('f5').catch((error) => { console.error('legacy data', error); ['f5History', 'f5ColdHot', 'f5Validation', 'f5Match'].forEach((id) => { const node = $(`#${id}`); if (node) node.innerHTML = '<p class="empty-state">資料暫時無法載入，請稍後再試。</p>'; }); });
+  if (feature.startsWith('f5-')) loadLegacyData('f5').then(() => { if (feature === 'f5-saved') renderSavedNumbers('f5'); }).catch((error) => { console.error('legacy data', error); ['f5History', 'f5ColdHot', 'f5Validation', 'f5Match', 'f5SavedNumbers'].forEach((id) => { const node = $(`#${id}`); if (node) node.innerHTML = '<p class="empty-state">資料暫時無法載入，請稍後再試。</p>'; }); });
 }
 
 async function json(url, options = {}) {

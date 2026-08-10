@@ -1,0 +1,12 @@
+{
+  "verdict": "D",
+  "workspace_complete": true,
+  "legacy_features": "26/26",
+  "saved_number_lifecycle_complete": true,
+  "persistence_scope": "DEVICE_SCOPED",
+  "cloud_member_history": false,
+  "desktop": "PASS",
+  "mobile": "PASS",
+  "eligible_for_staging_delivery": false,
+  "reason": "本Gate只允許本地完成；且目前沒有Authentication/user_id/server persistence，不能宣稱會員Cloud History"
+}

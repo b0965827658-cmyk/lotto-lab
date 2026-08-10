@@ -1,0 +1,8 @@
+{
+  "sections": ["本期號碼", "已完成對號", "歷史紀錄"],
+  "filters_ready": ["lottery"],
+  "user_id_claim_ready": true,
+  "current_scope": "device",
+  "settled_records_preserved": true,
+  "soft_hide_supported": true
+}

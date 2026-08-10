@@ -1,0 +1,8 @@
+{
+  "actual_source": "existing history-search canonical runtime source",
+  "alternate_draw_source_created": false,
+  "match_fields": ["actual_numbers", "matched_numbers", "hit_count", "settled_at"],
+  "pending_unknown_is_zero": false,
+  "prediction_mutation": false,
+  "evidence_mutation": false
+}

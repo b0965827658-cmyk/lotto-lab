@@ -1,0 +1,10 @@
+{
+  "flow": ["WAITING_DRAW", "SETTLED", "ARCHIVED"],
+  "active_editable": true,
+  "active_deletable": true,
+  "settled_hard_delete": false,
+  "settled_soft_hide": true,
+  "pending_hit_count": null,
+  "duplicate_key": "device_id|lottery|target_draw_id|normalized_numbers",
+  "browser_test": {"settled_hit_count": 3, "settled_status": "SETTLED", "next_draw_status": "ARCHIVED", "history_preserved": true}
+}

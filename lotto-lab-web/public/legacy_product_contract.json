@@ -11,6 +11,19 @@
     "539 Markov 轉移模型"
   ],
   "required_routes": ["/", "/legacy-tools.html"],
+  "unified_workspace": {
+    "independent_legacy_product_entry": false,
+    "legacy_route_retained_for_backward_compatibility": true,
+    "workspace_sections": ["本期分析", "冷熱號", "模型驗證", "歷史開獎", "自動對號", "我的號碼", "研究資訊"],
+    "lotteries": ["tw539", "ca-fantasy5"]
+  },
+  "saved_number_lifecycle": {
+    "storage_scope": "DEVICE_LOCAL_STORAGE",
+    "cross_device_sync": false,
+    "user_id_available": false,
+    "statuses": ["ACTIVE", "WAITING_DRAW", "SETTLED", "ARCHIVED", "HIDDEN"],
+    "migration_status": "LEGACY_UNASSIGNED"
+  },
   "required_sections": ["冷熱號分析", "歷史開獎紀錄", "模型驗證", "自動對號", "使用說明與免責聲明"],
   "required_history_fields": ["period", "date", "numbers"],
   "required_auto_match_fields": ["snapshot", "outcome", "hits5", "hits10", "hits15"],

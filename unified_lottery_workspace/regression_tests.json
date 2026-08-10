@@ -1,0 +1,5 @@
+{
+  "pytest": {"passed": 212, "subtests_passed": 2, "failed": 0},
+  "permanent_tests": ["test_legacy_features_26_present", "test_tw539_number_universe_39", "test_backtest_groups_5", "test_saved_number_active_to_settled", "test_saved_number_settled_to_archived", "test_pending_draw_not_zero_hit", "test_saved_number_duplicate_guard", "test_saved_number_history_preserved", "test_legacy_saved_number_migration", "test_saved_numbers_do_not_enter_research_evidence", "test_mobile_workspace_navigation"],
+  "git_diff_check": "PASS"
+}

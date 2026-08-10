@@ -1,0 +1,8 @@
+{
+  "sources": ["star-picks-tw", "star-picks-f5", "lotto-lab-saved-picks"],
+  "destination": "star-saved-number-records-v1",
+  "unknown_target_draw_policy": "LEGACY_UNASSIGNED",
+  "fabricated_settlement": false,
+  "idempotency_key": "star-saved-number-migration-v1",
+  "browser_validation": "PASS"
+}
