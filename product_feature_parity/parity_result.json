@@ -1,0 +1,1 @@
+{"gate":"Legacy Feature Preservation & Navigation Recovery","decision":"A","legacy_total":18,"missing":0,"desktop":"PASS","mobile":"PASS","tablet":"PASS","prediction_behavior_change":false,"research_brain_modified":false,"notification_backend_modified":false,"commit":false,"push":false,"deploy":false,"next_gate":"Staging Recovery Delivery"}

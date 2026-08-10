@@ -1,0 +1,6 @@
+{
+  "service_deployed": false,
+  "service_restarted": false,
+  "knowledge_modified": false,
+  "expected_mode": "AUTONOMOUS_OBSERVATION"
+}

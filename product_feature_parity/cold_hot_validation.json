@@ -1,0 +1,1 @@
+{"route":"#tw539 / #fantasy5","source":"GET /api/history-search","windows":[10,30,60],"includes":["frequency","omission","odd_even","tail"],"copy_guard":"統計觀察，不暗示未來機率","empty_state":"PASS","error_state":"PASS","result":"PASS"}

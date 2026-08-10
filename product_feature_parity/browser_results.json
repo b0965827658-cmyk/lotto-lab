@@ -1,0 +1,302 @@
+{
+  "desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "checks": [
+      {
+        "feature": "tw-cold-hot",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-history",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-validation",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-match",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-guide",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-cold-hot",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-history",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-validation",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-match",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-guide",
+        "width": 1440,
+        "scrollWidth": 1440,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      }
+    ],
+    "pass": true,
+    "overflowCount": 0
+  },
+  "mobile": {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "checks": [
+      {
+        "feature": "tw-cold-hot",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-history",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-validation",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-match",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-guide",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-cold-hot",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-history",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-validation",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-match",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-guide",
+        "width": 390,
+        "scrollWidth": 390,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      }
+    ],
+    "pass": true,
+    "overflowCount": 0
+  },
+  "tablet": {
+    "viewport": {
+      "width": 768,
+      "height": 1024
+    },
+    "checks": [
+      {
+        "feature": "tw-cold-hot",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-history",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-validation",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-match",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "tw-guide",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-cold-hot",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-history",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-validation",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-match",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      },
+      {
+        "feature": "f5-guide",
+        "width": 768,
+        "scrollWidth": 768,
+        "visiblePanel": true,
+        "errors": false,
+        "missing": false,
+        "pass": true
+      }
+    ],
+    "pass": true,
+    "overflowCount": 0
+  }
+}

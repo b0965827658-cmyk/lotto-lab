@@ -1,0 +1,7 @@
+{
+  "worktree": "D:/Lotto/lotto-lab-staging",
+  "branch": "frozen-candidate-a-staging",
+  "head_before": "9836fdf8a36d286616e8fcb41b46fe71fdb5803c",
+  "diff_check": "PASS",
+  "unrelated_dirty_files_excluded": true
+}

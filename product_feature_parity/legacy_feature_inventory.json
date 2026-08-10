@@ -1,0 +1,25 @@
+{
+  "source_commits": ["322ed81", "c702d1d", "c85232e", "3d3583c", "45f7bc9"],
+  "total": 18,
+  "features": [
+    {"id":"game-switch","name":"彩種切換","status":"PRESERVED","new_location":"主導航／彩種頁"},
+    {"id":"latest-draw","name":"最新開獎與重新整理","status":"PRESERVED","new_location":"總覽／彩種頁"},
+    {"id":"recommendation-tiers","name":"Top5／Top10／Top15","status":"PRESERVED","new_location":"本期分析"},
+    {"id":"full-ranking","name":"完整號碼排名","status":"PRESERVED","new_location":"本期分析"},
+    {"id":"cold-hot","name":"冷熱號分析","status":"MOVED","new_location":"彩種次導覽／冷熱號"},
+    {"id":"omission","name":"遺漏期數","status":"MOVED","new_location":"冷熱號分析"},
+    {"id":"odd-even-tail","name":"奇偶與尾數","status":"MOVED","new_location":"冷熱號分析／奇偶與尾數觀察"},
+    {"id":"history","name":"歷史開獎紀錄","status":"MOVED","new_location":"彩種次導覽／歷史紀錄"},
+    {"id":"history-search","name":"歷史搜尋與號碼篩選","status":"PRESERVED","new_location":"歷史開獎紀錄搜尋"},
+    {"id":"backtest","name":"模型回測","status":"RENAMED","new_location":"模型驗證／唯讀摘要"},
+    {"id":"baseline-random","name":"Baseline／Random比較","status":"MOVED","new_location":"模型驗證／進階說明"},
+    {"id":"auto-match","name":"自動對號","status":"MOVED","new_location":"彩種次導覽／自動對號"},
+    {"id":"saved-picks","name":"自選號碼保存／清除","status":"PRESERVED","new_location":"自動對號／我的自選號碼"},
+    {"id":"disclaimer","name":"使用說明與免責聲明","status":"MOVED","new_location":"彩種次導覽／使用說明"},
+    {"id":"notifications","name":"開獎與重要通知","status":"MOVED","new_location":"通知中心"},
+    {"id":"analysis-window","name":"分析觀察範圍","status":"RENAMED","new_location":"冷熱號／近10、30、60期"},
+    {"id":"candidate-analysis","name":"核心候選與分析模式摘要","status":"RENAMED","new_location":"本期分析＋模型驗證（唯讀）"},
+    {"id":"subscription","name":"訂閱／方案狀態","status":"MOVED","new_location":"通知中心／系統管理；不影響本次Push驗收"}
+  ],
+  "counts": {"PRESERVED":6,"MOVED":9,"RENAMED":3,"MISSING":0,"DEPRECATED":0,"INTENTIONALLY_REMOVED":0}
+}

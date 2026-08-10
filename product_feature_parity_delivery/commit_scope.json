@@ -1,0 +1,17 @@
+{
+  "allowed": [
+    "lotto-lab-web/public/index.html",
+    "lotto-lab-web/public/product-v2.css",
+    "lotto-lab-web/public/product.js",
+    "product_feature_parity/",
+    "product_feature_parity_delivery/"
+  ],
+  "excluded": [
+    "runtime databases",
+    "evidence and knowledge records",
+    "prediction journals and settlements",
+    "models and weights",
+    "secrets",
+    "unrelated research outputs"
+  ]
+}

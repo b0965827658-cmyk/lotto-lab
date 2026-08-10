@@ -1,0 +1,1 @@
+{"source":"GET /api/prediction-journal","shows":["actual_numbers","Top5 hits","Top10 hits","Top15 hits","full15 matches"],"unsettled_copy":"等待開獎結果","unsettled_zero_filled":false,"saved_picks":"local-device only, max 5","result":"PASS"}

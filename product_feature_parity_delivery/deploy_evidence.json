@@ -1,0 +1,8 @@
+{
+  "service": "lotto-lab-candidate-a-staging",
+  "deploy_id": null,
+  "status": "PENDING",
+  "health": "PENDING",
+  "production_deploy": false,
+  "research_brain_deploy": false
+}

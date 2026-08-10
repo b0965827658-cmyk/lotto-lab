@@ -1,0 +1,1 @@
+{"legacy_total":18,"missing":0,"parity_percent":100,"rules":{"no_button_only":true,"no_new_dataset":true,"no_sandbox_exposure":true},"read_paths":{"history":"GET /api/history-search","prediction_and_settlement":"GET /api/prediction-journal","notification":"existing Notification Center"},"result":"PASS"}
