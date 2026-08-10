@@ -29,6 +29,8 @@ def test_legacy_routes_present():
     assert (PUBLIC / "legacy-tools.html").exists()
     assert INDEX.count("/legacy-tools.html?game=") == 0
     assert CONTRACT["unified_workspace"]["independent_legacy_product_entry"] is False
+    assert "location.replace" in LEGACY
+    assert "'ca-fantasy5' ? 'fantasy5' : 'tw539'" in LEGACY
     assert "data-game=\"tw539\"" in LEGACY
     assert "data-game=\"ca-fantasy5\"" in LEGACY
 
