@@ -3,7 +3,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const locale = window.STAR_LOCALES?.['zh-TW'];
 const pages = ['overview', 'tw539', 'fantasy5', 'brain', 'evidence', 'knowledge', 'notifications', 'system'];
 let notificationConfig = {};
-const legacyData = { tw: { game: 'tw539', history: [], journal: [] }, f5: { game: 'ca-fantasy5', history: [], journal: [] } };
+const legacyData = { tw: { game: 'tw539', history: [], journal: [], analysis: null }, f5: { game: 'ca-fantasy5', history: [], journal: [], analysis: null } };
 
 function activate(page) {
   if (!pages.includes(page)) page = 'overview';
@@ -62,7 +62,12 @@ function renderHistory(prefix) {
     target.innerHTML = '<p class="empty-state">目前尚無可讀取的歷史開獎紀錄。</p>';
     return;
   }
-  target.innerHTML = `<p class="history-count">顯示最近 ${Math.min(rows.length, 30)} 筆，共讀取 ${rows.length} 筆可信紀錄</p>` + rows.slice(0, 30).map((row) => `<article><div><span>第 ${escapeHtml(row.period || '--')} 期</span><small>${displayDate(row.date)}</small></div>${numberChips(row.numbers || [])}</article>`).join('');
+  renderHistoryRows(prefix, rows);
+}
+
+function renderHistoryRows(prefix, rows) {
+  const target = $(`#${prefix === 'tw' ? 'tw' : 'f5'}History`);
+  target.innerHTML = rows.length ? `<p class="history-count">完整顯示 ${rows.length} 筆可信紀錄</p>` + rows.map((row) => `<article data-history-row><div><span>第 ${escapeHtml(row.period || '--')} 期</span><small>${displayDate(row.date)}</small></div>${numberChips(row.numbers || [])}</article>`).join('') : '<p class="empty-state">找不到符合條件的開獎紀錄。</p>';
 }
 
 function coldHotStats(rows, windowSize) {
@@ -74,7 +79,11 @@ function coldHotStats(rows, windowSize) {
     if (gaps.get(Number(number)) === used.length) gaps.set(Number(number), drawIndex);
   }));
   const ranked = [...counts].map(([number, count]) => ({ number, count, gap: gaps.get(number) })).sort((a, b) => b.count - a.count || a.number - b.number);
-  return { used: used.length, hot: ranked.slice(0, 10), cold: [...ranked].sort((a, b) => a.count - b.count || b.gap - a.gap || a.number - b.number).slice(0, 10), overdue: [...ranked].sort((a, b) => b.gap - a.gap || a.number - b.number).slice(0, 10) };
+  const coldRanked = [...ranked].sort((a, b) => a.count - b.count || b.gap - a.gap || a.number - b.number);
+  const hotNumbers = new Set(ranked.slice(0, 10).map((item) => item.number));
+  const coldNumbers = new Set(coldRanked.slice(0, 10).map((item) => item.number));
+  const all = [...ranked].sort((a, b) => a.number - b.number).map((item) => ({ ...item, status: hotNumbers.has(item.number) ? '偏熱' : coldNumbers.has(item.number) ? '偏冷' : '一般' }));
+  return { used: used.length, all, hot: ranked.slice(0, 10), cold: coldRanked.slice(0, 10), overdue: [...ranked].sort((a, b) => b.gap - a.gap || a.number - b.number).slice(0, 10) };
 }
 
 function renderColdHot(prefix, windowSize = 30) {
@@ -89,7 +98,8 @@ function renderColdHot(prefix, windowSize = 30) {
   const values = usedRows.flatMap((row) => row.numbers || []).map(Number);
   const odd = values.filter((number) => number % 2).length;
   const tails = Array.from({ length: 10 }, (_, tail) => ({ tail, count: values.filter((number) => number % 10 === tail).length })).sort((a, b) => b.count - a.count || a.tail - b.tail);
-  target.innerHTML = group('近期較常出現', stats.hot, (item) => `${item.count} 次`) + group('近期較少出現', stats.cold, (item) => `${item.count} 次`) + group('目前遺漏較久', stats.overdue, (item) => `${item.gap} 期`) + `<article class="shape-observation"><p class="overline">奇偶與尾數觀察</p><div class="shape-summary"><span>奇數<b>${odd}</b></span><span>偶數<b>${values.length - odd}</b></span><span>較常出現尾數<b>${tails.slice(0, 3).map((item) => `${item.tail} 尾`).join('、')}</b></span></div></article>`;
+  const full = `<article class="full-number-analysis"><p class="overline">1–39 完整號碼分析</p><p class="feature-note">共 ${stats.all.length} 顆；每顆均保留出現次數、冷熱分類與遺漏期數。</p><div class="full-stat-grid">${stats.all.map((item) => `<div class="full-stat-row" data-stat-number="${item.number}"><b>${String(item.number).padStart(2, '0')}</b><span>${item.count} 次</span><span>${item.status}</span><span>遺漏 ${item.gap} 期</span></div>`).join('')}</div></article>`;
+  target.innerHTML = group('近期較常出現', stats.hot, (item) => `${item.count} 次`) + group('近期較少出現', stats.cold, (item) => `${item.count} 次`) + group('目前遺漏較久', stats.overdue, (item) => `${item.gap} 期`) + full + `<article class="shape-observation"><p class="overline">奇偶與尾數觀察</p><div class="shape-summary"><span>奇數<b>${odd}</b></span><span>偶數<b>${values.length - odd}</b></span><span>較常出現尾數<b>${tails.slice(0, 3).map((item) => `${item.tail} 尾`).join('、')}</b></span></div></article>`;
 }
 
 function settledRecords(prefix) {
@@ -105,7 +115,25 @@ function renderValidation(prefix) {
     return;
   }
   const avg = (key) => settled.length ? (settled.reduce((sum, row) => sum + Number(row.outcome?.[key] || 0), 0) / settled.length).toFixed(2) : '—';
-  target.innerHTML = `<article><span>前瞻預測紀錄</span><b>${all.length} 筆</b><small>Prediction-before-Actual</small></article><article><span>已結算</span><b>${settled.length} 筆</b><small>${settled.length ? '可供結果摘要' : '等待開獎結果'}</small></article><article><span>Top 5 平均命中</span><b>${avg('hits5')}</b><small>只計已結算紀錄</small></article><article><span>Top 15 平均命中</span><b>${avg('hits15')}</b><small>不代表未來結果</small></article><details><summary>查看進階驗證說明</summary><p>Walk-Forward、Baseline、Random 與證據等級沿用既有正式研究證據；本頁不啟動新回測，也不將研究沙盒公開為一般功能。</p></details>`;
+  const analysis = legacyData[prefix].analysis || {};
+  const backtest = analysis.backtest || {};
+  const profiles = Array.isArray(analysis.modelProfiles) ? analysis.modelProfiles : [];
+  const groups = prefix === 'tw' && backtest.testedCount ? [{ label: '多模型集成（整體）', testedCount: backtest.testedCount, averageHit5: backtest.averageHit5 ?? backtest.averageHit, averageHit15: backtest.averageHit15, hitRate15: backtest.hitRate15 }, ...profiles] : [];
+  const groupMarkup = groups.length ? `<section class="backtest-groups"><div class="panel-title"><h3>舊版完整模型回測</h3><span>${groups.length} / 5 組</span></div>${groups.map((group, index) => `<article data-backtest-group="${index + 1}"><span>${escapeHtml(group.label || group.id || `模型 ${index + 1}`)}</span><b>Top 15 平均 ${Number(group.averageHit15 ?? 0).toFixed(4)}</b><small>${Number(group.testedCount || 0)} 期｜Top 5 平均 ${Number(group.averageHit5 ?? group.averageHit ?? 0).toFixed(4)}｜Top 15 命中率 ${Number(group.hitRate15 || 0).toFixed(2)}%</small></article>`).join('')}<details><summary>Baseline／Random 比較</summary><p>${escapeHtml(backtest.baselineComparison?.status || '依既有合法回測資料顯示；不在此頁重新計算。')}</p><p>隨機基準 Top 15 理論平均：${Number(backtest.baselineModels?.['random-expected']?.averageHit15 ?? 1.9231).toFixed(4)}</p></details></section>` : '<p class="empty-state">模型回測資料尚未載入；開啟此分頁時會讀取既有分析結果。</p>';
+  target.innerHTML = `<article><span>前瞻預測紀錄</span><b>${all.length} 筆</b><small>Prediction-before-Actual</small></article><article><span>已結算</span><b>${settled.length} 筆</b><small>${settled.length ? '可供結果摘要' : '等待開獎結果'}</small></article><article><span>Top 5 平均命中</span><b>${avg('hits5')}</b><small>只計已結算紀錄</small></article><article><span>Top 15 平均命中</span><b>${avg('hits15')}</b><small>不代表未來結果</small></article>${groupMarkup}`;
+}
+
+async function loadValidationAnalysis(prefix) {
+  const state = legacyData[prefix];
+  if (state.analysis || state.analysisLoading || prefix !== 'tw') return;
+  state.analysisLoading = true;
+  try {
+    const payload = await json(`/api/lottery?game=${state.game}&limit=365`);
+    state.analysis = payload.analysis || payload.result || payload;
+  } finally {
+    state.analysisLoading = false;
+    renderValidation(prefix);
+  }
 }
 
 function renderMatch(prefix) {
@@ -129,7 +157,7 @@ function renderMatch(prefix) {
 }
 
 function pickManagerHtml(prefix) {
-  return `<details class="pick-manager"><summary>我的自選號碼</summary><p>最多選擇 5 碼，只儲存在這台裝置，不會改變模型或推薦。</p><div class="pick-grid">${Array.from({ length: 39 }, (_, index) => `<button type="button" data-pick="${prefix}" data-number="${index + 1}">${String(index + 1).padStart(2, '0')}</button>`).join('')}</div><div class="pick-actions"><button type="button" data-save-picks="${prefix}">儲存自選號碼</button><button type="button" data-clear-picks="${prefix}">清除</button><span data-pick-state="${prefix}">尚未選擇</span></div></details>`;
+  return `<details class="pick-manager"><summary>我的自選號碼</summary><p>可從 1–39 保存完整自選組合，只儲存在這台裝置，不會改變模型或推薦。</p><div class="pick-grid">${Array.from({ length: 39 }, (_, index) => `<button type="button" data-pick="${prefix}" data-number="${index + 1}">${String(index + 1).padStart(2, '0')}</button>`).join('')}</div><div class="pick-actions"><button type="button" data-save-picks="${prefix}">儲存自選號碼</button><button type="button" data-clear-picks="${prefix}">清除</button><span data-pick-state="${prefix}">尚未選擇</span></div></details>`;
 }
 
 function bindPickManager(prefix) {
@@ -142,7 +170,7 @@ function bindPickManager(prefix) {
     $$(`[data-pick="${prefix}"]`, root).forEach((button) => button.classList.toggle('selected', selected.has(Number(button.dataset.number))));
     $(`[data-pick-state="${prefix}"]`, root).textContent = selected.size ? `已選 ${[...selected].sort((a,b) => a-b).join('、')}` : '尚未選擇';
   };
-  $$(`[data-pick="${prefix}"]`, root).forEach((button) => { button.onclick = () => { const number = Number(button.dataset.number); if (selected.has(number)) selected.delete(number); else if (selected.size < 5) selected.add(number); refreshPicks(); }; });
+  $$(`[data-pick="${prefix}"]`, root).forEach((button) => { button.onclick = () => { const number = Number(button.dataset.number); if (selected.has(number)) selected.delete(number); else if (selected.size < 39) selected.add(number); refreshPicks(); }; });
   $(`[data-save-picks="${prefix}"]`, root).onclick = () => { localStorage.setItem(key, JSON.stringify([...selected].sort((a,b) => a-b))); refreshPicks(); };
   $(`[data-clear-picks="${prefix}"]`, root).onclick = () => { selected.clear(); localStorage.removeItem(key); refreshPicks(); };
   refreshPicks();
@@ -167,6 +195,7 @@ function activateFeature(button) {
   $$('[data-feature]', page).forEach((node) => node.classList.toggle('active', node === button));
   $$('[data-feature-panel]', page).forEach((node) => node.classList.toggle('active', node.dataset.featurePanel === feature));
   if (feature.startsWith('tw-')) loadLegacyData('tw').catch((error) => { console.error('legacy data', error); ['twHistory', 'twColdHot', 'twValidation', 'twMatch'].forEach((id) => { const node = $(`#${id}`); if (node) node.innerHTML = '<p class="empty-state">資料暫時無法載入，請稍後再試。</p>'; }); });
+  if (feature === 'tw-validation') loadValidationAnalysis('tw').catch((error) => { console.error('model validation data', error); });
   if (feature.startsWith('f5-')) loadLegacyData('f5').catch((error) => { console.error('legacy data', error); ['f5History', 'f5ColdHot', 'f5Validation', 'f5Match'].forEach((id) => { const node = $(`#${id}`); if (node) node.innerHTML = '<p class="empty-state">資料暫時無法載入，請稍後再試。</p>'; }); });
 }
 
@@ -271,7 +300,7 @@ $$('[data-history-search]').forEach((input) => {
     const prefix = input.dataset.historySearch;
     const query = input.value.trim().toLowerCase();
     const original = legacyData[prefix].history;
-    $(`#${prefix === 'tw' ? 'tw' : 'f5'}History`).innerHTML = original.filter((row) => !query || String(row.period || '').includes(query) || String(row.date || '').includes(query) || (row.numbers || []).some((number) => String(number) === query)).slice(0, 30).map((row) => `<article><div><span>第 ${escapeHtml(row.period || '--')} 期</span><small>${displayDate(row.date)}</small></div>${numberChips(row.numbers || [])}</article>`).join('') || '<p class="empty-state">找不到符合條件的開獎紀錄。</p>';
+    renderHistoryRows(prefix, original.filter((row) => !query || String(row.period || '').includes(query) || String(row.date || '').includes(query) || (row.numbers || []).some((number) => String(number) === query)));
   };
 });
 $('#refreshBtn').onclick = refresh;

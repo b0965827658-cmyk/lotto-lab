@@ -1,0 +1,1 @@
+{"commit":"65d4a59bc6eb4cc89fa484679bd22281f460069e","deploy_id":"dep-d9p9saj7uimc739f1utg","service":"lotto-lab-1","selection_reason":"最後一個使用者實際使用、且位於 Product UI v2 重構前的完整正式介面版本","source_method":"git object tree + existing immutable deploy metadata","production_mutated":false}

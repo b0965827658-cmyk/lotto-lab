@@ -3081,6 +3081,11 @@ window.addEventListener("load", () => {
 state.plan = loadPlanPreview();
 state.analysisFocus = loadAnalysisFocus();
 state.modelWeights = loadModelWeights();
+const requestedGame = new URLSearchParams(location.search).get("game");
+if (["tw539", "ca-fantasy5"].includes(requestedGame)) {
+  state.game = requestedGame;
+  document.querySelectorAll(".segment").forEach((button) => button.classList.toggle("active", button.dataset.game === requestedGame));
+}
 initHistoryYears();
 syncAnalysisLimitControls();
 renderModelControls();

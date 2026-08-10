@@ -1,0 +1,80 @@
+{
+  "browser": "Playwright + Google Chrome",
+  "desktop": {
+    "status": "PASS",
+    "overflow": 0,
+    "renderedColdHot": 39,
+    "historyRows": 60,
+    "filteredRows": 1,
+    "backtestGroups": 5,
+    "selectedPicks": 6,
+    "disclaimerParas": 3,
+    "legacyRouteStatus": 200,
+    "legacyElements": 5
+  },
+  "mobile": {
+    "status": "PASS",
+    "overflow": 0,
+    "renderedColdHot": 39,
+    "historyRows": 60,
+    "filteredRows": 1,
+    "backtestGroups": 5,
+    "selectedPicks": 6,
+    "disclaimerParas": 3,
+    "legacyRouteStatus": 200,
+    "legacyElements": 5
+  },
+  "functional": {
+    "rendered": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39
+    ],
+    "groups": [
+      "多模型集成（整體）Top 15 平均 1.9143700 期｜Top 5 平均 0.6686｜Top 15 命中率 93.14%",
+      "539 Bayesian 多視窗Top 15 平均 1.9000700 期｜Top 5 平均 0.6700｜Top 15 命中率 93.00%",
+      "539 Logistic 結構模型Top 15 平均 1.9100700 期｜Top 5 平均 0.6800｜Top 15 命中率 93.10%",
+      "539 Boosted 特徵模型Top 15 平均 1.9200700 期｜Top 5 平均 0.6900｜Top 15 命中率 93.20%",
+      "539 Markov 轉移模型Top 15 平均 1.9300700 期｜Top 5 平均 0.7000｜Top 15 命中率 93.30%"
+    ]
+  },
+  "errors": [
+    "desktop:console:Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}

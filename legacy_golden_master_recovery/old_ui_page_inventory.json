@@ -1,0 +1,1 @@
+{"pages":[{"name":"主分析頁","visible_sections":["彩種切換","最新開獎","統計矩陣","歷史開獎","奇偶尾數","自訂邏輯推理","核心候選15碼","模型回測","自動對號","通知與免責","方案資訊"],"data_sources":["/api/lottery","/api/history-search","/api/config","/api/push-subscription"],"interactions":["切換彩種","切換分析期數","跨年查詢","關鍵字與號碼篩選","號碼/尾數檢視","保存自選號碼","展開五組回測","通知設定"]}],"source":"65d4a59:lotto-lab-web/public/index.html + app.js"}

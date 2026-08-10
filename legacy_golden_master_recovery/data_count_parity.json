@@ -1,0 +1,1 @@
+{"cold_hot":{"expected":39,"actual":39},"backtest_groups":{"expected":5,"actual":5},"history_fixture":{"received":60,"normalized":60,"rendered":60,"filtered_result":1},"disclaimer_paragraphs":{"expected":3,"actual":3},"status":"PASS"}

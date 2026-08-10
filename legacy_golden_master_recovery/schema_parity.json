@@ -1,0 +1,1 @@
+{"status":"PASS","history_fields":["period","date","numbers"],"auto_match_fields":["snapshot","outcome","hits5","hits10","hits15"],"backtest_fields":["testedCount","averageHit5","averageHit15","hitRate15","baselineModels","baselineComparison","modelProfiles"],"backend_changed":false}

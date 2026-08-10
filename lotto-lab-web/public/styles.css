@@ -391,6 +391,24 @@ input:focus-visible {
   }
 }
 
+/* Legacy Golden Master functional data must remain fully visible in the product shell. */
+.full-number-analysis { grid-column: 1 / -1; }
+.full-stat-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:14px; }
+.full-stat-row { display:grid; grid-template-columns:42px 1fr 1fr 1.2fr; align-items:center; gap:8px; border:1px solid rgba(148,163,184,.18); padding:10px 12px; background:rgba(7,17,30,.42); }
+.full-stat-row b { color:var(--cyan); font-size:1.05rem; }
+.full-stat-row span { color:var(--muted); font-size:.8rem; }
+.backtest-groups { grid-column:1/-1; display:grid; gap:10px; margin-top:8px; }
+.backtest-groups article { display:grid; grid-template-columns:minmax(180px,1fr) auto; gap:6px 18px; }
+.backtest-groups article small { grid-column:1/-1; }
+.feature-nav a { display:inline-flex; align-items:center; justify-content:center; color:var(--text); text-decoration:none; border:1px solid rgba(148,163,184,.28); padding:10px 14px; white-space:nowrap; }
+
+@media (max-width: 700px) {
+  .full-stat-grid { grid-template-columns:1fr; }
+  .full-stat-row { grid-template-columns:38px 1fr 1fr 1.25fr; }
+  .backtest-groups article { grid-template-columns:1fr; }
+  .backtest-groups article small { grid-column:auto; }
+}
+
 /* Keep history markers visible after the shared ball theme is applied. */
 .history-balls .history-ball.is-repeat,
 .history-tail-current-numbers .history-ball.is-repeat {

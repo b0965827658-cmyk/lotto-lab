@@ -1,0 +1,1 @@
+{"file":"lotto-lab-web/tests/test_legacy_product_contract.py","tests":8,"passed":8,"required_guards":["hot_cold_39","backtest_5","legacy_routes","feature_counts","auto_match_fields","history_fields","no_truncation","full_disclaimer"]}

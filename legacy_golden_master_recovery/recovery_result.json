@@ -1,0 +1,1 @@
+{"verdict":"A","golden_master_parity":"100%","legacy_feature_total":26,"regressions_found":7,"regressions_fixed":7,"unresolved_regressions":0,"cold_hot":"39/39","backtest":"5/5","desktop":"PASS","mobile":"PASS","notification":"UNCHANGED","prediction":"ZERO_CHANGE","research_brain":"ZERO_MODIFICATION","production":"ZERO_MODIFICATION","permanent_contract":true}

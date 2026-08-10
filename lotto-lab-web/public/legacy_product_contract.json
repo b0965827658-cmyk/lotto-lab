@@ -1,0 +1,20 @@
+{
+  "contract_version": "legacy-golden-master-v1",
+  "golden_master_commit": "65d4a59bc6eb4cc89fa484679bd22281f460069e",
+  "golden_master_deploy": "dep-d9p9saj7uimc739f1utg",
+  "tw539_number_universe": 39,
+  "backtest_legacy_groups": [
+    "多模型集成（整體）",
+    "539 Bayesian 多視窗",
+    "539 Logistic 結構模型",
+    "539 Boosted 特徵模型",
+    "539 Markov 轉移模型"
+  ],
+  "required_routes": ["/", "/legacy-tools.html"],
+  "required_sections": ["冷熱號分析", "歷史開獎紀錄", "模型驗證", "自動對號", "使用說明與免責聲明"],
+  "required_history_fields": ["period", "date", "numbers"],
+  "required_auto_match_fields": ["snapshot", "outcome", "hits5", "hits10", "hits15"],
+  "required_interactions": ["game-switch", "analysis-window", "history-keyword", "history-number", "history-years", "history-view", "saved-picks", "backtest-groups", "notification-center"],
+  "legacy_feature_total": 26,
+  "contract_may_not_be_lowered_by_ui_redesign": true
+}
