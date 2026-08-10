@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "original_contradiction": "sample_count=0 with 91.67% or 100% performance",
+  "root_cause": [
+    "control and baseline profiles were mixed into the five user-facing model groups",
+    "missing metrics were formatted with a numeric zero fallback",
+    "sample count and percentage could originate from different profile/window fields"
+  ],
+  "recovery": {
+    "zero_sample_primary_text": "尚無可用樣本",
+    "zero_sample_metric_display": "—",
+    "percentage_allowed_when_sample_count_zero": false,
+    "legacy_model_groups": 5,
+    "baselines_separate": true
+  }
+}

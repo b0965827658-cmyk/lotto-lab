@@ -5,6 +5,58 @@ const pages = ['overview', 'tw539', 'fantasy5', 'brain', 'evidence', 'knowledge'
 let notificationConfig = {};
 const legacyData = { tw: { game: 'tw539', history: [], journal: [], analysis: null, latest: null }, f5: { game: 'ca-fantasy5', history: [], journal: [], analysis: null, latest: null } };
 
+function orderedPredictionTier(record, key) {
+  const prediction = record?.prediction || record?.snapshot || {};
+  const values = prediction[key] || (key === 'top15' ? prediction.full15 : []) || [];
+  const members = new Set(values.map(Number));
+  const reasons = Array.isArray(record?.snapshot?.reasons) ? [...record.snapshot.reasons].sort((a, b) => Number(a.rank) - Number(b.rank)) : [];
+  const ranked = reasons.map((item) => Number(item.number)).filter((number) => members.has(number));
+  values.map(Number).forEach((number) => { if (!ranked.includes(number)) ranked.push(number); });
+  return ranked;
+}
+
+function currentPrediction(prefix) {
+  if (prefix !== 'tw') return null;
+  const latestPeriod = String(legacyData.tw.latest?.period || '');
+  return [...legacyData.tw.journal]
+    .filter((record) => record.recordType === 'live-pre-draw' && record.status === 'open' && String(record.dataCutoffPeriod || '') === latestPeriod && record.locked !== false)
+    .sort((a, b) => String(b.predictionCapturedAt || '').localeCompare(String(a.predictionCapturedAt || '')))[0] || null;
+}
+
+function renderUserPrediction(prefix) {
+  if (prefix !== 'tw') return;
+  const record = currentPrediction(prefix);
+  if (!record) {
+    $('#twFocusDraw').textContent = '目前尚無對應最新資料的正式 Prediction';
+    $('#twPredictionMeta').textContent = '不會為了填滿畫面而重新產生或使用舊期推薦。';
+    $('#twPredictionStatus').textContent = '等待正式資料';
+    $('#twPredictionModel').textContent = '—';
+    $('#twPredictionHash').textContent = '—';
+    setNumbers('#twFocusNumbers', []);
+    $('#twTop10').textContent = '—';
+    $('#twTop15').textContent = '—';
+    $('#twRankGrid').innerHTML = '<p class="empty-state">目前沒有可驗證的本期模型排序。</p>';
+    return;
+  }
+  const prediction = record.prediction || record.snapshot || {};
+  const top5 = orderedPredictionTier(record, 'top5');
+  const top10 = orderedPredictionTier(record, 'top10');
+  const top15 = orderedPredictionTier(record, 'top15');
+  const reasons = Array.isArray(record.snapshot?.reasons) ? [...record.snapshot.reasons].sort((a, b) => Number(a.rank) - Number(b.rank)) : [];
+  const hash = record.predictionHash || record.snapshotHash || '';
+  $('#twFocusDraw').textContent = `目標開獎日 ${displayDate(prediction.drawDate || record.targetDate)}｜${prediction.drawId || record.targetKey}`;
+  $('#twPredictionMeta').textContent = `建立時間 ${displayDate(prediction.predictionTime || record.predictionCapturedAt)}｜資料截止期別 ${record.dataCutoffPeriod || '—'}`;
+  $('#twPredictionStatus').textContent = record.locked ? '已鎖定、等待開獎' : '完整性待確認';
+  $('#twPredictionModel').textContent = prediction.modelVersion || record.modelVersion || '—';
+  $('#twPredictionHash').textContent = hash ? `${hash.slice(0, 12)}…` : '—';
+  setNumbers('#twFocusNumbers', top5);
+  $('#twTop10').textContent = top10.map((number) => String(number).padStart(2, '0')).join('、');
+  $('#twTop15').textContent = top15.map((number) => String(number).padStart(2, '0')).join('、');
+  $('#twRankGrid').innerHTML = reasons.length >= 15
+    ? reasons.slice(0, 15).map((item) => `<span data-model-rank="${Number(item.rank)}"><small>第 ${Number(item.rank)} 名</small><b>${String(item.number).padStart(2, '0')}</b><em>${Number.isFinite(Number(item.score)) ? `推薦強度 ${Number(item.score).toFixed(2)}` : ''}</em></span>`).join('')
+    : '<p class="empty-state">正式紀錄沒有足夠的 rank 資料，因此不顯示推測排名。</p>';
+}
+
 function activate(page) {
   if (!pages.includes(page)) page = 'overview';
   $$('[data-page-panel]').forEach((node) => node.classList.toggle('active', node.dataset.pagePanel === page));
@@ -38,12 +90,9 @@ function setDraw(prefix, data) {
   $(`#${prefix}Draw`).textContent = `最新期別 ${period}`;
   $(`#${prefix}Date`).textContent = displayDate(latest.date);
   setNumbers(`#${prefix}Numbers`, numbers);
-  $(`#${prefix}FocusDraw`).textContent = `第 ${period} 期｜${displayDate(latest.date)}`;
-  setNumbers(`#${prefix}FocusNumbers`, numbers);
-  if (prefix === 'tw') {
-    const ranking = latest.ranking || [];
-    $('#twTop10').textContent = ranking.slice(0, 10).join('、') || '目前尚無排名資料';
-    $('#twTop15').textContent = ranking.slice(0, 15).join('、') || '目前尚無排名資料';
+  if (prefix === 'f5') {
+    $(`#${prefix}FocusDraw`).textContent = `第 ${period} 期｜${displayDate(latest.date)}`;
+    setNumbers(`#${prefix}FocusNumbers`, numbers);
   }
 }
 
@@ -119,8 +168,14 @@ function renderValidation(prefix) {
   const analysis = legacyData[prefix].analysis || {};
   const backtest = analysis.backtest || {};
   const profiles = Array.isArray(analysis.modelProfiles) ? analysis.modelProfiles : [];
-  const groups = prefix === 'tw' && backtest.testedCount ? [{ label: '多模型集成（整體）', testedCount: backtest.testedCount, averageHit5: backtest.averageHit5 ?? backtest.averageHit, averageHit15: backtest.averageHit15, hitRate15: backtest.hitRate15 }, ...profiles] : [];
-  const groupMarkup = groups.length ? `<section class="backtest-groups"><div class="panel-title"><h3>舊版完整模型回測</h3><span>${groups.length} / 5 組</span></div>${groups.map((group, index) => `<article data-backtest-group="${index + 1}"><span>${escapeHtml(group.label || group.id || `模型 ${index + 1}`)}</span><b>Top 15 平均 ${Number(group.averageHit15 ?? 0).toFixed(4)}</b><small>${Number(group.testedCount || 0)} 期｜Top 5 平均 ${Number(group.averageHit5 ?? group.averageHit ?? 0).toFixed(4)}｜Top 15 命中率 ${Number(group.hitRate15 || 0).toFixed(2)}%</small></article>`).join('')}<details><summary>Baseline／Random 比較</summary><p>${escapeHtml(backtest.baselineComparison?.status || '依既有合法回測資料顯示；不在此頁重新計算。')}</p><p>隨機基準 Top 15 理論平均：${Number(backtest.baselineModels?.['random-expected']?.averageHit15 ?? 1.9231).toFixed(4)}</p></details></section>` : '<p class="empty-state">模型回測資料尚未載入；開啟此分頁時會讀取既有分析結果。</p>';
+  const profileIds = ['tw-bayesian', 'tw-logistic', 'tw-boosted', 'tw-markov'];
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const groups = prefix === 'tw' ? [
+    { id: 'ensemble', label: '多模型集成（整體）', testedCount: backtest.testedCount, averageHit5: backtest.averageHit5 ?? backtest.averageHit, averageHit15: backtest.averageHit15, hitRate15: backtest.hitRate15 },
+    ...profileIds.map((id) => profileById.get(id) || ({ id, label: ({'tw-bayesian':'539 Bayesian 多視窗','tw-logistic':'539 Logistic 結構模型','tw-boosted':'539 Boosted 特徵模型','tw-markov':'539 Markov 轉移模型'})[id], testedCount: 0 }))
+  ] : [];
+  const metric = (value, digits = 4) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—';
+  const groupMarkup = groups.length ? `<section class="backtest-groups"><div class="panel-title"><h3>五組正式模型驗證</h3><span>5 / 5 組</span></div>${groups.map((group, index) => { const samples = Number(group.testedCount || 0); return `<article data-backtest-group="${index + 1}" data-sample-count="${samples}"><span>${escapeHtml(group.label)}</span>${samples > 0 ? `<b>Top 15 平均 ${metric(group.averageHit15)}</b><small>${samples} 期｜Top 5 平均 ${metric(group.averageHit5 ?? group.averageHit)}｜Top 15 命中率 ${metric(group.hitRate15, 2)}%</small>` : '<b>尚無可用樣本</b><small>平均與命中率 —</small>'}</article>`; }).join('')}<details class="baseline-details"><summary>進階驗證資料：基準比較</summary><p>隨機、均勻分布、長期頻率、滾動頻率與遺漏值只作研究控制，不是本期推薦模型，也不計入上述五組。</p><p>${escapeHtml(backtest.baselineComparison?.status || '依既有合法資料顯示；本頁不重新計算。')}</p></details></section>` : '<p class="empty-state">模型驗證資料尚未載入。</p>';
   target.innerHTML = `<article><span>前瞻預測紀錄</span><b>${all.length} 筆</b><small>Prediction-before-Actual</small></article><article><span>已結算</span><b>${settled.length} 筆</b><small>${settled.length ? '可供結果摘要' : '等待開獎結果'}</small></article><article><span>Top 5 平均命中</span><b>${avg('hits5')}</b><small>只計已結算紀錄</small></article><article><span>Top 15 平均命中</span><b>${avg('hits15')}</b><small>不代表未來結果</small></article>${groupMarkup}`;
 }
 
@@ -220,9 +275,9 @@ function bindSavedNumberWorkspace(prefix) {
   refresh();
 }
 
-async function loadLegacyData(prefix) {
+async function loadLegacyData(prefix, force = false) {
   const state = legacyData[prefix];
-  if (state.loaded) return;
+  if (state.loaded && !force) return;
   const [history, journal] = await Promise.all([json(`/api/history-search?game=${state.game}&fromYear=1990&toYear=${new Date().getFullYear()}&limit=500`), json(`/api/prediction-journal?game=${state.game}&limit=100`)]);
   state.history = history.history || [];
   state.journal = journal.records || [];
@@ -234,6 +289,7 @@ async function loadLegacyData(prefix) {
   window.StarSavedNumbers?.reconcile(state.game, state.history);
   renderSavedNumbers(prefix);
   renderMatch(prefix);
+  renderUserPrediction(prefix);
 }
 
 function activateFeature(button) {
@@ -320,6 +376,7 @@ async function refresh() {
     const [tw539, fantasy5, config] = await Promise.all([json('/api/latest?game=tw539'), json('/api/latest?game=ca-fantasy5'), json('/api/config')]);
     setDraw('tw', tw539);
     setDraw('f5', fantasy5);
+    await loadLegacyData('tw', true);
     notificationConfig = config.notifications || {};
     const ready = notificationConfig.serverReady && notificationConfig.queueReady;
     $('#notificationReality').textContent = ready ? `${locale.notification.ready}，目前 ${notificationConfig.subscriberCount || 0} 個裝置已開啟` : locale.notification.setupPending;

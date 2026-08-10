@@ -1,0 +1,23 @@
+{
+  "status": "PASS",
+  "source": "existing locked Current prediction; no prediction was executed",
+  "game": "tw539",
+  "draw_id": "next-after:115000192",
+  "target_date": "2026-08-10",
+  "data_cutoff_period": "115000192",
+  "prediction_created_at": "2026-08-08T13:37:25+00:00",
+  "model_version": "2026.08-independent-baselines-v2",
+  "prediction_hash": "2755d260418e8921a20da3a77f0b9f8807853be1bbc7d65d8aadf008bca8385e",
+  "top5_model_order": [36, 8, 11, 25, 29],
+  "top10_model_order": [36, 8, 11, 25, 29, 28, 14, 34, 7, 6],
+  "top15_model_order": [36, 8, 11, 25, 29, 28, 14, 34, 7, 6, 37, 2, 4, 23, 31],
+  "layers": {
+    "runtime": "EXISTING_FORMAL_CURRENT",
+    "prediction_journal": "MATCH",
+    "api": "MATCH",
+    "frontend_adapter": "MATCH_AFTER_RECOVERY",
+    "rendered_dom": "MATCH"
+  },
+  "hash_consistent": true,
+  "prediction_executed_by_gate": false
+}

@@ -1,0 +1,23 @@
+{
+  "verdict": "A",
+  "formal_prediction_exists": true,
+  "top5_count": 5,
+  "top10_count": 10,
+  "top15_count": 15,
+  "prediction_hash_consistent": true,
+  "fake_full_ranking_removed": true,
+  "verified_ranking_displayed": "top15",
+  "zero_sample_fake_metrics": 0,
+  "legacy_backtest_groups": "5/5",
+  "fantasy5_formal_recommendation": "PAUSED",
+  "desktop_browser": "PASS",
+  "mobile_browser": "PASS",
+  "mobile_core_recommendation_y": 638.46875,
+  "mobile_viewport_height": 844,
+  "legacy_contract": "26/26",
+  "web_tests": "223 passed + 2 subtests",
+  "research_sandbox_tests": "152 passed",
+  "prediction_algorithm_modified": false,
+  "research_brain_modified": false,
+  "deployed": false
+}

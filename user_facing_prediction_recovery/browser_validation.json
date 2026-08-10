@@ -1,0 +1,54 @@
+{
+  "engine": "Playwright + Google Chrome",
+  "desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "core": [
+      "36",
+      "08",
+      "11",
+      "25",
+      "29"
+    ],
+    "top10Count": 10,
+    "top15Count": 15,
+    "rankCount": 15,
+    "hash": "2755d260418e…",
+    "groupCount": 5,
+    "zeroSampleText": "多模型集成（整體）尚無可用樣本平均與命中率 —",
+    "rawBaselinesInModels": false,
+    "fantasyPaused": true,
+    "recommendationY": 677.828125,
+    "overflow": 0,
+    "errors": [],
+    "pass": true
+  },
+  "mobile": {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "core": [
+      "36",
+      "08",
+      "11",
+      "25",
+      "29"
+    ],
+    "top10Count": 10,
+    "top15Count": 15,
+    "rankCount": 15,
+    "hash": "2755d260418e…",
+    "groupCount": 5,
+    "zeroSampleText": "多模型集成（整體）尚無可用樣本平均與命中率 —",
+    "rawBaselinesInModels": false,
+    "fantasyPaused": true,
+    "recommendationY": 638.46875,
+    "overflow": 0,
+    "errors": [],
+    "pass": true
+  },
+  "status": "PASS"
+}

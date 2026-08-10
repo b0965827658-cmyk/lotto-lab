@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "source": "prediction_journal_v3 live-pre-draw locked record",
+  "tw539": {
+    "top5_count": 5,
+    "top10_count": 10,
+    "top15_count": 15,
+    "sets_nested": true,
+    "preserve_model_order": true,
+    "full_ranking_requires_ranked_39": true
+  },
+  "zero_sample_metrics": "HIDDEN_AS_DASH",
+  "fantasy5_formal_recommendation": "PAUSED",
+  "baselines_are_models": false
+}
