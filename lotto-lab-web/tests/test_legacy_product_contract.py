@@ -9,6 +9,7 @@ CONTRACT = json.loads((PUBLIC / "legacy_product_contract.json").read_text(encodi
 PRODUCT_JS = (PUBLIC / "product.js").read_text(encoding="utf-8")
 INDEX = (PUBLIC / "index.html").read_text(encoding="utf-8")
 LEGACY = (PUBLIC / "legacy-tools.html").read_text(encoding="utf-8")
+LEGACY_REDIRECT = (PUBLIC / "legacy-redirect.js").read_text(encoding="utf-8")
 
 
 def test_tw539_hot_cold_has_39_numbers():
@@ -29,8 +30,9 @@ def test_legacy_routes_present():
     assert (PUBLIC / "legacy-tools.html").exists()
     assert INDEX.count("/legacy-tools.html?game=") == 0
     assert CONTRACT["unified_workspace"]["independent_legacy_product_entry"] is False
-    assert "location.replace" in LEGACY
-    assert "'ca-fantasy5' ? 'fantasy5' : 'tw539'" in LEGACY
+    assert 'src="/legacy-redirect.js?v=1"' in LEGACY
+    assert "location.replace" in LEGACY_REDIRECT
+    assert "'ca-fantasy5' ? 'fantasy5' : 'tw539'" in LEGACY_REDIRECT
     assert "data-game=\"tw539\"" in LEGACY
     assert "data-game=\"ca-fantasy5\"" in LEGACY
 
