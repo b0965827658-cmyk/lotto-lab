@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "pages_checked": 16,
+  "forbidden_primary_enum_residue_count": 0,
+  "scanned": ["SLEEPING", "PAUSED", "OPEN_RQ", "LOW_MATERIALITY", "DATA_QUALITY_BLOCKED", "NO_EDGE_FOUND"],
+  "simplified_chinese_issue_count": 0,
+  "numeric_navigation_residue_count": 0,
+  "allowed_terms": ["Fantasy 5", "AI", "E1", "E2", "E3", "SHA-256", "Shadow"]
+}

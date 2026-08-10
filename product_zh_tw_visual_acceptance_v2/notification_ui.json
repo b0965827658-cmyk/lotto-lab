@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "desktop_rendered": true,
+  "mobile_rendered": true,
+  "button_text": "開啟通知",
+  "explanation": "只在重要研究升級或系統異常時通知你。",
+  "subscriber_count": 0,
+  "incorrect_enabled_claim": false,
+  "backend_modified": false
+}

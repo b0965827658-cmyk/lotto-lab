@@ -1,0 +1,20 @@
+{
+  "gate": "A",
+  "status": "PASS",
+  "browser_engine": "Playwright + installed Google Chrome",
+  "desktop_8_pages_pass": true,
+  "mobile_5_pages_pass": true,
+  "tablet_pass": true,
+  "overflow_count": 0,
+  "unexpected_clipping_count": 0,
+  "missing_chinese_glyph_count": 0,
+  "primary_ui_enum_residue_count": 0,
+  "notification_ui_pass": true,
+  "visual_fix_applied": true,
+  "may_commit": true,
+  "may_push": true,
+  "may_deploy_staging": true,
+  "commit_performed": false,
+  "push_performed": false,
+  "deploy_performed": false
+}

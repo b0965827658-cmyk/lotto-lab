@@ -1,0 +1,343 @@
+{
+  "engine": "Playwright + installed Google Chrome",
+  "rendered_at": "2026-08-10T01:12:51.740Z",
+  "views": {
+    "desktop": [
+      {
+        "page": "overview",
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "overflow": [
+          {
+            "tag": "ARTICLE",
+            "id": "",
+            "cls": "subject-card cyan",
+            "scrollWidth": 577,
+            "clientWidth": 527,
+            "text": "台灣彩券\n觀測中\n今彩539\n最新期別 115000158\n2026/06/30\n03\n11\n23\n26\n37\n目前模式\n研究觀測\n資料狀態\n持續累積證據\n查看"
+          },
+          {
+            "tag": "ARTICLE",
+            "id": "",
+            "cls": "subject-card violet",
+            "scrollWidth": 577,
+            "clientWidth": 527,
+            "text": "California Fantasy 5\n研究中\n加州天天樂\n最新期別 100023\n2024/01/24\n06\n11\n16\n21\n26\n目前模式\n正式推薦暫停"
+          }
+        ],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "摘星引擎總覽"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "STAR ENGINE\n\n摘星引擎總覽\n\nAI 數據研究與預測觀測平台\n\n摘星引擎\n正常運作\n測試環境\nAI 研究中心\n正在監測新證據\n自主研究模式\n資料更新\n正常\n更新時間 09:12\n需要處理\n無\n目前沒有需要處理的事項\n\n彩種狀態\n\n最新觀測\n資料僅供研究觀測\n台灣彩券\n觀測中\n今彩539\n最新期別 115000158\n2026/06/30\n03\n11\n23\n26\n37\n目前模式\n研究觀測\n資料狀態\n持續累積證據\n查看今彩539\nCalifornia Fantasy 5\n研究中\n加州天天樂\n最新期別 100023\n2024/01/24\n06\n11\n16\n21\n26\n目前模式\n正式推薦暫停\n已驗證歷史資料\n95 期\n查看加州天天樂\n\nAI 研究動態\n\n最近一次自主判斷\n目前狀態\n正在監測新證據\n\n目前沒有足以啟動新研究的重大變化。系統會持續等待合格證據，不會為了產生結果而強迫研究。\n\n查看技術詳細資料"
+      },
+      {
+        "page": "tw539",
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "今彩539"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "台灣彩券\n\n今彩539\n\n查看本期分析、推薦觀測與證據累積。號碼內容不代表保證結果。\n\n研究觀測\n第 115000158 期｜2026/06/30\n\n核心推薦 5 碼\n\n03\n11\n23\n26\n37\n擴展觀察 10 碼\n1、2、3、4、5、6、7、8、9、10\n完整觀察 15 碼\n1、2、3、4、5、6、7、8、9、10、11、12、13、14、15\n證據累積\n唯讀呈現\n近期命中表現\n以已結算證據為準\n模型研究狀態\n正在監測證據\n完整號碼排名\n1–39\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n近期命中表現\n\n目前尚無可在此頁新增呈現的已結算讀取資料。\n\n歷史紀錄\n\n正在等待下一筆合格證據。"
+      },
+      {
+        "page": "fantasy5",
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "加州天天樂 Fantasy 5"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "CALIFORNIA FANTASY 5\n\n加州天天樂 Fantasy 5\n\n目前處於研究觀測階段，正式推薦暫停。\n\n研究觀測\n第 100023 期｜2024/01/24\n06\n11\n16\n21\n26\n前瞻驗證資料\n0 期\n已驗證歷史資料\n95 期\nAI 研究狀態\n資料可信度不足，暫停研究\n前置快照\n等待自然觀測\n開獎確認\n尚無紀錄\n時間窗分析\n觀測資料已準備\n正式推薦\n暫停\n研究觀測排名\n\n尚未產生第一筆自然前瞻快照，不進行歷史回填。\n\n資料可信度\n\n已驗證歷史資料 95 期；未達研究升級門檻。"
+      },
+      {
+        "page": "brain",
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "AI 研究中心"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "STAR RESEARCH BRAIN\n\nAI 研究中心\n\n只在新證據具有足夠資訊量時啟動研究；所有研究都受安全邊界限制。\n\nAI 目前狀態\n\n正在監測證據\n最近決策\n等待新資料\n目前研究問題\n無\n\n安全邊界\n\n研究沙盒\n正式環境寫入\n禁止\n部署與推送\n禁止\n自動升級模型\n禁止\n觀察證據\n提出問題\n比較假設\n離線實驗\n主動反證\n記錄知識\n決定下一步\n最近一次自主判斷\n\n目前沒有需要啟動的新研究。\n\n研究結論與下一步\n\n尚未發現值得重新研究的重大變化，持續監測。\n\n工程稽核"
+      },
+      {
+        "page": "evidence",
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "證據中心"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "EVIDENCE CENTER\n\n證據中心\n\n集中查看即時、前瞻與已結算證據，以及資料來源與完整性驗證。\n\n即時證據\n前瞻證據\n已結算證據\n資料完整性\n項目\n資料來源\n開獎確認\nSHA-256\n狀態\n今彩539證據\n持久化紀錄\n預測早於開獎\nruntime_sha256\n已驗證\n\n本頁只讀取證據，不重新計算命中結果。\n\n加州天天樂前瞻快照\n前瞻觀測紀錄\n等待自然建立\n—\n等待中"
+      },
+      {
+        "page": "knowledge",
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "研究知識庫"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "RESEARCH KNOWLEDGE\n\n研究知識庫\n\n成功、失敗與資料不足的研究都會保留，避免重複走無效方向。\n\n全部\n已獲支持\n已被否證\n尚無優勢證據\n資料不足\nE2\n\n今彩539\n\n目前方法是否具穩定優勢？\n研究結論：尚未發現穩定優勢。\n尚無優勢證據\n新重大證據出現前禁止重複\nE1\n\n加州天天樂\n\n市場狀態是否具研究價值？\n研究限制：已驗證資料不足。\n資料不足\n已驗證 95 期\n政策\n\n研究規範\n\n被否證的方向仍保留\n失敗也是知識，不因結果不漂亮而刪除。\n可稽核\n禁止事後改寫"
+      },
+      {
+        "page": "notifications",
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "通知中心"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "NOTIFICATION CENTER\n\n通知中心\n\n只在重要研究升級或系統異常時通知你。\n\n瀏覽器通知\n\n通知服務已準備完成，目前 0 個裝置已開啟\n服務已就緒\n開啟通知\n重要通知\n\n目前尚無需要處理的通知。\n\nAI 研究升級\n\n只有建議進入影子驗證時通知。\n\n資料完整性\n\n完整性異常與儲存風險會立即通知。\n\n通知設定\n通知服務：暫時無法使用\n瀏覽器權限：尚未決定\n通知訂閱：正在確認"
+      },
+      {
+        "page": "system",
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "系統管理"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "SYSTEM MANAGEMENT\n\n系統管理\n\n服務、儲存、自動排程、權限與版本資訊集中在此；一般頁面不顯示工程細節。\n\n服務狀態\n環境：測試環境\n正式環境：未修改\n介面狀態：唯讀\n資料儲存\n歷史紀錄只追加\nSHA-256 完整性驗證\n獨立持久化儲存空間\n自動排程\n今彩539排程：維持原設定\nAI研究：預設休眠\n同時最多一個研究程序\n權限與安全\n正式環境寫入：禁止\n模型升級：需人工審核\n安全停止開關：可用\n顯示版本與工程稽核資訊"
+      }
+    ],
+    "mobile": [
+      {
+        "page": "overview",
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "overflow": [
+          {
+            "tag": "ARTICLE",
+            "id": "",
+            "cls": "subject-card cyan",
+            "scrollWidth": 390,
+            "clientWidth": 340,
+            "text": "台灣彩券\n觀測中\n今彩539\n最新期別 115000158\n2026/06/30\n03\n11\n23\n26\n37\n目前模式\n研究觀測\n資料狀態\n持續累積證據\n查看"
+          },
+          {
+            "tag": "ARTICLE",
+            "id": "",
+            "cls": "subject-card violet",
+            "scrollWidth": 390,
+            "clientWidth": 340,
+            "text": "California Fantasy 5\n研究中\n加州天天樂\n最新期別 100023\n2024/01/24\n06\n11\n16\n21\n26\n目前模式\n正式推薦暫停"
+          }
+        ],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "摘星引擎總覽"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "STAR ENGINE\n\n摘星引擎總覽\n\nAI 數據研究與預測觀測平台\n\n摘星引擎\n正常運作\n測試環境\nAI 研究中心\n正在監測新證據\n自主研究模式\n資料更新\n正常\n更新時間 09:12\n需要處理\n無\n目前沒有需要處理的事項\n\n彩種狀態\n\n最新觀測\n資料僅供研究觀測\n台灣彩券\n觀測中\n今彩539\n最新期別 115000158\n2026/06/30\n03\n11\n23\n26\n37\n目前模式\n研究觀測\n資料狀態\n持續累積證據\n查看今彩539\nCalifornia Fantasy 5\n研究中\n加州天天樂\n最新期別 100023\n2024/01/24\n06\n11\n16\n21\n26\n目前模式\n正式推薦暫停\n已驗證歷史資料\n95 期\n查看加州天天樂\n\nAI 研究動態\n\n最近一次自主判斷\n目前狀態\n正在監測新證據\n\n目前沒有足以啟動新研究的重大變化。系統會持續等待合格證據，不會為了產生結果而強迫研究。\n\n查看技術詳細資料"
+      },
+      {
+        "page": "tw539",
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "今彩539"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "台灣彩券\n\n今彩539\n\n查看本期分析、推薦觀測與證據累積。號碼內容不代表保證結果。\n\n研究觀測\n第 115000158 期｜2026/06/30\n\n核心推薦 5 碼\n\n03\n11\n23\n26\n37\n擴展觀察 10 碼\n1、2、3、4、5、6、7、8、9、10\n完整觀察 15 碼\n1、2、3、4、5、6、7、8、9、10、11、12、13、14、15\n證據累積\n唯讀呈現\n近期命中表現\n以已結算證據為準\n模型研究狀態\n正在監測證據\n完整號碼排名\n1–39\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n近期命中表現\n\n目前尚無可在此頁新增呈現的已結算讀取資料。\n\n歷史紀錄\n\n正在等待下一筆合格證據。"
+      },
+      {
+        "page": "fantasy5",
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "加州天天樂 Fantasy 5"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "CALIFORNIA FANTASY 5\n\n加州天天樂 Fantasy 5\n\n目前處於研究觀測階段，正式推薦暫停。\n\n研究觀測\n第 100023 期｜2024/01/24\n06\n11\n16\n21\n26\n前瞻驗證資料\n0 期\n已驗證歷史資料\n95 期\nAI 研究狀態\n資料可信度不足，暫停研究\n前置快照\n等待自然觀測\n開獎確認\n尚無紀錄\n時間窗分析\n觀測資料已準備\n正式推薦\n暫停\n研究觀測排名\n\n尚未產生第一筆自然前瞻快照，不進行歷史回填。\n\n資料可信度\n\n已驗證歷史資料 95 期；未達研究升級門檻。"
+      },
+      {
+        "page": "brain",
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "AI 研究中心"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "STAR RESEARCH BRAIN\n\nAI 研究中心\n\n只在新證據具有足夠資訊量時啟動研究；所有研究都受安全邊界限制。\n\nAI 目前狀態\n\n正在監測證據\n最近決策\n等待新資料\n目前研究問題\n無\n\n安全邊界\n\n研究沙盒\n正式環境寫入\n禁止\n部署與推送\n禁止\n自動升級模型\n禁止\n觀察證據\n提出問題\n比較假設\n離線實驗\n主動反證\n記錄知識\n決定下一步\n最近一次自主判斷\n\n目前沒有需要啟動的新研究。\n\n研究結論與下一步\n\n尚未發現值得重新研究的重大變化，持續監測。\n\n工程稽核"
+      },
+      {
+        "page": "notifications",
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "通知中心"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "NOTIFICATION CENTER\n\n通知中心\n\n只在重要研究升級或系統異常時通知你。\n\n瀏覽器通知\n\n通知服務已準備完成，目前 0 個裝置已開啟\n服務已就緒\n開啟通知\n重要通知\n\n目前尚無需要處理的通知。\n\nAI 研究升級\n\n只有建議進入影子驗證時通知。\n\n資料完整性\n\n完整性異常與儲存風險會立即通知。\n\n通知設定\n通知服務：暫時無法使用\n瀏覽器權限：尚未決定\n通知訂閱：正在確認"
+      }
+    ],
+    "tablet": [
+      {
+        "page": "overview",
+        "scrollWidth": 768,
+        "clientWidth": 768,
+        "overflow": [
+          {
+            "tag": "ARTICLE",
+            "id": "",
+            "cls": "subject-card cyan",
+            "scrollWidth": 768,
+            "clientWidth": 718,
+            "text": "台灣彩券\n觀測中\n今彩539\n最新期別 115000158\n2026/06/30\n03\n11\n23\n26\n37\n目前模式\n研究觀測\n資料狀態\n持續累積證據\n查看"
+          },
+          {
+            "tag": "ARTICLE",
+            "id": "",
+            "cls": "subject-card violet",
+            "scrollWidth": 768,
+            "clientWidth": 718,
+            "text": "California Fantasy 5\n研究中\n加州天天樂\n最新期別 100023\n2024/01/24\n06\n11\n16\n21\n26\n目前模式\n正式推薦暫停"
+          }
+        ],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "摘星引擎總覽"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "STAR ENGINE\n\n摘星引擎總覽\n\nAI 數據研究與預測觀測平台\n\n摘星引擎\n正常運作\n測試環境\nAI 研究中心\n正在監測新證據\n自主研究模式\n資料更新\n正常\n更新時間 09:12\n需要處理\n無\n目前沒有需要處理的事項\n\n彩種狀態\n\n最新觀測\n資料僅供研究觀測\n台灣彩券\n觀測中\n今彩539\n最新期別 115000158\n2026/06/30\n03\n11\n23\n26\n37\n目前模式\n研究觀測\n資料狀態\n持續累積證據\n查看今彩539\nCalifornia Fantasy 5\n研究中\n加州天天樂\n最新期別 100023\n2024/01/24\n06\n11\n16\n21\n26\n目前模式\n正式推薦暫停\n已驗證歷史資料\n95 期\n查看加州天天樂\n\nAI 研究動態\n\n最近一次自主判斷\n目前狀態\n正在監測新證據\n\n目前沒有足以啟動新研究的重大變化。系統會持續等待合格證據，不會為了產生結果而強迫研究。\n\n查看技術詳細資料"
+      },
+      {
+        "page": "tw539",
+        "scrollWidth": 768,
+        "clientWidth": 768,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "今彩539"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "台灣彩券\n\n今彩539\n\n查看本期分析、推薦觀測與證據累積。號碼內容不代表保證結果。\n\n研究觀測\n第 115000158 期｜2026/06/30\n\n核心推薦 5 碼\n\n03\n11\n23\n26\n37\n擴展觀察 10 碼\n1、2、3、4、5、6、7、8、9、10\n完整觀察 15 碼\n1、2、3、4、5、6、7、8、9、10、11、12、13、14、15\n證據累積\n唯讀呈現\n近期命中表現\n以已結算證據為準\n模型研究狀態\n正在監測證據\n完整號碼排名\n1–39\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n近期命中表現\n\n目前尚無可在此頁新增呈現的已結算讀取資料。\n\n歷史紀錄\n\n正在等待下一筆合格證據。"
+      },
+      {
+        "page": "brain",
+        "scrollWidth": 768,
+        "clientWidth": 768,
+        "overflow": [],
+        "clipped": [
+          {
+            "tag": "H2",
+            "id": "",
+            "text": "AI 研究中心"
+          }
+        ],
+        "enums": [],
+        "fontFamily": "\"Noto Sans TC\", \"PingFang TC\", \"Microsoft JhengHei\", Inter, system-ui, sans-serif",
+        "tofu": 0,
+        "visibleText": "STAR RESEARCH BRAIN\n\nAI 研究中心\n\n只在新證據具有足夠資訊量時啟動研究；所有研究都受安全邊界限制。\n\nAI 目前狀態\n\n正在監測證據\n最近決策\n等待新資料\n目前研究問題\n無\n\n安全邊界\n\n研究沙盒\n正式環境寫入\n禁止\n部署與推送\n禁止\n自動升級模型\n禁止\n觀察證據\n提出問題\n比較假設\n離線實驗\n主動反證\n記錄知識\n決定下一步\n最近一次自主判斷\n\n目前沒有需要啟動的新研究。\n\n研究結論與下一步\n\n尚未發現值得重新研究的重大變化，持續監測。\n\n工程稽核"
+      }
+    ]
+  },
+  "totals": {
+    "pages": 16,
+    "horizontal_overflow_pages": 0,
+    "overflow_elements": 6,
+    "clipped_elements": 16,
+    "enum_residue": 0,
+    "tofu_characters": 0
+  }
+}

@@ -1,0 +1,1 @@
+{"SLEEPING":"正在監測證據","AUTONOMOUS_OBSERVATION":"自主研究模式","LOW_MATERIALITY_OBSERVE_ONLY":"新資料資訊量不足，暫不啟動研究","NO_MATERIAL_CHANGE":"尚未發現值得重新研究的變化","OPEN_RQ":"已啟動新的研究問題","DATA_QUALITY_BLOCKED":"資料可信度不足，暫停研究","NO_EDGE_FOUND":"尚未發現穩定優勢","REJECTED":"假設已被證據否證","SUPPORTED":"假設獲得目前證據支持","SHADOW_RECOMMENDED":"建議進入影子驗證","EMERGENCY_KILL":"AI研究服務已安全停止","PAUSED":"研究觀測中／正式推薦暫停"}

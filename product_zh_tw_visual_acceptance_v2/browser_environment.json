@@ -1,0 +1,12 @@
+{
+  "status": "AVAILABLE",
+  "controller_status": "BROWSER_CONTROLLER_UNAVAILABLE",
+  "engine": "Playwright + installed Google Chrome",
+  "browser_executable": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "render_mode": "headless DOM rendering",
+  "locale": "zh-TW",
+  "timezone": "Asia/Taipei",
+  "rendered_at": "2026-08-10T01:12:51.740Z",
+  "source": "file:///D:/Lotto/lotto-lab-staging/lotto-lab-web/public/index.html",
+  "data_mode": "existing read-only local UI data"
+}

@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "engine": "Playwright + installed Google Chrome",
+  "pages_rendered": 16,
+  "desktop": {"viewport": "1440x1000", "pages": 8, "passed": 8},
+  "mobile": {"viewport": "390x844", "pages": 5, "passed": 5},
+  "tablet": {"viewport": "768x1024", "pages": 3, "passed": 3},
+  "dom_ready": true,
+  "fonts_ready": true,
+  "loading_skeleton_captured": false,
+  "screenshots": "desktop/, mobile/, tablet/"
+}

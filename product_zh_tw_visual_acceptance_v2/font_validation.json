@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "computed_font_family": "Noto Sans TC, PingFang TC, Microsoft JhengHei, Inter, system-ui, sans-serif",
+  "pages_checked": 16,
+  "missing_glyph_count": 0,
+  "replacement_character_count": 0,
+  "baseline_issue_count": 0
+}

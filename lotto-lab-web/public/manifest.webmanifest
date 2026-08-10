@@ -1,25 +1,16 @@
 {
-  "name": "摘星引擎｜彩券邏輯推理引擎",
+  "name": "摘星引擎｜AI 數據研究與預測觀測平台",
   "short_name": "摘星引擎",
-  "description": "摘星引擎｜彩券邏輯推理引擎",
-  "start_url": "/",
+  "description": "以可驗證證據為核心的 AI 數據研究與預測觀測平台",
+  "lang": "zh-TW",
+  "start_url": "/#overview",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#eef3f8",
-  "theme_color": "#102b49",
+  "background_color": "#07090d",
+  "theme_color": "#070a0f",
   "orientation": "portrait-primary",
   "icons": [
-    {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ]
 }

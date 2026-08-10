@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "page_level_overflow_count": 0,
+  "unexpected_visible_element_overflow_count": 0,
+  "measurements": {
+    "desktop": {"clientWidth": 1440, "scrollWidth": 1440, "pages": 8},
+    "mobile": {"clientWidth": 390, "scrollWidth": 390, "pages": 5},
+    "tablet": {"clientWidth": 768, "scrollWidth": 768, "pages": 3}
+  },
+  "excluded_benign_metrics": {
+    "count": 6,
+    "reason": "overview subject-card decorative circular pseudo-element is intentionally clipped by overflow:hidden and does not affect document width"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "unexpected_clipping_count": 0,
+  "ellipsis_without_detail_count": 0,
+  "detector_candidates_reviewed": 16,
+  "candidate_disposition": "All were fully visible H2 headings with a one-pixel fractional line-box measurement difference; screenshot review confirmed no clipping.",
+  "fields_checked": ["page headings", "navigation", "research question", "knowledge conclusion", "status text", "notification text"]
+}
