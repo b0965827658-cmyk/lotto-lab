@@ -12,7 +12,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py analysis_v2.py prediction_journal_v3.py operations_v11.py ./
+COPY server.py analysis_v2.py prediction_journal_v3.py operations_v11.py \
+    tw539_evidence_runtime.py tw539_evidence_provenance.py \
+    tw539_evidence_trigger.py tw539_evidence_cron.py ./
 COPY public ./public
 COPY data ./data
 
