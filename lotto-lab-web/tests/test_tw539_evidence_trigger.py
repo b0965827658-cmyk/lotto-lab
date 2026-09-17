@@ -2,7 +2,35 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 import tw539_evidence_trigger as trigger
+
+
+@pytest.fixture(autouse=True)
+def enable_staging_trigger(monkeypatch):
+    monkeypatch.setenv(trigger.TRIGGER_ENABLED_ENV, "true")
+    monkeypatch.setenv(trigger.RUNTIME_ENV_ENV, "staging")
+
+
+def test_trigger_is_disabled_by_default(monkeypatch):
+    monkeypatch.delenv(trigger.TRIGGER_ENABLED_ENV, raising=False)
+    code, response = trigger.invoke_current_evidence_cycle(
+        supplied_secret="unused", payload={}, runner=lambda: {"status": "SUCCESS"}, audit_writer=lambda _: None
+    )
+    assert code == 503
+    assert response["error_category"] == "trigger_disabled"
+
+
+def test_production_requires_independent_arm(monkeypatch):
+    monkeypatch.setenv(trigger.RUNTIME_ENV_ENV, "production")
+    monkeypatch.setenv(trigger.TRIGGER_SECRET_ENV, "secret-value")
+    monkeypatch.delenv(trigger.PRODUCTION_ARMED_ENV, raising=False)
+    code, response = trigger.invoke_current_evidence_cycle(
+        supplied_secret="secret-value", payload={}, runner=lambda: {"status": "SUCCESS"}, audit_writer=lambda _: None
+    )
+    assert code == 503
+    assert response["error_category"] == "production_not_armed"
 
 
 def test_authentication_and_empty_payload_only(monkeypatch):
@@ -32,6 +60,17 @@ def test_current_only_success(monkeypatch):
         audit_writer=lambda _: None,
     )
     assert code == 200 and response["records_added"] == 1
+
+
+def test_records_skipped_uses_current_invocation_value(monkeypatch):
+    monkeypatch.setenv(trigger.TRIGGER_SECRET_ENV, "secret-value")
+    code, response = trigger.invoke_current_evidence_cycle(
+        supplied_secret="secret-value", payload={},
+        runner=lambda: {"status": "SAFE_NOOP", "records_added": 0, "record_count": 99, "records_skipped": 1},
+        audit_writer=lambda _: None,
+    )
+    assert code == 200
+    assert response["records_skipped"] == 1
 
 
 def test_reentry_is_safe_noop(monkeypatch):
