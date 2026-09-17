@@ -1,0 +1,12 @@
+{
+  "test_fixture": "isolated temporary directory",
+  "runs": 10,
+  "subjects": ["current", "baseline", "candidate"],
+  "records_added_each_run": [3,0,0,0,0,0,0,0,0,0],
+  "final_record_count": 3,
+  "unique_journal_hash_count": 1,
+  "journal_sha256": "430115f2e37ff33ebed3ebe41c16b8eea70f8449a64ffad1b34480389eb48ef6",
+  "eps_duplicate_accumulation": false,
+  "dashboard_changed_on_replay": false,
+  "result": "PASS"
+}
