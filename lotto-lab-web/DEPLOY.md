@@ -67,6 +67,34 @@ The app can show local notifications while the user keeps the site open. Full ba
 /api/health
 ```
 
+## TW539 Evidence Staging Gate
+
+The Evidence trigger and scheduler are fail-closed. The checked-in Render
+Blueprint keeps them disabled and does not create a Cron Job.
+
+For a dedicated Staging service only, configure:
+
+```text
+EVIDENCE_RUNTIME_ENV=staging
+EVIDENCE_TRIGGER_ENABLED=true
+EVIDENCE_TRIGGER_SECRET=<staging-only-secret>
+```
+
+For a separate Staging scheduler, also configure:
+
+```text
+EVIDENCE_SCHEDULER_ENABLED=true
+TW539_EVIDENCE_TRIGGER_URL=https://<staging-host>/api/internal/tw539-evidence-cycle
+EVIDENCE_ALLOWED_TRIGGER_HOST=<staging-host>
+```
+
+Do not reuse the Production hostname or secret. Production additionally
+requires `EVIDENCE_RUNTIME_ENV=production` and
+`EVIDENCE_PRODUCTION_ARMED=true`; keep the latter false until a separately
+approved Production gate. A Staging validation must first prove authentication
+failure, host mismatch rejection, one successful invocation, and replay
+deduplication.
+
 ## Deploy To Render
 
 1. Push this folder to a GitHub repository.
