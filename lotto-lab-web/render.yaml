@@ -22,3 +22,9 @@ services:
         value: 1
       - key: NUMEXPR_NUM_THREADS
         value: 1
+      - key: EVIDENCE_TRIGGER_ENABLED
+        value: "false"
+      - key: EVIDENCE_RUNTIME_ENV
+        value: disabled
+      - key: EVIDENCE_PRODUCTION_ARMED
+        value: "false"
