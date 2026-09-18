@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import hmac
 import html
 import io
 import itertools
@@ -129,6 +130,14 @@ AUTO_NOTIFY_GAMES = [
     for game in os.environ.get("LOTTO_AUTO_NOTIFY_GAMES", "tw539,ca-fantasy5").split(",")
     if game.strip() in ALLOWED_GAMES
 ]
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "").strip()
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+LINE_ADMIN_USER_IDS = {
+    value.strip()
+    for value in os.environ.get("LINE_ADMIN_USER_IDS", "").split(",")
+    if value.strip()
+}
+LINE_WEBHOOK_MAX_EVENTS = 50
 
 
 @dataclass
@@ -4677,6 +4686,65 @@ def public_draws(draws: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [public_draw(draw) for draw in draws]
 
 
+def line_signature_is_valid(body: bytes, signature: str) -> bool:
+    """Validate LINE's HMAC-SHA256 signature without logging secrets or payloads."""
+    if not LINE_CHANNEL_SECRET or not signature:
+        return False
+    expected = hmac.new(
+        LINE_CHANNEL_SECRET.encode("utf-8"), body, hashlib.sha256
+    ).digest()
+    try:
+        supplied = __import__("base64").b64decode(signature, validate=True)
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(expected, supplied)
+
+
+def line_reply(reply_token: str, text: str) -> None:
+    """Reply once to a LINE message. A missing token is a configuration error, not a fallback."""
+    if not LINE_CHANNEL_ACCESS_TOKEN:
+        raise RuntimeError("LINE_CHANNEL_ACCESS_TOKEN 尚未設定")
+    payload = json.dumps(
+        {"replyToken": reply_token, "messages": [{"type": "text", "text": text[:5000]}]},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.line.me/v2/bot/message/reply",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10):
+        pass
+
+
+def line_message_reply(event: dict[str, Any]) -> str | None:
+    """Return an allowlisted, non-predictive reply for a LINE text-message event."""
+    if event.get("type") != "message" or event.get("message", {}).get("type") != "text":
+        return None
+    text = str(event["message"].get("text", "")).strip().lower()
+    user_id = str(event.get("source", {}).get("userId", "")).strip()
+    if text in {"管理", "admin"}:
+        if user_id and user_id in LINE_ADMIN_USER_IDS:
+            return "管理員功能正在建立中。"
+        return "此指令僅限管理員。"
+    if text in {"最新", "最新開獎", "539", "tw539"}:
+        try:
+            latest = taiwan_latest()
+            numbers = "、".join(f"{int(number):02d}" for number in latest.get("numbers", []))
+            period = latest.get("period", "—")
+            date = latest.get("date", "—")
+            return f"今彩539 最新開獎\n期別：{period}\n日期：{date}\n號碼：{numbers or '資料驗證中'}"
+        except Exception:
+            return "開獎資料驗證中，請稍後再試。"
+    if text in {"幫助", "help", "開始", "start"}:
+        return "摘星引擎已連線。\n輸入「最新」可查詢今彩539最新開獎。"
+    return "輸入「幫助」查看可用指令。"
+
+
 class Handler(SimpleHTTPRequestHandler):
     server_version = "LottoLab"
     sys_version = ""
@@ -4902,6 +4970,37 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        # LINE does not send browser Origin headers; signature verification is the
+        # authority check for this single public endpoint.
+        if parsed.path == "/api/line/webhook":
+            if not LINE_CHANNEL_SECRET:
+                self.send_json({"ok": False, "error": "LINE Webhook 尚未設定"}, status=503)
+                return
+            try:
+                body = self.read_raw_body()
+                if not line_signature_is_valid(body, self.headers.get("X-Line-Signature", "")):
+                    self.send_json({"ok": False, "error": "LINE 簽章驗證失敗"}, status=401)
+                    return
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                events = payload.get("events", []) if isinstance(payload, dict) else []
+                if not isinstance(events, list) or len(events) > LINE_WEBHOOK_MAX_EVENTS:
+                    raise ValueError("LINE 事件格式不正確")
+                for event in events:
+                    if not isinstance(event, dict):
+                        continue
+                    reply_token = str(event.get("replyToken", "")).strip()
+                    reply_text = line_message_reply(event)
+                    if reply_token and reply_text and LINE_CHANNEL_ACCESS_TOKEN:
+                        try:
+                            line_reply(reply_token, reply_text)
+                        except Exception as exc:
+                            # LINE retries only the webhook delivery; do not turn a
+                            # reply failure into a replayed command.
+                            print(f"LINE reply failed: {type(exc).__name__}")
+                self.send_json({"ok": True})
+            except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+                self.send_json({"ok": False, "error": "LINE 事件格式不正確"}, status=400)
+            return
         if parsed.path.startswith("/api/") and self.reject_if_rate_limited(parsed.path):
             return
         if not self.verify_origin():
@@ -4990,13 +5089,18 @@ class Handler(SimpleHTTPRequestHandler):
                 return
         self.send_json({"ok": False, "error": "not found"}, status=404)
 
-    def read_json_body(self) -> dict[str, Any]:
+    def read_raw_body(self) -> bytes:
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length <= 0:
-            return {}
+            return b""
         if length > MAX_JSON_BODY_BYTES:
             raise ValueError("資料量過大")
-        body = self.rfile.read(length)
+        return self.rfile.read(length)
+
+    def read_json_body(self) -> dict[str, Any]:
+        body = self.read_raw_body()
+        if not body:
+            return {}
         payload = json.loads(body.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("JSON 格式不正確")
