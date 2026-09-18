@@ -5012,9 +5012,9 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
         parsed = urlparse(self.path)
-        if parsed.path in ("/", "/index.html", "/sw.js", "/manifest.webmanifest"):
+        if parsed.path in ("/", "/index.html", "/app.js", "/styles.css", "/sw.js", "/manifest.webmanifest"):
             self.send_header("Cache-Control", "no-cache")
-        elif parsed.path.startswith(("/app.js", "/styles.css", "/icon")):
+        elif parsed.path.startswith("/icon"):
             self.send_header("Cache-Control", "public, max-age=86400")
         super().end_headers()
 
