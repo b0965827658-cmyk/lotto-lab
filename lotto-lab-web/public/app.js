@@ -2792,12 +2792,32 @@ async function load(options = {}) {
   if (!silent) els.refresh.disabled = true;
   try {
     const previousSeen = readLastSeenDraw()[state.game] || "";
-    const [rawPayload, rawCompanionPayload] = await Promise.all([
-      requestAnalysisPayload(state.game, state.limit),
-      requestAnalysisPayload(companionGame, 10).catch(() => null),
-    ]);
+    const analysisPromise = requestAnalysisPayload(state.game, state.limit);
+    const latestPayloads = await Promise.all(
+      [state.game, companionGame].map((game) =>
+        fetchJsonWithTimeout(`/api/latest?game=${game}&t=${Date.now()}`).catch(() => null),
+      ),
+    );
+    for (const latestPayload of latestPayloads) {
+      if (!latestPayload?.ok || !isValidDraw(latestPayload.latest)) continue;
+      const game = latestPayload.game || latestPayload.latest.game;
+      if (game) state.latestByGame[game] = latestPayload.latest;
+    }
+    if (requestId !== state.requestId) return;
+    renderLatestDraws();
+    if (!silent && latestPayloads.some((item) => item?.ok && isValidDraw(item.latest))) {
+      setStatus("最新開獎已顯示，數據分析仍在背景處理...");
+    }
+
+    const rawPayload = await analysisPromise;
     const payload = validateLotteryPayload(rawPayload);
-    const companionPayload = rawCompanionPayload?.ok && isValidDraw(rawCompanionPayload.latest) ? rawCompanionPayload : null;
+    const companionLatestPayload = latestPayloads.find((item) => {
+      const game = item?.game || item?.latest?.game;
+      return game === companionGame && item?.ok && isValidDraw(item.latest);
+    });
+    const companionPayload = companionLatestPayload
+      ? { ok: true, latest: companionLatestPayload.latest }
+      : null;
     if (requestId !== state.requestId) return;
     writeCachedPayload(cacheKey, payload);
     if (companionPayload?.ok) writeCachedPayload(companionCacheKey, companionPayload);

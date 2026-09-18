@@ -456,6 +456,7 @@ def run_tw539_daily_evidence(
         "status": "completed",
         "draw_id": draw_id,
         "records_added": added,
+        "records_skipped": len(new_records) - added,
         "record_count": len(updated["records"]),
         "journal_sha256": updated["journal_sha256"],
         "candidate_predictions_isolated": len(candidate_isolated),
