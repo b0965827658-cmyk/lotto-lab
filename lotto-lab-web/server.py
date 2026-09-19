@@ -138,6 +138,15 @@ LINE_ADMIN_USER_IDS = {
     if value.strip()
 }
 LINE_WEBHOOK_MAX_EVENTS = 50
+LINE_GAME_CATALOG = (
+    ("今彩539", "tw539", "已連線，資料驗證中"),
+    ("加州天天樂", "ca-fantasy5", "已連線，資料驗證中"),
+    ("六合彩", "mark-six", "資料來源驗證中"),
+    ("威力彩", "power-lottery", "資料來源驗證中"),
+    ("大樂透", "lotto-649", "資料來源驗證中"),
+    ("三星彩", "daily-3", "資料來源驗證中"),
+    ("四星彩", "daily-4", "資料來源驗證中"),
+)
 
 
 @dataclass
@@ -4727,6 +4736,10 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
         return None
     text = str(event["message"].get("text", "")).strip().lower()
     user_id = str(event.get("source", {}).get("userId", "")).strip()
+    if text in {"彩種", "彩券", "遊戲"}:
+        lines = ["彩券系統建置中："]
+        lines.extend(f"• {name}：{status}" for name, _code, status in LINE_GAME_CATALOG)
+        return "\n".join(lines)
     if text in {"我的id", "我的 id", "myid"}:
         return f"你的 LINE 管理識別碼：{user_id or '尚未取得'}\n請只在管理員設定時使用，不要公開貼出。"
     if text in {"管理", "admin"}:
@@ -4745,7 +4758,7 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
     if text in {"系統", "系統狀態", "status"}:
         return "摘星引擎目前已連線。\n開獎資料會先完成驗證，再提供可用資訊。"
     if text in {"幫助", "help", "開始", "start"}:
-        return "摘星引擎已連線。\n「最新」查今彩539開獎\n「系統」查看連線狀態\n「我的ID」取得管理識別碼"
+        return "摘星引擎已連線。\n「彩種」查看支援進度\n「最新」查今彩539開獎\n「系統」查看連線狀態\n「我的ID」取得管理識別碼"
     return "輸入「幫助」查看可用指令。"
 
 
