@@ -4727,6 +4727,8 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
         return None
     text = str(event["message"].get("text", "")).strip().lower()
     user_id = str(event.get("source", {}).get("userId", "")).strip()
+    if text in {"我的id", "我的 id", "myid"}:
+        return f"你的 LINE 管理識別碼：{user_id or '尚未取得'}\n請只在管理員設定時使用，不要公開貼出。"
     if text in {"管理", "admin"}:
         if user_id and user_id in LINE_ADMIN_USER_IDS:
             return "管理員功能正在建立中。"
@@ -4740,8 +4742,10 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
             return f"今彩539 最新開獎\n期別：{period}\n日期：{date}\n號碼：{numbers or '資料驗證中'}"
         except Exception:
             return "開獎資料驗證中，請稍後再試。"
+    if text in {"系統", "系統狀態", "status"}:
+        return "摘星引擎目前已連線。\n開獎資料會先完成驗證，再提供可用資訊。"
     if text in {"幫助", "help", "開始", "start"}:
-        return "摘星引擎已連線。\n輸入「最新」可查詢今彩539最新開獎。"
+        return "摘星引擎已連線。\n「最新」查今彩539開獎\n「系統」查看連線狀態\n「我的ID」取得管理識別碼"
     return "輸入「幫助」查看可用指令。"
 
 

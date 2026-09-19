@@ -35,3 +35,12 @@ def test_line_admin_command_requires_allowlist(monkeypatch):
     assert "正在建立中" in server.line_message_reply(
         {"type": "message", "message": {"type": "text", "text": "管理"}, "source": {"userId": "admin-user"}}
     )
+
+
+def test_line_id_command_returns_only_the_callers_id():
+    reply = server.line_message_reply(
+        {"type": "message", "message": {"type": "text", "text": "我的ID"}, "source": {"userId": "caller-only"}}
+    )
+
+    assert reply is not None
+    assert "caller-only" in reply
