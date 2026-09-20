@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 67126)
-Total output lines: 5279
+Warning: truncated output (original token count: 67574)
+Total output lines: 5308
 
 # -*- coding: utf-8 -*-
 from __future__ import annotations
@@ -35,6 +35,7 @@ from lottery_registry import catalog_rows, validate_main_numbers
 from line_social import LineSocialStore
 from marksix_official import latest as marksix_latest
 from taiwan_official_history import recent as taiwan_official_history_recent
+from line_notifications import LineNotificationStore
 from urllib.parse import parse_qs, unquote, urlparse
 
 try:
@@ -151,6 +152,19 @@ LINE_SOCIAL_ENABLED = os.environ.get("LINE_SOCIAL_ENABLED", "0").strip().lower()
 LINE_SOCIAL_STORE = LineSocialStore(
     Path(os.environ.get("LINE_SOCIAL_FILE", PERSISTENT_DATA / "line_social.json")),
     enabled=LINE_SOCIAL_ENABLED,
+)
+LINE_NOTIFICATION_RUNTIME = os.environ.get("LINE_NOTIFICATION_RUNTIME", "").strip().lower()
+LINE_NOTIFICATION_TESTER_IDS = {
+    value.strip() for value in os.environ.get("LINE_NOTIFICATION_TESTER_USER_IDS", "").split(",") if value.strip()
+}
+LINE_NOTIFICATIONS_ENABLED = (
+    os.environ.get("LINE_NOTIFICATIONS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+    and LINE_NOTIFICATION_RUNTIME == "staging"
+)
+LINE_NOTIFICATION_STORE = LineNotificationStore(
+    Path(os.environ.get("LINE_NOTIFICATION_FILE", PERSISTENT_DATA / "line_notifications_staging.sqlite3")),
+    enabled=LINE_NOTIFICATIONS_ENABLED,
+    tester_ids=LINE_NOTIFICATION_TESTER_IDS,
 )
 
 
@@ -1011,49 +1025,7 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
         "availableYears": available_years,
         "searchedYears": searched_years,
         "limited": len(draws) > limit,
-    }
-
-
-def filter_history_rows(draws: list[dict[str, Any]], query: str = "", number: int | None = None) -> list[dict[str, Any]]:
-    query = query.strip().lower()
-    return [
-        draw
-        for draw in draws
-        if (not query or query in f"{draw.get('date', '')} {draw.get('period', '')} {' '.join(str(n).zfill(2) for n in draw.get('numbers', []))}".lower())
-        and (not number or number in draw.get("numbers", []))
-    ]
-
-
-def parse_california_history(source_html: str) -> list[dict[str, Any]]:
-    text = re.sub(r"<[^>]+>", "\n", source_html)
-    text = re.sub(r"&nbsp;?", " ", text)
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    parsed = []
-    for i, line in enumerate…47126 tokens truncated…istory: list[dict[str, Any]]) -> dict[str, Any]:
-    if analysis.get("dataInsufficient"):
-        return {"databaseId": f"lotto-lab-{game}-prediction-history", "count": 0, "latest": None, "immutableSnapshot": False, "status": "insufficient"}
-    return _formal_save_snapshot(game, analysis, latest, history)
-
-
-def analysis_metadata(limit: int, data_status: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "engineVersion": ANALYSIS_ENGINE_VERSION,
-        "analysisLimit": limit,
-        "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "dataValidated": bool(data_status.get("validated")),
-    }
-
-
-def attach_deep_sniper_analysis(
-    game: str,
-    analysis: dict[str, Any],
-    latest: dict[str, Any],
-    history: list[dict[str, Any]],
-) -> dict[str, Any]:
-    slot_start, slot_end = deep_analysis_slot()
-    key = f"{game}:{latest.get('date', '')}:{latest.get('period', '')}:deep-8h-{slot_start}"
-    # The public engine is now deterministic and backtest-driven. Keep the
-    # legacy deep-sniper slot for UI compatibility, but never let its older
+ …47574 tokens truncated…ver let its older
     # random/heuristic implementation overwrite the formal recommendation.
     top5 = analysis.get("candidateTiers", {}).get("top5", analysis.get("recommendation", []))[:5]
     deep = {
@@ -1316,6 +1288,12 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
     text = str(event["message"].get("text", "")).strip().lower()
     user_id = str(event.get("source", {}).get("userId", "")).strip()
     event_id = str(event.get("webhookEventId", "")).strip()
+    if text in {"通知開啟", "開啟通知"}:
+        return LINE_NOTIFICATION_STORE.subscribe(user_id)
+    if text in {"通知關閉", "關閉通知"}:
+        return LINE_NOTIFICATION_STORE.unsubscribe(user_id)
+    if text in {"通知設定", "通知狀態"}:
+        return LINE_NOTIFICATION_STORE.status(user_id)
     parts = text.split()
     if parts and parts[0] == "分享":
         try:
@@ -1398,7 +1376,7 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
     if text in {"系統", "系統狀態", "status"}:
         return "摘星引擎目前已連線。\n開獎資料會先完成驗證，再提供可用資訊。"
     if text in {"幫助", "help", "開始", "start"}:
-        return "摘星引擎已連線。\n「彩種」查看支援進度\n「最新」查今彩539開獎\n「系統」查看連線狀態\n「我的ID」取得管理識別碼"
+        return "摘星引擎已連線。\n「彩種」查看支援進度\n「最新」查今彩539開獎\n直接傳「六合彩／威力彩／大樂透／三星彩／四星彩」查最新開獎\n「歷史 威力彩」查官方近 5 期\n「系統」查看連線狀態\n「我的ID」取得管理識別碼"
     return "輸入「幫助」查看可用指令。"
 
 
@@ -1645,6 +1623,15 @@ class Handler(SimpleHTTPRequestHandler):
                 for event in events:
                     if not isinstance(event, dict):
                         continue
+                    event_id = str(event.get("webhookEventId", "")).strip()
+                    if not LINE_NOTIFICATION_STORE.record_webhook_event(event_id):
+                        continue
+                    source = event.get("source", {}) if isinstance(event.get("source"), dict) else {}
+                    event_user_id = str(source.get("userId", "")).strip()
+                    if event.get("type") == "follow":
+                        LINE_NOTIFICATION_STORE.follow(event_user_id)
+                    elif event.get("type") == "unfollow":
+                        LINE_NOTIFICATION_STORE.unfollow(event_user_id)
                     reply_token = str(event.get("replyToken", "")).strip()
                     reply_text = line_message_reply(event)
                     if reply_token and reply_text and LINE_CHANNEL_ACCESS_TOKEN:
