@@ -33,7 +33,7 @@ from line_social import LineSocialStore
 from marksix_official import history as marksix_official_history
 from marksix_official import latest as marksix_latest
 from taiwan_official_history import recent as taiwan_official_history_recent
-from line_notifications import LineNotificationStore
+from line_notifications import DEFAULT_GAMES, LineNotificationStore
 from line_notifications import taiwan_pre_draw_games
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
@@ -173,17 +173,92 @@ LINE_NOTIFICATION_RUNTIME = os.environ.get("LINE_NOTIFICATION_RUNTIME", "").stri
 LINE_NOTIFICATION_TESTER_IDS = {
     value.strip() for value in os.environ.get("LINE_NOTIFICATION_TESTER_USER_IDS", "").split(",") if value.strip()
 }
-LINE_NOTIFICATIONS_ENABLED = (
-    os.environ.get("LINE_NOTIFICATIONS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
-    and LINE_NOTIFICATION_RUNTIME == "staging"
+LINE_NOTIFICATION_STAGING_SERVICE_ID = "srv-d9pomuqd0e5s73en98eg"
+LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT = Path("/api/health")
+LINE_NOTIFICATION_SERVICE_ID = os.environ.get("RENDER_SERVICE_ID", "").strip()
+LINE_NOTIFICATION_PERSISTENT_ROOT = Path(os.environ.get("LINE_NOTIFICATION_PERSISTENT_ROOT", "/api/health"))
+LINE_NOTIFICATION_FILE = Path(os.environ.get("LINE_NOTIFICATION_FILE", PERSISTENT_DATA / "line_notifications_staging.sqlite3"))
+
+
+def line_notification_persistent_mount_is_verified(persistent_root: Path) -> bool:
+    """Require the known Render disk to be mounted, not merely a Docker directory."""
+    try:
+        resolved_root = persistent_root.resolve()
+        if not resolved_root.is_dir():
+            return False
+        if resolved_root.is_mount():
+            return True
+        mountinfo = Path("/proc/self/mountinfo")
+        if not mountinfo.is_file():
+            return False
+        return any(
+            len(parts := line.split()) >= 5 and parts[4] == str(resolved_root)
+            for line in mountinfo.read_text(encoding="utf-8").splitlines()
+        )
+    except (OSError, ValueError):
+        return False
+
+
+def line_notification_guard_reason(
+    requested: bool,
+    runtime: str,
+    service_id: str,
+    storage_file: Path,
+    persistent_root: Path,
+    *,
+    has_access_token: bool = True,
+    has_tester_ids: bool = True,
+) -> str:
+    """Fail closed unless the notification worker is pinned to the known Staging disk and service."""
+    if not requested:
+        return "尚未啟用"
+    if runtime != "staging":
+        return "非測試站模式"
+    if not hmac.compare_digest(service_id, LINE_NOTIFICATION_STAGING_SERVICE_ID):
+        return "測試站服務身分未通過驗證"
+    try:
+        resolved_root = persistent_root.resolve()
+        storage_ok = storage_file.resolve().is_relative_to(resolved_root)
+    except (OSError, ValueError):
+        storage_ok = False
+        resolved_root = None
+    if not storage_ok:
+        return "通知資料未放在持久化磁碟"
+    if resolved_root != LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT.resolve():
+        return "通知資料位置未通過驗證"
+    if not line_notification_persistent_mount_is_verified(persistent_root):
+        return "測試站持久化磁碟未掛載"
+    if not has_access_token:
+        return "LINE 發送憑證未設定"
+    if not has_tester_ids:
+        return "尚未設定測試收件人"
+    return "已啟用"
+
+
+LINE_NOTIFICATION_REQUESTED = os.environ.get("LINE_NOTIFICATIONS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+LINE_NOTIFICATION_BLOCK_REASON = line_notification_guard_reason(
+    LINE_NOTIFICATION_REQUESTED,
+    LINE_NOTIFICATION_RUNTIME,
+    LINE_NOTIFICATION_SERVICE_ID,
+    LINE_NOTIFICATION_FILE,
+    LINE_NOTIFICATION_PERSISTENT_ROOT,
+    has_access_token=bool(LINE_CHANNEL_ACCESS_TOKEN),
+    has_tester_ids=bool(LINE_NOTIFICATION_TESTER_IDS),
 )
+LINE_NOTIFICATIONS_ENABLED = LINE_NOTIFICATION_BLOCK_REASON == "已啟用"
 LINE_NOTIFICATION_STORE = LineNotificationStore(
-    Path(os.environ.get("LINE_NOTIFICATION_FILE", PERSISTENT_DATA / "line_notifications_staging.sqlite3")),
+    LINE_NOTIFICATION_FILE,
     enabled=LINE_NOTIFICATIONS_ENABLED,
     tester_ids=LINE_NOTIFICATION_TESTER_IDS,
 )
 LINE_NOTIFICATION_CYCLE_SECRET = os.environ.get("LINE_NOTIFICATION_CYCLE_SECRET", "").strip()
 LINE_NOTIFICATION_CYCLE_HEADER = "X-Lotto-Line-Notification-Secret"
+LINE_NOTIFICATION_LOOP_REQUESTED = os.environ.get("LINE_NOTIFICATION_LOOP_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+LINE_NOTIFICATION_LOOP_ENABLED = LINE_NOTIFICATIONS_ENABLED and LINE_NOTIFICATION_LOOP_REQUESTED
+LINE_NOTIFICATION_LOOP_INTERVAL_SECONDS = max(30, min(300, int(os.environ.get("LINE_NOTIFICATION_LOOP_INTERVAL_SECONDS", "60"))))
+# The official current-draw schedule source is not connected yet. Never send a
+# fixed-calendar pre-draw claim as if it were official; results remain available.
+LINE_NOTIFICATION_PRE_DRAW_ENABLED = False
 
 
 @dataclass
@@ -894,12 +969,30 @@ def taiwan_latest() -> dict[str, Any]:
 
 
 TAIWAN_LINE_LATEST_GAMES = {
-    "tw539": {"game_code": 5120, "name": "今彩539", "draw_size": 5, "bonus_label": ""},
-    "power-lottery": {"game_code": 5134, "name": "威力彩", "draw_size": 6, "bonus_label": "第二區"},
-    "lotto-649": {"game_code": 5118, "name": "大樂透", "draw_size": 6, "bonus_label": "特別號"},
-    "daily-3": {"game_code": 2108, "name": "三星彩", "draw_size": 3, "bonus_label": ""},
-    "daily-4": {"game_code": 2109, "name": "四星彩", "draw_size": 4, "bonus_label": ""},
+    "tw539": {"game_code": 5120, "name": "今彩539", "draw_size": 5, "bonus_label": "", "bonus_max": None, "bonus_can_overlap": False},
+    "power-lottery": {"game_code": 5134, "name": "威力彩", "draw_size": 6, "bonus_label": "第二區", "bonus_max": 8, "bonus_can_overlap": True},
+    "lotto-649": {"game_code": 5118, "name": "大樂透", "draw_size": 6, "bonus_label": "特別號", "bonus_max": 49, "bonus_can_overlap": False},
+    "daily-3": {"game_code": 2108, "name": "三星彩", "draw_size": 3, "bonus_label": "", "bonus_max": None, "bonus_can_overlap": False},
+    "daily-4": {"game_code": 2109, "name": "四星彩", "draw_size": 4, "bonus_label": "", "bonus_max": None, "bonus_can_overlap": False},
 }
+
+
+def validate_taiwan_line_draw(game: str, values: list[int]) -> tuple[list[int], list[int]]:
+    """Validate both main and bonus balls before any LINE delivery."""
+    spec = TAIWAN_LINE_LATEST_GAMES[game]
+    expected_count = spec["draw_size"] + (1 if spec["bonus_max"] else 0)
+    if len(values) != expected_count:
+        raise RuntimeError(f"{spec['name']}最新資料號碼數量不正確")
+    main_numbers = values[: spec["draw_size"]]
+    bonus_numbers = values[spec["draw_size"] :]
+    if not validate_main_numbers(game, main_numbers):
+        raise RuntimeError(f"{spec['name']}最新資料未通過主號驗證")
+    if spec["bonus_max"]:
+        if len(bonus_numbers) != 1 or not 1 <= bonus_numbers[0] <= spec["bonus_max"]:
+            raise RuntimeError(f"{spec['name']}最新資料未通過特別號驗證")
+        if not spec["bonus_can_overlap"] and bonus_numbers[0] in main_numbers:
+            raise RuntimeError(f"{spec['name']}最新資料特別號重複")
+    return main_numbers, bonus_numbers
 
 
 def taiwan_line_latest(game: str) -> dict[str, Any]:
@@ -913,17 +1006,22 @@ def taiwan_line_latest(game: str) -> dict[str, Any]:
             item = next((entry for entry in entries if entry.get("gameCode") == spec["game_code"]), None)
             if not item:
                 raise RuntimeError(f"台灣彩券 API 目前沒有回傳{spec['name']}最新資料")
-            raw_numbers = [int(number) for number in item.get("lotNumber", [])]
-            main_numbers = raw_numbers[: spec["draw_size"]]
-            if not validate_main_numbers(game, main_numbers):
-                raise RuntimeError(f"{spec['name']}最新資料未通過號碼規格驗證")
+            raw = item.get("lotNumber")
+            if not isinstance(raw, list):
+                raise RuntimeError(f"{spec['name']}最新資料號碼格式不正確")
+            raw_numbers = [int(number) for number in raw]
+            main_numbers, bonus_numbers = validate_taiwan_line_draw(game, raw_numbers)
+            period = str(item.get("period") or "").strip()
+            draw_date = parse_date(str(item.get("drawDate") or ""))
+            if not period or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", draw_date):
+                raise RuntimeError(f"{spec['name']}最新資料期別或日期不正確")
             return {
                 "game": game,
                 "name": spec["name"],
-                "period": item.get("period", ""),
-                "date": parse_date(item.get("drawDate", "")),
+                "period": period,
+                "date": draw_date,
                 "numbers": main_numbers,
-                "bonus": raw_numbers[spec["draw_size"] :],
+                "bonus": bonus_numbers,
                 "bonusLabel": spec["bonus_label"],
                 "source": "台灣彩券 LastNumber API",
                 "sourceUrl": TAIWAN_LAST_URL,
@@ -937,15 +1035,18 @@ def taiwan_line_latest(game: str) -> dict[str, Any]:
             if not rows:
                 raise RuntimeError(f"{spec['name']}官方來源目前沒有可驗證的最近一期資料")
             row = rows[0]
-            if not validate_main_numbers(game, row["numbers"]):
-                raise RuntimeError(f"{spec['name']}官方歷史資料未通過號碼規格驗證")
+            main_numbers, bonus_numbers = validate_taiwan_line_draw(game, list(row["numbers"]) + list(row.get("bonus", [])))
+            period = str(row.get("period") or "").strip()
+            draw_date = str(row.get("date") or "").strip()
+            if not period or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", draw_date):
+                raise RuntimeError(f"{spec['name']}官方歷史資料期別或日期不正確")
             return {
                 "game": game,
                 "name": spec["name"],
-                "period": row["period"],
-                "date": row["date"],
-                "numbers": row["numbers"],
-                "bonus": row.get("bonus", []),
+                "period": period,
+                "date": draw_date,
+                "numbers": main_numbers,
+                "bonus": bonus_numbers,
                 "bonusLabel": spec["bonus_label"],
                 "source": row["source"],
                 "sourceUrl": row["sourceUrl"],
@@ -4880,7 +4981,7 @@ def line_push(user_id: str, text: str, retry_key: str) -> None:
 
 def line_notification_text(kind: str, latest: dict[str, Any] | None = None) -> str:
     if kind == "pre" and latest:
-        return f"{latest['name']}提醒\n將在一小時後開獎。官方資料確認前不會提供未驗證號碼。"
+        return f"{latest['name']}提醒\n依一般開獎時程約一小時後；以官方公告為準。官方資料確認前不會提供未驗證號碼。"
     if kind == "result" and latest:
         numbers = "、".join(f"{int(number):02d}" for number in latest["numbers"])
         text = f"{latest['name']} 官方最新開獎\n期別：{latest['period']}\n日期：{latest['date']}\n號碼：{numbers}"
@@ -4895,10 +4996,23 @@ def send_line_notification(game: str, event_key: str, kind: str, latest: dict[st
     sent = failed = 0
     message = line_notification_text(kind, latest)
     for user_id in LINE_NOTIFICATION_STORE.recipients(game):
-        if not LINE_NOTIFICATION_STORE.claim_delivery(event_key, user_id):
+        retry_key = LINE_NOTIFICATION_STORE.claim_delivery(event_key, user_id)
+        if not retry_key:
             continue
         try:
-            line_push(user_id, message, uuid.uuid4().hex)
+            line_push(user_id, message, retry_key)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 409:
+                # LINE already accepted this retry key.  Do not turn a safe
+                # retry into a duplicate message during the 24-hour window.
+                LINE_NOTIFICATION_STORE.finish_delivery(event_key, user_id, sent=True)
+                sent += 1
+            elif exc.code in {408, 429} or exc.code >= 500:
+                LINE_NOTIFICATION_STORE.finish_delivery(event_key, user_id, sent=False)
+                failed += 1
+            else:
+                LINE_NOTIFICATION_STORE.finish_delivery(event_key, user_id, permanent=True)
+                failed += 1
         except Exception:
             LINE_NOTIFICATION_STORE.finish_delivery(event_key, user_id, sent=False)
             failed += 1
@@ -4909,22 +5023,29 @@ def send_line_notification(game: str, event_key: str, kind: str, latest: dict[st
 
 
 def run_line_notification_cycle(now: datetime | None = None) -> dict[str, Any]:
-    """Staging-only cycle called by an external scheduler; fail closed on source errors."""
-    if not LINE_NOTIFICATIONS_ENABLED or not LINE_NOTIFICATION_CYCLE_SECRET:
+    """Staging-only cycle called by the guarded worker or a secret-protected endpoint."""
+    if not LINE_NOTIFICATIONS_ENABLED:
         raise RuntimeError("LINE 通知排程尚未啟用")
     current = now or datetime.now(timezone.utc)
     taipei = current.astimezone(ZoneInfo("Asia/Taipei"))
     counts = {"pre": 0, "result": 0, "failed": 0}
-    for game in taiwan_pre_draw_games(current):
-        latest = {"name": TAIWAN_LINE_LATEST_GAMES[game]["name"]}
-        try:
-            outcome = send_line_notification(game, f"pre:{game}:{taipei.date().isoformat()}", "pre", latest)
-            counts["pre"] += outcome["sent"]
-            counts["failed"] += outcome["failed"]
-        except Exception:
-            counts["failed"] += 1
-    if (taipei.hour, taipei.minute) >= (21, 30):
+    if LINE_NOTIFICATION_PRE_DRAW_ENABLED:
+        for game in taiwan_pre_draw_games(current):
+            if not LINE_NOTIFICATION_STORE.recipients(game):
+                continue
+            latest = {"name": TAIWAN_LINE_LATEST_GAMES[game]["name"]}
+            try:
+                outcome = send_line_notification(game, f"pre:{game}:{taipei.date().isoformat()}", "pre", latest)
+                counts["pre"] += outcome["sent"]
+                counts["failed"] += outcome["failed"]
+            except Exception:
+                counts["failed"] += 1
+    # Taiwan Lottery publishes these draws after the 20:30 draw time.  Polling
+    # starts then, but sending still requires a same-day official result.
+    if (taipei.hour, taipei.minute) >= (20, 30):
         for game in ("tw539", "power-lottery", "lotto-649", "daily-3", "daily-4"):
+            if not LINE_NOTIFICATION_STORE.recipients(game):
+                continue
             try:
                 latest = taiwan_line_latest(game)
                 if latest.get("date") != taipei.date().isoformat():
@@ -4935,15 +5056,99 @@ def run_line_notification_cycle(now: datetime | None = None) -> dict[str, Any]:
             except Exception:
                 counts["failed"] += 1
     try:
-        hk_now = current.astimezone(ZoneInfo("Asia/Hong_Kong"))
-        hk_latest = marksix_latest()
-        if hk_latest.get("date") == hk_now.date().isoformat():
-            outcome = send_line_notification("mark-six", f"result:mark-six:{hk_latest['period']}", "result", hk_latest)
-            counts["result"] += outcome["sent"]
-            counts["failed"] += outcome["failed"]
+        if LINE_NOTIFICATION_STORE.recipients("mark-six"):
+            hk_now = current.astimezone(ZoneInfo("Asia/Hong_Kong"))
+            hk_latest = marksix_latest()
+            if hk_latest.get("date") == hk_now.date().isoformat():
+                outcome = send_line_notification("mark-six", f"result:mark-six:{hk_latest['period']}", "result", hk_latest)
+                counts["result"] += outcome["sent"]
+                counts["failed"] += outcome["failed"]
     except Exception:
         counts["failed"] += 1
     return {"ok": True, **counts}
+
+
+def line_notification_loop() -> None:
+    """Run the opt-in Staging cycle once per minute when explicitly armed."""
+    time.sleep(5)
+    while True:
+        try:
+            result = run_line_notification_cycle()
+            if result.get("pre") or result.get("result") or result.get("failed"):
+                print(
+                    "LINE notification cycle",
+                    "pre",
+                    result.get("pre", 0),
+                    "result",
+                    result.get("result", 0),
+                    "failed",
+                    result.get("failed", 0),
+                )
+        except Exception as exc:
+            print(f"LINE notification cycle error: {type(exc).__name__}")
+        time.sleep(LINE_NOTIFICATION_LOOP_INTERVAL_SECONDS)
+
+
+def line_admin_reply(text: str) -> str:
+    """Read and adjust only the Staging notification controls for allowlisted admins."""
+    parts = text.split()
+    command = parts[1] if len(parts) > 1 else ""
+    summary = LINE_NOTIFICATION_STORE.summary()
+    notification_state = "已啟用" if LINE_NOTIFICATIONS_ENABLED else f"未啟用（{LINE_NOTIFICATION_BLOCK_REASON}）"
+    if not command:
+        return (
+            "管理員選單\n"
+            "「管理 狀態」查看測試站狀態\n"
+            "「管理 人數」查看已同意通知的測試人數\n"
+            "「管理 通知」查看或暫停測試通知\n"
+            "「管理 彩種」查看或暫停已驗證彩種\n"
+            "公告功能會先保留在測試收件人範圍內，尚未開放群發。"
+        )
+    if command == "狀態":
+        loop_state = "運行中" if LINE_NOTIFICATION_LOOP_ENABLED else "未運行"
+        return (
+            "測試站管理狀態\n"
+            f"通知安全鎖：{notification_state}\n"
+            f"背景排程：{loop_state}\n"
+            f"已同意通知：{summary['active']} 人\n"
+            f"全域通知：{'暫停' if summary['paused'] else '可發送'}\n"
+            f"開獎前提醒：{'已啟用' if LINE_NOTIFICATION_PRE_DRAW_ENABLED else '官方時程驗證中，未啟用'}"
+        )
+    if command == "人數":
+        return f"已同意測試通知：{summary['active']} 人\n曾完成通知設定：{summary['total']} 人\n此數字不等於 LINE 官方帳號追蹤人數。"
+    if command == "通知":
+        action = parts[2] if len(parts) > 2 else ""
+        if action in {"暫停", "停止"}:
+            if not LINE_NOTIFICATION_STORE.set_paused(True):
+                return f"無法暫停：通知安全鎖尚未通過（{LINE_NOTIFICATION_BLOCK_REASON}）。"
+            return "已暫停所有測試通知；不會移除使用者的同意設定。"
+        if action in {"恢復", "開啟"}:
+            if not LINE_NOTIFICATION_STORE.set_paused(False):
+                return f"無法恢復：通知安全鎖尚未通過（{LINE_NOTIFICATION_BLOCK_REASON}）。"
+            return "已恢復測試通知；只會通知已同意的測試使用者。"
+        paused = "暫停中" if summary["paused"] else "可發送"
+        return f"測試通知：{notification_state}\n目前：{paused}\n已同意：{summary['active']} 人\n可用指令：管理 通知 暫停／管理 通知 恢復"
+    if command == "彩種":
+        action = parts[2] if len(parts) > 2 else ""
+        if action in {"暫停", "停止", "恢復", "開啟"}:
+            game = LINE_GAME_COMMAND_ALIASES.get(" ".join(parts[3:]))
+            if game not in DEFAULT_GAMES:
+                return "只能調整已驗證彩種：539、六合彩、威力彩、大樂透、三星彩、四星彩。"
+            if not LINE_NOTIFICATION_STORE.set_game_paused(game, action in {"暫停", "停止"}):
+                return f"無法調整：通知安全鎖尚未通過（{LINE_NOTIFICATION_BLOCK_REASON}）。"
+            return f"已{'暫停' if action in {'暫停', '停止'} else '恢復'} {LINE_GAME_NAMES[game]} 的測試通知。"
+        paused_games = set(summary["pausedGames"])
+        lines = ["測試通知彩種狀態："]
+        for name, code, status in LINE_GAME_CATALOG:
+            if code not in DEFAULT_GAMES:
+                lines.append(f"• {name}：{status}")
+            else:
+                lines.append(f"• {name}：{'通知暫停' if code in paused_games else '通知可用'}")
+        lines.append("可用指令：管理 彩種 暫停 539／管理 彩種 恢復 539")
+        return "\n".join(lines)
+    if command == "公告":
+        return "公告功能尚未開啟。正式發送前會先限定已同意的測試收件人、預覽、確認與稽核，不能直接群發追蹤者。"
+    return "可用管理指令：管理 狀態／人數／通知／彩種"
 
 
 LINE_GAME_COMMAND_ALIASES = {
@@ -5010,7 +5215,11 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
         return LINE_NOTIFICATION_STORE.subscribe(user_id)
     if text in {"通知關閉", "關閉通知"}:
         return LINE_NOTIFICATION_STORE.unsubscribe(user_id)
-    if text in {"通知設定", "通知狀態"}:
+    if text == "通知設定":
+        return LINE_NOTIFICATION_STORE.status(user_id)
+    if text.startswith("通知設定 "):
+        return LINE_NOTIFICATION_STORE.configure(user_id, text.split()[1:])
+    if text in {"通知狀態"}:
         return LINE_NOTIFICATION_STORE.status(user_id)
     parts = text.split()
     if parts and parts[0] == "分享":
@@ -5032,9 +5241,9 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
         return "\n".join(lines)
     if text in {"我的id", "我的 id", "myid"}:
         return f"你的 LINE 帳號識別碼：{user_id or '尚未取得'}\n請只在管理員設定時使用，不要公開貼出。"
-    if text in {"管理", "admin"}:
+    if text == "admin" or text.startswith("管理"):
         if user_id and user_id in LINE_ADMIN_USER_IDS:
-            return "管理員功能正在建立中。"
+            return line_admin_reply(text)
         return "此指令僅限管理員。"
     if parts and parts[0] in {"最新", "最新開獎"}:
         if len(parts) == 1:
@@ -5070,7 +5279,7 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
     if text in {"系統", "系統狀態", "status"}:
         return "摘星引擎目前已連線。\n開獎資料會先完成驗證，再提供可用資訊。"
     if text in {"幫助", "help", "開始", "start"}:
-        return "摘星引擎已連線。\n「彩種」查看支援進度\n「最新」查今彩539開獎\n「最新 威力彩」查指定彩種開獎\n「歷史 539」查官方最近 5 期\n「系統」查看連線狀態\n「我的ID」取得你的帳號識別碼"
+        return "摘星引擎已連線。\n「彩種」查看支援進度\n「最新」查今彩539開獎\n「最新 威力彩」查指定彩種開獎\n「歷史 539」查官方最近 5 期\n「通知開啟」只開啟你自己的測試通知\n「通知設定 539 六合彩」調整通知彩種\n「系統」查看連線狀態\n「我的ID」取得你的帳號識別碼"
     return "輸入「幫助」查看可用指令。"
 
 
@@ -5505,6 +5714,11 @@ def main():
     if AUTO_NOTIFY_ENABLED:
         threading.Thread(target=auto_notify_loop, name="lotto-auto-notify", daemon=True).start()
         print(f"auto notify enabled every {max(30, AUTO_NOTIFY_INTERVAL_SECONDS)}s for {', '.join(AUTO_NOTIFY_GAMES) or 'no games'}")
+    if LINE_NOTIFICATION_LOOP_ENABLED:
+        threading.Thread(target=line_notification_loop, name="line-notification-staging", daemon=True).start()
+        print(f"LINE staging notification worker enabled every {LINE_NOTIFICATION_LOOP_INTERVAL_SECONDS}s")
+    elif LINE_NOTIFICATION_REQUESTED:
+        print(f"LINE staging notification worker remains disabled: {LINE_NOTIFICATION_BLOCK_REASON}")
     print(f"摘星引擎 running at http://{host}:{port}")
     server.serve_forever()
 

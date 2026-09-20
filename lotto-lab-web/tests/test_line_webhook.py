@@ -3,8 +3,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
+import urllib.error
 
 import server
+from line_notifications import LineNotificationStore
 
 
 def test_line_signature_accepts_only_the_configured_secret(monkeypatch):
@@ -32,9 +35,168 @@ def test_line_admin_command_requires_allowlist(monkeypatch):
     assert "僅限管理員" in server.line_message_reply(
         {"type": "message", "message": {"type": "text", "text": "管理"}, "source": {"userId": "ordinary-user"}}
     )
-    assert "正在建立中" in server.line_message_reply(
+    assert "管理員選單" in server.line_message_reply(
         {"type": "message", "message": {"type": "text", "text": "管理"}, "source": {"userId": "admin-user"}}
     )
+
+
+def test_line_notification_guard_requires_known_staging_service_and_persistent_disk(tmp_path, monkeypatch):
+    persistent_root = tmp_path / "persist"
+    storage_file = persistent_root / "line.sqlite3"
+    monkeypatch.setattr(server, "LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT", persistent_root)
+    monkeypatch.setattr(server, "line_notification_persistent_mount_is_verified", lambda _root: True)
+
+    assert server.line_notification_guard_reason(
+        True,
+        "staging",
+        server.LINE_NOTIFICATION_STAGING_SERVICE_ID,
+        storage_file,
+        persistent_root,
+    ) == "已啟用"
+    assert server.line_notification_guard_reason(
+        True, "staging", "other-service", storage_file, persistent_root
+    ) == "測試站服務身分未通過驗證"
+    assert server.line_notification_guard_reason(
+        True,
+        "staging",
+        server.LINE_NOTIFICATION_STAGING_SERVICE_ID,
+        tmp_path / "outside.sqlite3",
+        persistent_root,
+    ) == "通知資料未放在持久化磁碟"
+
+
+def test_line_notification_guard_fails_closed_without_mount_token_or_tester(tmp_path, monkeypatch):
+    persistent_root = tmp_path / "persist"
+    storage_file = persistent_root / "line.sqlite3"
+    monkeypatch.setattr(server, "LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT", persistent_root)
+    monkeypatch.setattr(server, "line_notification_persistent_mount_is_verified", lambda _root: False)
+
+    assert server.line_notification_guard_reason(
+        True, "staging", server.LINE_NOTIFICATION_STAGING_SERVICE_ID, storage_file, persistent_root
+    ) == "測試站持久化磁碟未掛載"
+
+    monkeypatch.setattr(server, "line_notification_persistent_mount_is_verified", lambda _root: True)
+    assert server.line_notification_guard_reason(
+        True,
+        "staging",
+        server.LINE_NOTIFICATION_STAGING_SERVICE_ID,
+        storage_file,
+        persistent_root,
+        has_access_token=False,
+    ) == "LINE 發送憑證未設定"
+    assert server.line_notification_guard_reason(
+        True,
+        "staging",
+        server.LINE_NOTIFICATION_STAGING_SERVICE_ID,
+        storage_file,
+        persistent_root,
+        has_tester_ids=False,
+    ) == "尚未設定測試收件人"
+
+
+def test_line_admin_can_pause_only_opted_in_staging_notifications(tmp_path, monkeypatch):
+    store = LineNotificationStore(tmp_path / "line.sqlite3", enabled=True, tester_ids={"admin-user"})
+    assert "已開啟" in store.subscribe("admin-user")
+    monkeypatch.setattr(server, "LINE_NOTIFICATION_STORE", store)
+    monkeypatch.setattr(server, "LINE_ADMIN_USER_IDS", {"admin-user"})
+    monkeypatch.setattr(server, "LINE_NOTIFICATIONS_ENABLED", True)
+    monkeypatch.setattr(server, "LINE_NOTIFICATION_LOOP_ENABLED", True)
+    monkeypatch.setattr(server, "LINE_NOTIFICATION_BLOCK_REASON", "已啟用")
+
+    status = server.line_message_reply(
+        {"type": "message", "message": {"type": "text", "text": "管理 狀態"}, "source": {"userId": "admin-user"}}
+    )
+    paused = server.line_message_reply(
+        {"type": "message", "message": {"type": "text", "text": "管理 通知 暫停"}, "source": {"userId": "admin-user"}}
+    )
+    assert paused is not None and "已暫停" in paused
+    assert store.is_paused()
+    assert store.recipients("tw539") == []
+    resumed = server.line_message_reply(
+        {"type": "message", "message": {"type": "text", "text": "管理 通知 恢復"}, "source": {"userId": "admin-user"}}
+    )
+    game_paused = server.line_message_reply(
+        {"type": "message", "message": {"type": "text", "text": "管理 彩種 暫停 539"}, "source": {"userId": "admin-user"}}
+    )
+
+    assert status is not None and "已同意通知：1 人" in status
+    assert resumed is not None and "已恢復" in resumed
+    assert not store.is_paused()
+    assert game_paused is not None and "今彩539" in game_paused
+    assert store.is_game_paused("tw539")
+    assert store.recipients("tw539") == []
+    assert store.recipients("mark-six") == ["admin-user"]
+
+
+def test_line_admin_cannot_override_the_notification_safety_lock(tmp_path, monkeypatch):
+    store = LineNotificationStore(tmp_path / "line.sqlite3", enabled=False, tester_ids={"admin-user"})
+    monkeypatch.setattr(server, "LINE_NOTIFICATION_STORE", store)
+    monkeypatch.setattr(server, "LINE_ADMIN_USER_IDS", {"admin-user"})
+    monkeypatch.setattr(server, "LINE_NOTIFICATIONS_ENABLED", False)
+    monkeypatch.setattr(server, "LINE_NOTIFICATION_BLOCK_REASON", "非測試站模式")
+
+    reply = server.line_message_reply(
+        {"type": "message", "message": {"type": "text", "text": "管理 通知 暫停"}, "source": {"userId": "admin-user"}}
+    )
+
+    assert reply is not None and "無法暫停" in reply
+    assert not store.is_paused()
+
+
+def test_line_retry_conflict_is_recorded_as_sent_without_a_duplicate(tmp_path, monkeypatch):
+    store = LineNotificationStore(tmp_path / "line.sqlite3", enabled=True, tester_ids={"tester"})
+    assert "已開啟" in store.subscribe("tester")
+    monkeypatch.setattr(server, "LINE_NOTIFICATION_STORE", store)
+
+    def already_accepted(*_args):
+        raise urllib.error.HTTPError("https://api.line.me", 409, "conflict", {}, None)
+
+    monkeypatch.setattr(server, "line_push", already_accepted)
+    outcome = server.send_line_notification(
+        "tw539",
+        "result:tw539:115000230",
+        "result",
+        {"name": "今彩539", "period": "115000230", "date": "2026-09-20", "numbers": [1, 2, 3, 4, 5]},
+    )
+
+    assert outcome == {"sent": 1, "failed": 0}
+    assert store.claim_delivery("result:tw539:115000230", "tester") is None
+
+
+def test_invalid_latest_bonus_falls_back_to_validated_official_history(monkeypatch):
+    server.cache.pop("taiwan-line-latest-power-lottery", None)
+    payload = {
+        "content": {
+            "lastNumberList": [
+                {
+                    "gameCode": 5134,
+                    "lotNumber": [1, 2, 3, 4, 5, 6, 9],
+                    "period": "115000230",
+                    "drawDate": "2026-09-20",
+                }
+            ]
+        }
+    }
+    monkeypatch.setattr(server, "fetch_text", lambda *_args, **_kwargs: json.dumps(payload))
+    monkeypatch.setattr(
+        server,
+        "taiwan_official_history_recent",
+        lambda _game, limit: [
+            {
+                "period": "115000229",
+                "date": "2026-09-19",
+                "numbers": [1, 2, 3, 4, 5, 6],
+                "bonus": [7],
+                "source": "official",
+                "sourceUrl": "https://official.example",
+            }
+        ],
+    )
+
+    latest = server.taiwan_line_latest("power-lottery")
+
+    assert latest["officialHistoryFallback"] is True
+    assert latest["bonus"] == [7]
 
 
 def test_line_id_command_returns_only_the_callers_id():
