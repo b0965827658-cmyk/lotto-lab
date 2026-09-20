@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 67574)
-Total output lines: 5308
+Warning: truncated output (original token count: 67688)
+Total output lines: 5318
 
 # -*- coding: utf-8 -*-
 from __future__ import annotations
@@ -148,10 +148,20 @@ LINE_ADMIN_USER_IDS = {
 }
 LINE_WEBHOOK_MAX_EVENTS = 50
 LINE_GAME_CATALOG = catalog_rows()
-LINE_SOCIAL_ENABLED = os.environ.get("LINE_SOCIAL_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+LINE_SOCIAL_ENV = os.environ.get("LINE_SOCIAL_ENV", "").strip().lower()
+LINE_SOCIAL_TESTER_IDS = {
+    value.strip() for value in os.environ.get("LINE_SOCIAL_TESTER_USER_IDS", "").split(",") if value.strip()
+}
+LINE_SOCIAL_ANONYMOUS_KEY = os.environ.get("LINE_SOCIAL_ANONYMOUS_KEY", "").strip()
+LINE_SOCIAL_ENABLED = (
+    os.environ.get("LINE_SOCIAL_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+    and LINE_SOCIAL_ENV == "staging"
+)
 LINE_SOCIAL_STORE = LineSocialStore(
-    Path(os.environ.get("LINE_SOCIAL_FILE", PERSISTENT_DATA / "line_social.json")),
+    Path(os.environ.get("LINE_SOCIAL_FILE", PERSISTENT_DATA / "line_social_staging.sqlite3")),
     enabled=LINE_SOCIAL_ENABLED,
+    tester_ids=LINE_SOCIAL_TESTER_IDS,
+    anonymous_key=LINE_SOCIAL_ANONYMOUS_KEY,
 )
 LINE_NOTIFICATION_RUNTIME = os.environ.get("LINE_NOTIFICATION_RUNTIME", "").strip().lower()
 LINE_NOTIFICATION_TESTER_IDS = {
@@ -1014,19 +1024,7 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
         latest_year = int(latest["date"][:4]) if latest.get("date") else None
         if latest_year in searched_years and not any(same_draw(latest, draw) for draw in draws):
             draws.append(latest)
-    query = keyword.strip().lower()
-    if query or number:
-        draws = filter_history_rows(draws, query, number)
-    draws = dedupe_draws(draws)
-    draws.sort(key=lambda item: (item["date"], item["period"]), reverse=True)
-    return {
-        "history": public_draws(draws[:limit]),
-        "total": len(draws),
-        "availableYears": available_years,
-        "searchedYears": searched_years,
-        "limited": len(draws) > limit,
- …47574 tokens truncated…ver let its older
-    # random/heuristic implementation overwrite the formal recommendation.
+    quer…47688 tokens truncated…andom/heuristic implementation overwrite the formal recommendation.
     top5 = analysis.get("candidateTiers", {}).get("top5", analysis.get("recommendation", []))[:5]
     deep = {
         "numbers": top5,
@@ -1301,11 +1299,11 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
         except (IndexError, ValueError):
             return "格式：分享 彩種 號碼，例如：分享 539 01 02 03 04 05"
     if parts and parts[0] == "熱門":
-        return LINE_SOCIAL_STORE.hot_numbers(parts[1] if len(parts) > 1 else "")
+        return LINE_SOCIAL_STORE.hot_numbers(user_id, parts[1] if len(parts) > 1 else "")
     if parts and parts[0] in {"排行", "排名"}:
-        return LINE_SOCIAL_STORE.active_ranking(parts[1] if len(parts) > 1 else "")
+        return LINE_SOCIAL_STORE.active_ranking(user_id, parts[1] if len(parts) > 1 else "")
     if text == "討論區":
-        return LINE_SOCIAL_STORE.recent_posts()
+        return LINE_SOCIAL_STORE.recent_posts(user_id)
     if text.startswith("討論"):
         return LINE_SOCIAL_STORE.post(user_id, text.removeprefix("討論"), event_id)
     if text in {"彩種", "彩券", "遊戲"}:
