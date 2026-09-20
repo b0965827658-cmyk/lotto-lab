@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 66714)
-Total output lines: 5248
+Warning: truncated output (original token count: 66857)
+Total output lines: 5257
 
 # -*- coding: utf-8 -*-
 from __future__ import annotations
@@ -33,6 +33,7 @@ from typing import Any
 
 from lottery_registry import catalog_rows, validate_main_numbers
 from line_social import LineSocialStore
+from marksix_official import latest as marksix_latest
 from urllib.parse import parse_qs, unquote, urlparse
 
 try:
@@ -1029,9 +1030,7 @@ def parse_california_history(source_html: str) -> list[dict[str, Any]]:
     parsed = []
     for i, line in enumerate(lines):
         period_match = re.match(r"第\s*(\d+)\s*期", line)
-        if not period_match:
-            continue
-        wind…46714 tokens truncated…路切換"}, "stateDetection": state, "appIntegration": {"enabled": False, "reason": "App 外部模型只允許進入 California Fantasy 5；目前未提供可驗證 App 分數快照。"} if game == "tw539" else {"enabled": False, "reason": "目前尚未收到可追溯的外部 App 分數快照，因此不擅自混入。"}, "ablation": _formal_ablation(source_rows, game, max_number), "strategy": strategy, "note": "分數是相對排序，不是實際中獎率。未使用未來資料、隨機亂數或事後修改推薦；彩券仍是隨機事件，請理性投注。"}
+        …46857 tokens truncated…推薦；彩券仍是隨機事件，請理性投注。"}
     result.update({
         "hot": [{"number": number, "count": display_stats["frequency"][number - 1]["count"]} for number in display_stats["hot"]],
         "cold": [{"number": number, "count": display_stats["frequency"][number - 1]["count"]} for number in display_stats["cold"]],
@@ -1369,6 +1368,14 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
             return f"今彩539 最新開獎\n期別：{period}\n日期：{date}\n號碼：{numbers or '資料驗證中'}"
         except Exception:
             return "開獎資料驗證中，請稍後再試。"
+    if text in {"六合彩", "mark six", "marksix"}:
+        try:
+            latest = marksix_latest()
+            numbers = "、".join(f"{int(number):02d}" for number in latest["numbers"])
+            bonus = "、".join(f"{int(number):02d}" for number in latest["bonus"])
+            return f"六合彩 最新開獎\n期別：{latest['period']}\n日期：{latest['date']}\n號碼：{numbers}\n特別號：{bonus}"
+        except Exception:
+            return "六合彩開獎資料驗證中，請稍後再試。"
     line_game_commands = {
         "威力彩": "power-lottery",
         "大樂透": "lotto-649",
