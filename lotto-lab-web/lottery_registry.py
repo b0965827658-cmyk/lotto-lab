@@ -25,7 +25,7 @@ class LotteryGame:
 
 GAMES: tuple[LotteryGame, ...] = (
     LotteryGame("tw539", "今彩539", "台灣", 5, 1, 39, True, "已連線，資料驗證中", "official-adapter-pending"),
-    LotteryGame("ca-fantasy5", "加州天天樂", "美國加州", 5, 1, 39, True, "已連線，資料驗證中", "official-adapter-pending"),
+    LotteryGame("ca-fantasy5", "加州天天樂", "美國加州", 5, 1, 39, True, "官方資料驗證中，暫不顯示號碼", "official-adapter-pending"),
     LotteryGame("mark-six", "六合彩", "香港", 6, 1, 49, True, "官方最新開獎已接通，歷史資料驗證中", "official-latest"),
     LotteryGame("power-lottery", "威力彩", "台灣", 6, 1, 38, True, "官方最新開獎已接通，歷史資料驗證中", "official-latest"),
     LotteryGame("lotto-649", "大樂透", "台灣", 6, 1, 49, True, "官方最新開獎已接通，歷史資料驗證中", "official-latest"),

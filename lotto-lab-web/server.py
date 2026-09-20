@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 67688)
-Total output lines: 5318
+Warning: truncated output (original token count: 69061)
+Total output lines: 5429
 
 # -*- coding: utf-8 -*-
 from __future__ import annotations
@@ -36,6 +36,8 @@ from line_social import LineSocialStore
 from marksix_official import latest as marksix_latest
 from taiwan_official_history import recent as taiwan_official_history_recent
 from line_notifications import LineNotificationStore
+from line_notifications import taiwan_pre_draw_games
+from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
 
 try:
@@ -122,6 +124,7 @@ API_RATE_LIMITS = {
     "/api/push-subscription": (20, 60),
     "/api/notify-latest": (5, 600),
     "/api/internal/tw539-evidence-cycle": (4, 3600),
+    "/api/internal/line-notification-cycle": (15, 3600),
     "/prediction": (60, 60),
 }
 ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
@@ -176,6 +179,8 @@ LINE_NOTIFICATION_STORE = LineNotificationStore(
     enabled=LINE_NOTIFICATIONS_ENABLED,
     tester_ids=LINE_NOTIFICATION_TESTER_IDS,
 )
+LINE_NOTIFICATION_CYCLE_SECRET = os.environ.get("LINE_NOTIFICATION_CYCLE_SECRET", "").strip()
+LINE_NOTIFICATION_CYCLE_HEADER = "X-Lotto-Line-Notification-Secret"
 
 
 @dataclass
@@ -859,6 +864,7 @@ def taiwan_latest() -> dict[str, Any]:
 
 
 TAIWAN_LINE_LATEST_GAMES = {
+    "tw539": {"game_code": 5120, "name": "今彩539", "draw_size": 5, "bonus_label": ""},
     "power-lottery": {"game_code": 5134, "name": "威力彩", "draw_size": 6, "bonus_label": "第二區"},
     "lotto-649": {"game_code": 5118, "name": "大樂透", "draw_size": 6, "bonus_label": "特別號"},
     "daily-3": {"game_code": 2108, "name": "三星彩", "draw_size": 3, "bonus_label": ""},
@@ -1014,96 +1020,7 @@ def search_taiwan_history(from_year: int, to_year: int, keyword: str = "", numbe
             latest_year = int(latest["date"][:4]) if latest.get("date") else None
             if latest_year in searched_years and not any(same_draw(latest, draw) for draw in draws):
                 draws.append(latest)
-        except Exception:
-            pass
-    else:
-        draws = []
-        for year in searched_years:
-            draws.extend(taiwan_year_history(year))
-        latest = taiwan_latest()
-        latest_year = int(latest["date"][:4]) if latest.get("date") else None
-        if latest_year in searched_years and not any(same_draw(latest, draw) for draw in draws):
-            draws.append(latest)
-    quer…47688 tokens truncated…andom/heuristic implementation overwrite the formal recommendation.
-    top5 = analysis.get("candidateTiers", {}).get("top5", analysis.get("recommendation", []))[:5]
-    deep = {
-        "numbers": top5,
-        "windowsUsed": analysis.get("windowsUsed", []),
-        "windowPicks": [{"window": window, "numbers": top5} for window in analysis.get("windowsUsed", [])],
-        "method": "候選池多模型集成（滾動回測加權；不使用隨機抽樣）",
-    }
-    deep_status = "8 小時深度分析已完成；新一期開出時立即重算。" if len(deep.get("numbers", [])) == 5 else "資料不足，深度分析暫不產生推薦。"
-    return {
-        **analysis,
-        "deepSniperRecommendation": deep.get("numbers", []),
-        "deepSniperSnapshot": {
-            "key": key,
-            "status": "published" if len(deep.get("numbers", [])) == 5 else "unavailable",
-            "profile": "deep-8h",
-            "source": "deterministic-shared-slot",
-        },
-        "deepSniperWindowHours": round(DEEP_ANALYSIS_WINDOW_SECONDS / 3600, 2),
-        "deepSniperSlotStartedAt": datetime.fromtimestamp(slot_start, timezone.utc).isoformat(timespec="seconds"),
-        "deepSniperNextAt": datetime.fromtimestamp(slot_end, timezone.utc).isoformat(timespec="seconds"),
-        "deepSniperAnalysisLimit": min(len(history), max(DEEP_ANALYSIS_WINDOWS)),
-        "deepSniperWindows": deep.get("windowsUsed", []),
-        "deepSniperWindowPicks": deep.get("windowPicks", []),
-        "deepSniperMethod": deep.get("method", "多視窗交叉分析"),
-        "deepSniperStatus": deep_status,
-    }
-
-
-def build_payload(game: str, limit: int, optimize: bool = False) -> dict[str, Any]:
-    if not getattr(analysis_worker_context, "active", False):
-        raise RuntimeError("full analysis must run inside the Production analysis queue worker")
-    if analysis_v2 is None:
-        raise RuntimeError("v2 分析引擎尚未載入；請確認 scikit-learn 與 joblib 已安裝")
-    if game == "tw539":
-        latest = taiwan_latest()
-        fetch_limit = max(limit, MODEL_ANALYSIS_DATA_WINDOW, MODEL_EVAL_WINDOW + MODEL_TRAIN_WINDOW)
-        history = taiwan_history(fetch_limit)
-        if history and not same_draw(history[0], latest):
-            history = [latest] + [item for item in history if item.get("period") != latest.get("period") and not same_draw(item, latest)]
-        draws = history[:limit]
-        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
-        analysis = cached(analysis_key, lambda: analysis_v2.analyze_tw539(history))
-        status = data_health(game, latest, draws)
-        analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
-        analysis = _attach_homepage_statistics(analysis, history)
-        analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
-        if feature_importance is not None and not analysis.get("dataInsufficient"):
-            analysis["featureImportance"] = feature_importance.capture_prediction(game, analysis, latest, history)
-        analysis["predictionHistory"] = _mm_save_prediction(game, analysis, latest, history)
-        if prediction_journal_v3 is not None:
-            analysis["predictionJournal"] = prediction_journal_v3.record_live_prediction(game, analysis, latest, history)
-        payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
-        if optimize:
-            payload["bestWindow"] = choose_best_analysis_window(history, game="tw539")
-        return payload
-    if game == "ca-fantasy5":
-        fetch_limit = max(limit, MODEL_ANALYSIS_DATA_WINDOW, MODEL_EVAL_WINDOW + MODEL_TRAIN_WINDOW)
-        history = california_history(fetch_limit)
-        if not history:
-            raise RuntimeError("加州天天樂資料頁目前沒有可解析的開獎資料")
-        draws = history[:limit]
-        analysis_key = f"{cache_key_for_draws('analysis', game, fetch_limit, history)}-selected-{limit}"
-        analysis = cached(analysis_key, lambda: analysis_v2.analyze_ca_fantasy5(history))
-        latest = history[0]
-        status = data_health(game, latest, draws)
-        if analysis.get("dataInsufficient"):
-            status = {
-                **status,
-                "validated": False,
-                "message": "最新開獎可解析，但正式模型資料不足；暫不產生推薦。",
-        }
-        analysis = {**analysis, "metadata": analysis_metadata(limit, status)}
-        analysis = _attach_homepage_statistics(analysis, history)
-        analysis = attach_deep_sniper_analysis(game, analysis, latest, history)
-        if feature_importance is not None and not analysis.get("dataInsufficient"):
-            analysis["featureImportance"] = feature_importance.capture_prediction(game, analysis, latest, history)
-        analysis["predictionHistory"] = _mm_save_prediction(game, analysis, latest, history)
-        if prediction_journal_v3 is not None:
-            analysis["predictionJournal"] = prediction_journal_v3.record_live_prediction(game, analysis, latest, history)
+        except Ex…49061 tokens truncated…ame, analysis, latest, history)
         payload = {"latest": public_draw(latest), "history": public_draws(draws), "analysis": analysis, "dataStatus": status}
         if optimize:
             payload["bestWindow"] = choose_best_analysis_window(history, game="ca-fantasy5")
@@ -1279,6 +1196,96 @@ def line_reply(reply_token: str, text: str) -> None:
         pass
 
 
+def line_push(user_id: str, text: str, retry_key: str) -> None:
+    """Send one opt-in LINE push using a retry key; never use a reply token."""
+    if not LINE_CHANNEL_ACCESS_TOKEN:
+        raise RuntimeError("LINE_CHANNEL_ACCESS_TOKEN 尚未設定")
+    payload = json.dumps(
+        {"to": user_id, "messages": [{"type": "text", "text": text[:5000]}]},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.line.me/v2/bot/message/push",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+            "Content-Type": "application/json",
+            "X-Line-Retry-Key": retry_key,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10):
+        pass
+
+
+def line_notification_text(kind: str, latest: dict[str, Any] | None = None) -> str:
+    if kind == "pre" and latest:
+        return f"{latest['name']}提醒\n將在一小時後開獎。官方資料確認前不會提供未驗證號碼。"
+    if kind == "result" and latest:
+        numbers = "、".join(f"{int(number):02d}" for number in latest["numbers"])
+        text = f"{latest['name']} 官方最新開獎\n期別：{latest['period']}\n日期：{latest['date']}\n號碼：{numbers}"
+        if latest.get("bonus") and latest.get("bonusLabel"):
+            bonus = "、".join(f"{int(number):02d}" for number in latest["bonus"])
+            text += f"\n{latest['bonusLabel']}：{bonus}"
+        return text
+    raise ValueError("通知內容不完整")
+
+
+def send_line_notification(game: str, event_key: str, kind: str, latest: dict[str, Any]) -> dict[str, int]:
+    sent = failed = 0
+    message = line_notification_text(kind, latest)
+    for user_id in LINE_NOTIFICATION_STORE.recipients(game):
+        if not LINE_NOTIFICATION_STORE.claim_delivery(event_key, user_id):
+            continue
+        try:
+            line_push(user_id, message, uuid.uuid4().hex)
+        except Exception:
+            LINE_NOTIFICATION_STORE.finish_delivery(event_key, user_id, sent=False)
+            failed += 1
+        else:
+            LINE_NOTIFICATION_STORE.finish_delivery(event_key, user_id, sent=True)
+            sent += 1
+    return {"sent": sent, "failed": failed}
+
+
+def run_line_notification_cycle(now: datetime | None = None) -> dict[str, Any]:
+    """Staging-only cycle called by an external scheduler; fail closed on source errors."""
+    if not LINE_NOTIFICATIONS_ENABLED or not LINE_NOTIFICATION_CYCLE_SECRET:
+        raise RuntimeError("LINE 通知排程尚未啟用")
+    current = now or datetime.now(timezone.utc)
+    taipei = current.astimezone(ZoneInfo("Asia/Taipei"))
+    counts = {"pre": 0, "result": 0, "failed": 0}
+    for game in taiwan_pre_draw_games(current):
+        latest = {"name": TAIWAN_LINE_LATEST_GAMES[game]["name"]}
+        try:
+            outcome = send_line_notification(game, f"pre:{game}:{taipei.date().isoformat()}", "pre", latest)
+            counts["pre"] += outcome["sent"]
+            counts["failed"] += outcome["failed"]
+        except Exception:
+            counts["failed"] += 1
+    if (taipei.hour, taipei.minute) >= (21, 30):
+        for game in ("tw539", "power-lottery", "lotto-649", "daily-3", "daily-4"):
+            try:
+                latest = taiwan_line_latest(game)
+                if latest.get("date") != taipei.date().isoformat():
+                    continue
+                outcome = send_line_notification(game, f"result:{game}:{latest['period']}", "result", latest)
+                counts["result"] += outcome["sent"]
+                counts["failed"] += outcome["failed"]
+            except Exception:
+                counts["failed"] += 1
+    try:
+        hk_now = current.astimezone(ZoneInfo("Asia/Hong_Kong"))
+        hk_latest = marksix_latest()
+        if hk_latest.get("date") == hk_now.date().isoformat():
+            outcome = send_line_notification("mark-six", f"result:mark-six:{hk_latest['period']}", "result", hk_latest)
+            counts["result"] += outcome["sent"]
+            counts["failed"] += outcome["failed"]
+    except Exception:
+        counts["failed"] += 1
+    return {"ok": True, **counts}
+
+
 def line_message_reply(event: dict[str, Any]) -> str | None:
     """Return an allowlisted, non-predictive reply for a LINE text-message event."""
     if event.get("type") != "message" or event.get("message", {}).get("type") != "text":
@@ -1333,6 +1340,8 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
             return f"六合彩 最新開獎\n期別：{latest['period']}\n日期：{latest['date']}\n號碼：{numbers}\n特別號：{bonus}"
         except Exception:
             return "六合彩開獎資料驗證中，請稍後再試。"
+    if text in {"加州天天樂", "天天樂", "fantasy5", "fantasy 5"}:
+        return "加州天天樂官方資料目前驗證中，暫不顯示號碼或推薦。"
     history_game_commands = {
         "威力彩": "power-lottery",
         "大樂透": "lotto-649",
@@ -1647,6 +1656,19 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if not self.verify_origin():
             self.send_json({"ok": False, "error": "不允許的請求來源"}, status=403)
+            return
+        if parsed.path == "/api/internal/line-notification-cycle":
+            supplied = self.headers.get(LINE_NOTIFICATION_CYCLE_HEADER, "")
+            if not LINE_NOTIFICATIONS_ENABLED or not LINE_NOTIFICATION_CYCLE_SECRET:
+                self.send_json({"ok": False, "error": "找不到端點"}, status=404)
+                return
+            if not hmac.compare_digest(supplied, LINE_NOTIFICATION_CYCLE_SECRET):
+                self.send_json({"ok": False, "error": "未授權"}, status=403)
+                return
+            try:
+                self.send_json(run_line_notification_cycle())
+            except Exception:
+                self.send_json({"ok": False, "error": "通知排程暫時無法執行"}, status=503)
             return
         if parsed.path == "/api/internal/tw539-evidence-cycle":
             if tw539_evidence_trigger is None:
