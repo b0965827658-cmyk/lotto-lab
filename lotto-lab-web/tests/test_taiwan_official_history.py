@@ -14,3 +14,23 @@ def test_daily_four_history_allows_repeated_digits_in_order():
     rows = recent("daily-4", month="2026-09", fetcher=lambda _url: payload)
 
     assert rows[0]["numbers"] == [4, 2, 3, 2]
+
+
+def test_tw539_history_requires_the_official_sorted_number_cross_check():
+    payload = {
+        "rtCode": 0,
+        "content": {
+            "daily539Res": [
+                {
+                    "period": 115000228,
+                    "lotteryDate": "2026-09-19T00:00:00",
+                    "drawNumberAppear": [35, 2, 29, 17, 27],
+                    "drawNumberSize": [2, 17, 27, 29, 35],
+                }
+            ]
+        },
+    }
+
+    rows = recent("tw539", month="2026-09", fetcher=lambda _url: payload)
+
+    assert rows[0]["numbers"] == [35, 2, 29, 17, 27]

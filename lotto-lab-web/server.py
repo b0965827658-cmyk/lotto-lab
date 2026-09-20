@@ -30,6 +30,7 @@ from typing import Any
 
 from lottery_registry import catalog_rows, validate_main_numbers
 from line_social import LineSocialStore
+from marksix_official import history as marksix_official_history
 from marksix_official import latest as marksix_latest
 from taiwan_official_history import recent as taiwan_official_history_recent
 from line_notifications import LineNotificationStore
@@ -125,6 +126,11 @@ API_RATE_LIMITS = {
     "/prediction": (60, 60),
 }
 ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
+# California Fantasy 5 has no verified official source yet.  It may remain in
+# internal research storage, but it must never be delivered as a current draw,
+# history, analysis, recommendation, or notification.
+DELIVERY_BLOCKED_GAMES = {"ca-fantasy5"}
+DELIVERY_BLOCKED_MESSAGE = "加州天天樂官方資料目前驗證中，暫不顯示號碼、歷史或推薦。"
 STRIPE_PAYMENT_LINK = os.environ.get("LOTTO_STRIPE_PAYMENT_LINK", "").strip()
 PUSH_PUBLIC_KEY = os.environ.get("LOTTO_VAPID_PUBLIC_KEY", "").strip()
 PUSH_PRIVATE_KEY = os.environ.get("LOTTO_VAPID_PRIVATE_KEY", "").strip().replace("\\n", "\n")
@@ -132,12 +138,12 @@ PUSH_CONTACT_EMAIL = os.environ.get("LOTTO_PUSH_CONTACT_EMAIL", "admin@example.c
 NOTIFY_SECRET = os.environ.get("LOTTO_NOTIFY_SECRET", "").strip()
 SUBSCRIPTIONS_FILE = Path(os.environ.get("LOTTO_SUBSCRIPTIONS_FILE", PERSISTENT_DATA / "push_subscriptions.json"))
 NOTIFY_STATE_FILE = Path(os.environ.get("LOTTO_NOTIFY_STATE_FILE", PERSISTENT_DATA / "notify_state.json"))
-AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+AUTO_NOTIFY_ENABLED = os.environ.get("LOTTO_AUTO_NOTIFY_ENABLED", "0").strip().lower() not in {"0", "false", "no", "off"}
 AUTO_NOTIFY_INTERVAL_SECONDS = int(os.environ.get("LOTTO_AUTO_NOTIFY_INTERVAL_SECONDS", "30"))
 AUTO_NOTIFY_GAMES = [
     game.strip()
-    for game in os.environ.get("LOTTO_AUTO_NOTIFY_GAMES", "tw539,ca-fantasy5").split(",")
-    if game.strip() in ALLOWED_GAMES
+    for game in os.environ.get("LOTTO_AUTO_NOTIFY_GAMES", "tw539").split(",")
+    if game.strip() in ALLOWED_GAMES and game.strip() not in DELIVERY_BLOCKED_GAMES
 ]
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "").strip()
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
@@ -342,6 +348,26 @@ def clean_game(value: str) -> str:
     return game
 
 
+def delivery_is_blocked(game: str) -> bool:
+    """Whether a game's data must be withheld from all user-facing delivery."""
+    return game in DELIVERY_BLOCKED_GAMES
+
+
+def delivery_pending_payload(game: str) -> dict[str, Any]:
+    """Safe API response for a game without a verified official source."""
+    return {
+        "ok": False,
+        "game": game,
+        "error": DELIVERY_BLOCKED_MESSAGE,
+        "dataStatus": {
+            "game": game,
+            "validated": False,
+            "state": "verification_pending",
+            "message": DELIVERY_BLOCKED_MESSAGE,
+        },
+    }
+
+
 def validate_push_subscription(subscription: dict[str, Any]) -> None:
     endpoint = str(subscription.get("endpoint", ""))
     keys = subscription.get("keys", {})
@@ -374,6 +400,8 @@ def subscription_id(subscription: dict[str, Any]) -> str:
 def upsert_push_subscription(subscription: dict[str, Any], game: str = "all") -> int:
     if not isinstance(subscription, dict) or not subscription.get("endpoint"):
         raise ValueError("缺少有效的通知訂閱資料")
+    if delivery_is_blocked(game):
+        raise ValueError(DELIVERY_BLOCKED_MESSAGE)
     validate_push_subscription(subscription)
     subscriptions = load_push_subscriptions()
     if len(subscriptions) >= MAX_PUSH_SUBSCRIPTIONS and subscription_id(subscription) not in {item.get("id") for item in subscriptions}:
@@ -447,12 +475,15 @@ def latest_notification_message(game: str, lottery: dict[str, Any]) -> dict[str,
     }
 
 
-def broadcast_push_message(message: dict[str, Any]) -> tuple[int, int, int]:
+def broadcast_push_message(message: dict[str, Any], game: str) -> tuple[int, int, int]:
     subscriptions = load_push_subscriptions()
     sent = 0
     failed = 0
     alive = []
     for item in subscriptions:
+        if item.get("game") not in {"all", game}:
+            alive.append(item)
+            continue
         subscription = item.get("subscription", {})
         try:
             send_push_message(subscription, message)
@@ -470,17 +501,19 @@ def broadcast_push_message(message: dict[str, Any]) -> tuple[int, int, int]:
 
 
 def notify_latest_game(game: str) -> dict[str, Any]:
+    if delivery_is_blocked(game):
+        return {"ok": False, "game": game, "error": DELIVERY_BLOCKED_MESSAGE, "state": "verification_pending"}
     if not push_server_ready():
         return {"ok": False, "game": game, "error": "尚未設定完整推播金鑰"}
     if not load_push_subscriptions():
         return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": 0, "skipped": True, "message": "目前沒有訂閱用戶"}
     # Notifications must not wait for the expensive model/backtest pipeline.
     # Read only the latest draw so the background loop can finish promptly.
-    lottery = taiwan_latest() if game == "tw539" else california_latest()
+    lottery = taiwan_line_latest("tw539") if game == "tw539" else california_latest()
     if already_notified(game, lottery):
         return {"ok": True, "game": game, "sent": 0, "failed": 0, "subscriberCount": len(load_push_subscriptions()), "skipped": True, "message": "這一期已通知過"}
     message = latest_notification_message(game, lottery)
-    sent, failed, alive = broadcast_push_message(message)
+    sent, failed, alive = broadcast_push_message(message, game)
     if sent > 0:
         mark_notified(game, lottery)
     return {"ok": True, "game": game, "sent": sent, "failed": failed, "subscriberCount": alive, "message": message}
@@ -874,26 +907,50 @@ def taiwan_line_latest(game: str) -> dict[str, Any]:
     spec = TAIWAN_LINE_LATEST_GAMES[game]
 
     def load():
-        payload = json.loads(fetch_text(cache_busted_url(TAIWAN_LAST_URL), timeout=10))
-        entries = payload.get("content", {}).get("lastNumberList", [])
-        item = next((entry for entry in entries if entry.get("gameCode") == spec["game_code"]), None)
-        if not item:
-            raise RuntimeError(f"台灣彩券 API 目前沒有回傳{spec['name']}最新資料")
-        raw_numbers = [int(number) for number in item.get("lotNumber", [])]
-        main_numbers = raw_numbers[: spec["draw_size"]]
-        if not validate_main_numbers(game, main_numbers):
-            raise RuntimeError(f"{spec['name']}最新資料未通過號碼規格驗證")
-        return {
-            "game": game,
-            "name": spec["name"],
-            "period": item.get("period", ""),
-            "date": parse_date(item.get("drawDate", "")),
-            "numbers": main_numbers,
-            "bonus": raw_numbers[spec["draw_size"] :],
-            "bonusLabel": spec["bonus_label"],
-            "source": "台灣彩券 LastNumber API",
-            "sourceUrl": TAIWAN_LAST_URL,
-        }
+        try:
+            payload = json.loads(fetch_text(cache_busted_url(TAIWAN_LAST_URL), timeout=10))
+            entries = payload.get("content", {}).get("lastNumberList", [])
+            item = next((entry for entry in entries if entry.get("gameCode") == spec["game_code"]), None)
+            if not item:
+                raise RuntimeError(f"台灣彩券 API 目前沒有回傳{spec['name']}最新資料")
+            raw_numbers = [int(number) for number in item.get("lotNumber", [])]
+            main_numbers = raw_numbers[: spec["draw_size"]]
+            if not validate_main_numbers(game, main_numbers):
+                raise RuntimeError(f"{spec['name']}最新資料未通過號碼規格驗證")
+            return {
+                "game": game,
+                "name": spec["name"],
+                "period": item.get("period", ""),
+                "date": parse_date(item.get("drawDate", "")),
+                "numbers": main_numbers,
+                "bonus": raw_numbers[spec["draw_size"] :],
+                "bonusLabel": spec["bonus_label"],
+                "source": "台灣彩券 LastNumber API",
+                "sourceUrl": TAIWAN_LAST_URL,
+                "officialHistoryFallback": False,
+            }
+        except Exception:
+            # A timeout of the all-games endpoint must not trigger a third-party
+            # fallback.  The game-specific Taiwan Lottery history endpoint is
+            # also official and independently validates its draw fields.
+            rows = taiwan_official_history_recent(game, limit=1)
+            if not rows:
+                raise RuntimeError(f"{spec['name']}官方來源目前沒有可驗證的最近一期資料")
+            row = rows[0]
+            if not validate_main_numbers(game, row["numbers"]):
+                raise RuntimeError(f"{spec['name']}官方歷史資料未通過號碼規格驗證")
+            return {
+                "game": game,
+                "name": spec["name"],
+                "period": row["period"],
+                "date": row["date"],
+                "numbers": row["numbers"],
+                "bonus": row.get("bonus", []),
+                "bonusLabel": spec["bonus_label"],
+                "source": row["source"],
+                "sourceUrl": row["sourceUrl"],
+                "officialHistoryFallback": True,
+            }
 
     return cached(f"taiwan-line-latest-{game}", load, ttl_seconds=LATEST_CACHE_TTL_SECONDS)
 
@@ -4889,6 +4946,59 @@ def run_line_notification_cycle(now: datetime | None = None) -> dict[str, Any]:
     return {"ok": True, **counts}
 
 
+LINE_GAME_COMMAND_ALIASES = {
+    "539": "tw539",
+    "今彩539": "tw539",
+    "tw539": "tw539",
+    "六合彩": "mark-six",
+    "mark six": "mark-six",
+    "marksix": "mark-six",
+    "加州天天樂": "ca-fantasy5",
+    "天天樂": "ca-fantasy5",
+    "fantasy5": "ca-fantasy5",
+    "fantasy 5": "ca-fantasy5",
+    "威力彩": "power-lottery",
+    "大樂透": "lotto-649",
+    "三星彩": "daily-3",
+    "四星彩": "daily-4",
+}
+
+
+LINE_GAME_NAMES = {
+    "tw539": "今彩539",
+    "mark-six": "六合彩",
+    "ca-fantasy5": "加州天天樂",
+    "power-lottery": "威力彩",
+    "lotto-649": "大樂透",
+    "daily-3": "三星彩",
+    "daily-4": "四星彩",
+}
+
+
+def line_latest_reply(game: str) -> str:
+    """Return a latest-result reply only after the official adapter validates it."""
+    if delivery_is_blocked(game):
+        return DELIVERY_BLOCKED_MESSAGE
+    try:
+        latest = marksix_latest() if game == "mark-six" else taiwan_line_latest(game)
+        numbers = "、".join(f"{int(number):02d}" for number in latest["numbers"])
+        title = f"{latest['name']} 官方最近一期" if latest.get("officialHistoryFallback") else f"{latest['name']} 最新開獎"
+        reply = (
+            f"{title}\n"
+            f"期別：{latest['period'] or '—'}\n"
+            f"日期：{latest['date'] or '—'}\n"
+            f"號碼：{numbers}"
+        )
+        if latest.get("bonus") and latest.get("bonusLabel"):
+            bonus = "、".join(f"{int(number):02d}" for number in latest["bonus"])
+            reply += f"\n{latest['bonusLabel']}：{bonus}"
+        if latest.get("officialHistoryFallback"):
+            reply += "\n註：官方最新總表暫時無回應，以上為官方歷史最近一期。"
+        return reply
+    except Exception:
+        return f"{LINE_GAME_NAMES.get(game, '彩券')}開獎資料驗證中，請稍後再試。"
+
+
 def line_message_reply(event: dict[str, Any]) -> str | None:
     """Return an allowlisted, non-predictive reply for a LINE text-message event."""
     if event.get("type") != "message" or event.get("message", {}).get("type") != "text":
@@ -4921,43 +5031,34 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
         lines.extend(f"• {name}：{status}" for name, _code, status in LINE_GAME_CATALOG)
         return "\n".join(lines)
     if text in {"我的id", "我的 id", "myid"}:
-        return f"你的 LINE 管理識別碼：{user_id or '尚未取得'}\n請只在管理員設定時使用，不要公開貼出。"
+        return f"你的 LINE 帳號識別碼：{user_id or '尚未取得'}\n請只在管理員設定時使用，不要公開貼出。"
     if text in {"管理", "admin"}:
         if user_id and user_id in LINE_ADMIN_USER_IDS:
             return "管理員功能正在建立中。"
         return "此指令僅限管理員。"
-    if text in {"最新", "最新開獎", "539", "tw539"}:
-        try:
-            latest = taiwan_latest()
-            numbers = "、".join(f"{int(number):02d}" for number in latest.get("numbers", []))
-            period = latest.get("period", "—")
-            date = latest.get("date", "—")
-            return f"今彩539 最新開獎\n期別：{period}\n日期：{date}\n號碼：{numbers or '資料驗證中'}"
-        except Exception:
-            return "開獎資料驗證中，請稍後再試。"
-    if text in {"六合彩", "mark six", "marksix"}:
-        try:
-            latest = marksix_latest()
-            numbers = "、".join(f"{int(number):02d}" for number in latest["numbers"])
-            bonus = "、".join(f"{int(number):02d}" for number in latest["bonus"])
-            return f"六合彩 最新開獎\n期別：{latest['period']}\n日期：{latest['date']}\n號碼：{numbers}\n特別號：{bonus}"
-        except Exception:
-            return "六合彩開獎資料驗證中，請稍後再試。"
-    if text in {"加州天天樂", "天天樂", "fantasy5", "fantasy 5"}:
-        return "加州天天樂官方資料目前驗證中，暫不顯示號碼或推薦。"
-    history_game_commands = {
-        "威力彩": "power-lottery",
-        "大樂透": "lotto-649",
-        "三星彩": "daily-3",
-        "四星彩": "daily-4",
-    }
+    if parts and parts[0] in {"最新", "最新開獎"}:
+        if len(parts) == 1:
+            return line_latest_reply("tw539")
+        game = LINE_GAME_COMMAND_ALIASES.get(" ".join(parts[1:]))
+        if not game:
+            return "格式：最新 彩種，例如：最新 威力彩"
+        return line_latest_reply(game)
+    if text in LINE_GAME_COMMAND_ALIASES:
+        return line_latest_reply(LINE_GAME_COMMAND_ALIASES[text])
     if parts and parts[0] in {"歷史", "紀錄"}:
-        game = history_game_commands.get(parts[1] if len(parts) > 1 else "")
+        game = LINE_GAME_COMMAND_ALIASES.get(" ".join(parts[1:]))
         if not game:
             return "格式：歷史 彩種，例如：歷史 威力彩"
+        if delivery_is_blocked(game):
+            return DELIVERY_BLOCKED_MESSAGE
         try:
-            rows = taiwan_official_history_recent(game, limit=5)
-            lines = [f"{TAIWAN_LINE_LATEST_GAMES[game]['name']} 官方近 5 期紀錄"]
+            if game == "mark-six":
+                rows = marksix_official_history(limit=5)
+                game_name = "六合彩"
+            else:
+                rows = taiwan_official_history_recent(game, limit=5)
+                game_name = TAIWAN_LINE_LATEST_GAMES[game]["name"]
+            lines = [f"{game_name} 官方最近 {len(rows)} 期紀錄"]
             for row in rows:
                 numbers = "、".join(f"{int(number):02d}" for number in row["numbers"])
                 if row["bonus"]:
@@ -4966,27 +5067,10 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
             return "\n".join(lines)
         except Exception:
             return "官方歷史資料驗證中，請稍後再試。"
-    line_game_commands = {
-        "威力彩": "power-lottery",
-        "大樂透": "lotto-649",
-        "三星彩": "daily-3",
-        "四星彩": "daily-4",
-    }
-    if text in line_game_commands:
-        try:
-            latest = taiwan_line_latest(line_game_commands[text])
-            numbers = "、".join(f"{int(number):02d}" for number in latest["numbers"])
-            reply = f"{latest['name']} 最新開獎\n期別：{latest['period'] or '—'}\n日期：{latest['date'] or '—'}\n號碼：{numbers}"
-            if latest["bonus"] and latest["bonusLabel"]:
-                bonus = "、".join(f"{int(number):02d}" for number in latest["bonus"])
-                reply += f"\n{latest['bonusLabel']}：{bonus}"
-            return reply
-        except Exception:
-            return "開獎資料驗證中，請稍後再試。"
     if text in {"系統", "系統狀態", "status"}:
         return "摘星引擎目前已連線。\n開獎資料會先完成驗證，再提供可用資訊。"
     if text in {"幫助", "help", "開始", "start"}:
-        return "摘星引擎已連線。\n「彩種」查看支援進度\n「最新」查今彩539開獎\n直接傳「六合彩／威力彩／大樂透／三星彩／四星彩」查最新開獎\n「歷史 威力彩」查官方近 5 期\n「系統」查看連線狀態\n「我的ID」取得管理識別碼"
+        return "摘星引擎已連線。\n「彩種」查看支援進度\n「最新」查今彩539開獎\n「最新 威力彩」查指定彩種開獎\n「歷史 539」查官方最近 5 期\n「系統」查看連線狀態\n「我的ID」取得你的帳號識別碼"
     return "輸入「幫助」查看可用指令。"
 
 
@@ -5096,7 +5180,10 @@ class Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
-                latest = taiwan_latest() if game == "tw539" else california_latest()
+                if delivery_is_blocked(game):
+                    self.send_json(delivery_pending_payload(game), status=409)
+                    return
+                latest = taiwan_line_latest("tw539") if game == "tw539" else california_latest()
                 self.send_json(
                     {
                         "ok": True,
@@ -5115,6 +5202,9 @@ class Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             route_game = "tw539" if parsed.path.endswith("tw539") else "ca-fantasy5"
             try:
+                if delivery_is_blocked(route_game):
+                    self.send_json(delivery_pending_payload(route_game), status=409)
+                    return
                 requested = clean_game(params.get("game", [route_game])[0])
                 if requested != route_game:
                     raise ValueError("分析 API 彩種與路徑不一致")
@@ -5131,6 +5221,9 @@ class Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
+                if delivery_is_blocked(game):
+                    self.send_json(delivery_pending_payload(game), status=409)
+                    return
                 limit = clamp_int(params.get("limit", ["180"])[0], 180, 1, 365)
                 optimize = params.get("optimize", ["0"])[0].strip().lower() in {"1", "true", "yes"}
                 job, status = start_analysis_job(game, limit, optimize=optimize)
@@ -5146,6 +5239,9 @@ class Handler(SimpleHTTPRequestHandler):
             current_year = datetime.now().year
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
+                if delivery_is_blocked(game):
+                    self.send_json(delivery_pending_payload(game), status=409)
+                    return
                 from_year = clamp_int(params.get("fromYear", [str(current_year - 2)])[0], current_year - 2, 1990, current_year)
                 to_year = clamp_int(params.get("toYear", [str(current_year)])[0], current_year, 1990, current_year)
                 if from_year > to_year:
@@ -5172,6 +5268,9 @@ class Handler(SimpleHTTPRequestHandler):
                 if prediction_journal_v3 is None:
                     raise RuntimeError("Prediction Journal 模組尚未載入")
                 game = clean_game(params.get("game", ["tw539"])[0])
+                if delivery_is_blocked(game):
+                    self.send_json(delivery_pending_payload(game), status=409)
+                    return
                 limit = clamp_int(params.get("limit", ["100"])[0], 100, 1, 500)
                 history = taiwan_history(5000) if game == "tw539" else california_history(5000)
                 result = prediction_journal_v3.get_journal(game, history, limit=limit)
@@ -5182,18 +5281,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(exc)}, status=502)
             return
         if parsed.path == "/api/ai-vs-app":
-            params = parse_qs(parsed.query)
-            try:
-                if prediction_journal_v3 is None:
-                    raise RuntimeError("AI vs App Battle 模組尚未載入")
-                limit = clamp_int(params.get("limit", ["100"])[0], 100, 1, 500)
-                history = california_history(5000)
-                result = prediction_journal_v3.get_battle(history, limit=limit)
-                self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **result})
-            except ValueError as exc:
-                self.send_json({"ok": False, "error": str(exc)}, status=400)
-            except Exception as exc:
-                self.send_json({"ok": False, "error": str(exc)}, status=502)
+            self.send_json(delivery_pending_payload("ca-fantasy5"), status=409)
             return
         if parsed.path.startswith("/prediction/") and parsed.path.endswith("/feature_importance"):
             try:
@@ -5204,7 +5292,11 @@ class Handler(SimpleHTTPRequestHandler):
                 draw_id = unquote(parsed.path[len(prefix):-len(suffix)]).strip("/")
                 params = parse_qs(parsed.query)
                 game = params.get("game", [None])[0]
-                result = feature_importance.get_prediction(draw_id, game=clean_game(game) if game else None)
+                resolved_game = clean_game(game) if game else None
+                if resolved_game and delivery_is_blocked(resolved_game):
+                    self.send_json(delivery_pending_payload(resolved_game), status=409)
+                    return
+                result = feature_importance.get_prediction(draw_id, game=resolved_game)
                 self.send_json({"ok": True, "updatedAt": datetime.now().isoformat(timespec="seconds"), **result})
             except ValueError as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=400)
@@ -5291,6 +5383,9 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path in {"/api/analyze/tw539", "/api/analyze/ca-fantasy5"}:
             try:
                 game = parsed.path.rsplit("/", 1)[-1]
+                if delivery_is_blocked(game):
+                    self.send_json(delivery_pending_payload(game), status=409)
+                    return
                 payload = self.read_json_body()
                 limit = clamp_int(payload.get("limit", 180), 180, 1, 365)
                 optimize = str(payload.get("optimize", "0")).strip().lower() in {"1", "true", "yes"}
@@ -5334,26 +5429,15 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 game = clean_game(payload.get("game", "tw539"))
                 with notify_lock:
-                    self.send_json(notify_latest_game(game))
+                    result = notify_latest_game(game)
+                    self.send_json(result, status=409 if result.get("state") == "verification_pending" else 200)
                 return
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, status=500)
                 return
         if parsed.path == "/api/ai-vs-app":
-            try:
-                if prediction_journal_v3 is None:
-                    raise RuntimeError("AI vs App Battle 模組尚未載入")
-                payload = self.read_json_body()
-                snapshot = payload.get("snapshot", payload)
-                result = prediction_journal_v3.submit_app_snapshot(snapshot)
-                self.send_json({"ok": True, **result})
-                return
-            except ValueError as exc:
-                self.send_json({"ok": False, "error": str(exc)}, status=400)
-                return
-            except Exception as exc:
-                self.send_json({"ok": False, "error": str(exc)}, status=500)
-                return
+            self.send_json(delivery_pending_payload("ca-fantasy5"), status=409)
+            return
         self.send_json({"ok": False, "error": "not found"}, status=404)
 
     def read_raw_body(self) -> bytes:
@@ -5373,8 +5457,8 @@ class Handler(SimpleHTTPRequestHandler):
             raise ValueError("JSON 格式不正確")
         return payload
 
-    def broadcast_notification(self, message: dict[str, Any]) -> tuple[int, int, int]:
-        return broadcast_push_message(message)
+    def broadcast_notification(self, message: dict[str, Any], game: str = "tw539") -> tuple[int, int, int]:
+        return broadcast_push_message(message, game)
 
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")

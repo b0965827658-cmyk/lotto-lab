@@ -1,4 +1,4 @@
-from marksix_official import latest
+from marksix_official import history, latest
 
 
 def test_marksix_accepts_only_completed_official_draw():
@@ -25,3 +25,18 @@ def test_marksix_rejects_duplicate_or_unfinished_numbers():
         pass
     else:
         raise AssertionError("invalid draw must fail closed")
+
+
+def test_marksix_history_requires_complete_unique_official_rows_and_sorts_them():
+    payload = {
+        "data": {
+            "lotteryDraws": [
+                {"id": "2026100N", "drawDate": "2026-09-15+08:00", "status": "Result", "drawResult": {"drawnNo": [1, 2, 3, 4, 5, 6], "xDrawnNo": 7}},
+                {"id": "2026102N", "drawDate": "2026-09-19+08:00", "status": "Result", "drawResult": {"drawnNo": [5, 8, 11, 14, 19, 31], "xDrawnNo": 21}},
+            ]
+        }
+    }
+
+    rows = history(2, fetcher=lambda: payload)
+
+    assert [row["period"] for row in rows] == ["2026102N", "2026100N"]
