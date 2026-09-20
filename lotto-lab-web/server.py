@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 66857)
-Total output lines: 5257
+Warning: truncated output (original token count: 67126)
+Total output lines: 5279
 
 # -*- coding: utf-8 -*-
 from __future__ import annotations
@@ -34,6 +34,7 @@ from typing import Any
 from lottery_registry import catalog_rows, validate_main_numbers
 from line_social import LineSocialStore
 from marksix_official import latest as marksix_latest
+from taiwan_official_history import recent as taiwan_official_history_recent
 from urllib.parse import parse_qs, unquote, urlparse
 
 try:
@@ -1028,27 +1029,7 @@ def parse_california_history(source_html: str) -> list[dict[str, Any]]:
     text = re.sub(r"&nbsp;?", " ", text)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     parsed = []
-    for i, line in enumerate(lines):
-        period_match = re.match(r"第\s*(\d+)\s*期", line)
-        …46857 tokens truncated…推薦；彩券仍是隨機事件，請理性投注。"}
-    result.update({
-        "hot": [{"number": number, "count": display_stats["frequency"][number - 1]["count"]} for number in display_stats["hot"]],
-        "cold": [{"number": number, "count": display_stats["frequency"][number - 1]["count"]} for number in display_stats["cold"]],
-        "overdue": [{"number": number, "gap": common_stats["omission"][number]} for number in display_stats["overdue"]],
-        "frequency": display_stats["frequency"],
-        "statisticsWindow": display_stats["window"],
-    })
-    result["thirdRecommendation"] = pool[10:15]
-    result["candidateTiers"]["third5"] = pool[10:15]
-    _formal_save_state(game, result)
-    return result
-
-
-def _mm_analysis(game: str, rows: list[dict[str, Any]], max_number: int = 39, pick_count: int = 5) -> dict[str, Any]:
-    return _formal_analysis(game, rows, max_number, pick_count)
-
-
-def _mm_save_prediction(game: str, analysis: dict[str, Any], latest: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    for i, line in enumerate…47126 tokens truncated…istory: list[dict[str, Any]]) -> dict[str, Any]:
     if analysis.get("dataInsufficient"):
         return {"databaseId": f"lotto-lab-{game}-prediction-history", "count": 0, "latest": None, "immutableSnapshot": False, "status": "insufficient"}
     return _formal_save_snapshot(game, analysis, latest, history)
@@ -1376,6 +1357,27 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
             return f"六合彩 最新開獎\n期別：{latest['period']}\n日期：{latest['date']}\n號碼：{numbers}\n特別號：{bonus}"
         except Exception:
             return "六合彩開獎資料驗證中，請稍後再試。"
+    history_game_commands = {
+        "威力彩": "power-lottery",
+        "大樂透": "lotto-649",
+        "三星彩": "daily-3",
+        "四星彩": "daily-4",
+    }
+    if parts and parts[0] in {"歷史", "紀錄"}:
+        game = history_game_commands.get(parts[1] if len(parts) > 1 else "")
+        if not game:
+            return "格式：歷史 彩種，例如：歷史 威力彩"
+        try:
+            rows = taiwan_official_history_recent(game, limit=5)
+            lines = [f"{TAIWAN_LINE_LATEST_GAMES[game]['name']} 官方近 5 期紀錄"]
+            for row in rows:
+                numbers = "、".join(f"{int(number):02d}" for number in row["numbers"])
+                if row["bonus"]:
+                    numbers += " + " + "、".join(f"{int(number):02d}" for number in row["bonus"])
+                lines.append(f"{row['date']}｜{numbers}")
+            return "\n".join(lines)
+        except Exception:
+            return "官方歷史資料驗證中，請稍後再試。"
     line_game_commands = {
         "威力彩": "power-lottery",
         "大樂透": "lotto-649",
