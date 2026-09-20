@@ -5027,7 +5027,7 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
     if text.startswith("討論"):
         return LINE_SOCIAL_STORE.post(user_id, text.removeprefix("討論"), event_id)
     if text in {"彩種", "彩券", "遊戲"}:
-        lines = ["彩券系統建置中："]
+        lines = ["彩券服務狀態："]
         lines.extend(f"• {name}：{status}" for name, _code, status in LINE_GAME_CATALOG)
         return "\n".join(lines)
     if text in {"我的id", "我的 id", "myid"}:

@@ -7,6 +7,14 @@ def test_catalog_has_all_seven_requested_games():
     ]
 
 
+def test_catalog_reports_only_verified_delivery_features_as_connected():
+    rows = {code: status for _name, code, status in catalog_rows()}
+
+    assert "已接通" in rows["tw539"]
+    assert "已接通" in rows["mark-six"]
+    assert "驗證中" in rows["ca-fantasy5"]
+
+
 def test_draw_validation_rejects_wrong_size_duplicate_and_out_of_range_numbers():
     assert validate_main_numbers("tw539", [1, 2, 3, 4, 5])
     assert not validate_main_numbers("tw539", [1, 2, 3, 4])

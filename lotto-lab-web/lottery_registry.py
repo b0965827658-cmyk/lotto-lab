@@ -24,13 +24,13 @@ class LotteryGame:
 
 
 GAMES: tuple[LotteryGame, ...] = (
-    LotteryGame("tw539", "今彩539", "台灣", 5, 1, 39, True, "已連線，資料驗證中", "official-adapter-pending"),
+    LotteryGame("tw539", "今彩539", "台灣", 5, 1, 39, True, "官方最新與近五期已接通", "official-latest-history"),
     LotteryGame("ca-fantasy5", "加州天天樂", "美國加州", 5, 1, 39, True, "官方資料驗證中，暫不顯示號碼", "official-adapter-pending"),
-    LotteryGame("mark-six", "六合彩", "香港", 6, 1, 49, True, "官方最新開獎已接通，歷史資料驗證中", "official-latest"),
-    LotteryGame("power-lottery", "威力彩", "台灣", 6, 1, 38, True, "官方最新開獎已接通，歷史資料驗證中", "official-latest"),
-    LotteryGame("lotto-649", "大樂透", "台灣", 6, 1, 49, True, "官方最新開獎已接通，歷史資料驗證中", "official-latest"),
-    LotteryGame("daily-3", "三星彩", "台灣", 3, 0, 9, False, "官方最新開獎已接通，歷史資料驗證中", "official-latest"),
-    LotteryGame("daily-4", "四星彩", "台灣", 4, 0, 9, False, "官方最新開獎已接通，歷史資料驗證中", "official-latest"),
+    LotteryGame("mark-six", "六合彩", "香港", 6, 1, 49, True, "官方最新與近五期已接通", "official-latest-history"),
+    LotteryGame("power-lottery", "威力彩", "台灣", 6, 1, 38, True, "官方最新與近五期已接通", "official-latest-history"),
+    LotteryGame("lotto-649", "大樂透", "台灣", 6, 1, 49, True, "官方最新與近五期已接通", "official-latest-history"),
+    LotteryGame("daily-3", "三星彩", "台灣", 3, 0, 9, False, "官方最新與近五期已接通", "official-latest-history"),
+    LotteryGame("daily-4", "四星彩", "台灣", 4, 0, 9, False, "官方最新與近五期已接通", "official-latest-history"),
 )
 
 BY_CODE = {game.code: game for game in GAMES}
