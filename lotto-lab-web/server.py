@@ -28,7 +28,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from lottery_registry import catalog_rows
+from lottery_registry import catalog_rows, validate_main_numbers
 from urllib.parse import parse_qs, unquote, urlparse
 
 try:
@@ -821,6 +821,43 @@ def taiwan_latest() -> dict[str, Any]:
         return official
 
     return cached("taiwan-latest", load, ttl_seconds=LATEST_CACHE_TTL_SECONDS)
+
+
+TAIWAN_LINE_LATEST_GAMES = {
+    "power-lottery": {"game_code": 5134, "name": "威力彩", "draw_size": 6, "bonus_label": "第二區"},
+    "lotto-649": {"game_code": 5118, "name": "大樂透", "draw_size": 6, "bonus_label": "特別號"},
+    "daily-3": {"game_code": 2108, "name": "三星彩", "draw_size": 3, "bonus_label": ""},
+    "daily-4": {"game_code": 2109, "name": "四星彩", "draw_size": 4, "bonus_label": ""},
+}
+
+
+def taiwan_line_latest(game: str) -> dict[str, Any]:
+    """Read a Taiwan Lottery latest draw for LINE after game-specific validation."""
+    spec = TAIWAN_LINE_LATEST_GAMES[game]
+
+    def load():
+        payload = json.loads(fetch_text(cache_busted_url(TAIWAN_LAST_URL), timeout=10))
+        entries = payload.get("content", {}).get("lastNumberList", [])
+        item = next((entry for entry in entries if entry.get("gameCode") == spec["game_code"]), None)
+        if not item:
+            raise RuntimeError(f"台灣彩券 API 目前沒有回傳{spec['name']}最新資料")
+        raw_numbers = [int(number) for number in item.get("lotNumber", [])]
+        main_numbers = raw_numbers[: spec["draw_size"]]
+        if not validate_main_numbers(game, main_numbers):
+            raise RuntimeError(f"{spec['name']}最新資料未通過號碼規格驗證")
+        return {
+            "game": game,
+            "name": spec["name"],
+            "period": item.get("period", ""),
+            "date": parse_date(item.get("drawDate", "")),
+            "numbers": main_numbers,
+            "bonus": raw_numbers[spec["draw_size"] :],
+            "bonusLabel": spec["bonus_label"],
+            "source": "台灣彩券 LastNumber API",
+            "sourceUrl": TAIWAN_LAST_URL,
+        }
+
+    return cached(f"taiwan-line-latest-{game}", load, ttl_seconds=LATEST_CACHE_TTL_SECONDS)
 
 
 def taiwan_dataset_rows() -> list[dict[str, str]]:
@@ -4747,6 +4784,23 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
             period = latest.get("period", "—")
             date = latest.get("date", "—")
             return f"今彩539 最新開獎\n期別：{period}\n日期：{date}\n號碼：{numbers or '資料驗證中'}"
+        except Exception:
+            return "開獎資料驗證中，請稍後再試。"
+    line_game_commands = {
+        "威力彩": "power-lottery",
+        "大樂透": "lotto-649",
+        "三星彩": "daily-3",
+        "四星彩": "daily-4",
+    }
+    if text in line_game_commands:
+        try:
+            latest = taiwan_line_latest(line_game_commands[text])
+            numbers = "、".join(f"{int(number):02d}" for number in latest["numbers"])
+            reply = f"{latest['name']} 最新開獎\\n期別：{latest['period'] or '—'}\\n日期：{latest['date'] or '—'}\\n號碼：{numbers}"
+            if latest["bonus"] and latest["bonusLabel"]:
+                bonus = "、".join(f"{int(number):02d}" for number in latest["bonus"])
+                reply += f"\\n{latest['bonusLabel']}：{bonus}"
+            return reply
         except Exception:
             return "開獎資料驗證中，請稍後再試。"
     if text in {"系統", "系統狀態", "status"}:
