@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+from lottery_registry import catalog_rows
 from urllib.parse import parse_qs, unquote, urlparse
 
 try:
@@ -138,15 +140,7 @@ LINE_ADMIN_USER_IDS = {
     if value.strip()
 }
 LINE_WEBHOOK_MAX_EVENTS = 50
-LINE_GAME_CATALOG = (
-    ("今彩539", "tw539", "已連線，資料驗證中"),
-    ("加州天天樂", "ca-fantasy5", "已連線，資料驗證中"),
-    ("六合彩", "mark-six", "資料來源驗證中"),
-    ("威力彩", "power-lottery", "資料來源驗證中"),
-    ("大樂透", "lotto-649", "資料來源驗證中"),
-    ("三星彩", "daily-3", "資料來源驗證中"),
-    ("四星彩", "daily-4", "資料來源驗證中"),
-)
+LINE_GAME_CATALOG = catalog_rows()
 
 
 @dataclass
