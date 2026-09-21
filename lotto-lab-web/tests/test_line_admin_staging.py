@@ -107,3 +107,13 @@ def test_cycle_rejects_stale_or_unavailable_official_results(armed, result, monk
         raise RuntimeError("official verification failed")
     monkeypatch.setattr(server, "taiwan_line_latest", unavailable)
     assert server.run_line_notification_cycle(now) == {"ok": True, "pre": 0, "result": 0, "failed": 1}
+
+
+def test_fantasy5_blocked_even_for_direct_send(armed, monkeypatch):
+    calls = []
+    monkeypatch.setattr(server, "line_push", lambda *args: calls.append(args))
+    monkeypatch.setattr(server, "validate_line_notification_result", lambda *args: None)
+    for _ in range(2):
+        with pytest.raises(ValueError, match="delivery is blocked"):
+            server.send_line_notification("ca-fantasy5", "result:ca-fantasy5:12006", "result", {})
+    assert calls == []

@@ -5053,6 +5053,8 @@ def validate_line_notification_result(game: str, event_key: str, kind: str, late
 
 def send_line_notification(game: str, event_key: str, kind: str, latest: dict[str, Any]) -> dict[str, int]:
     require_line_notification_runtime()
+    if delivery_is_blocked(game):
+        raise ValueError("Game delivery is blocked")
     validate_line_notification_result(game, event_key, kind, latest)
     sent = failed = 0
     message = line_notification_text(kind, latest)
