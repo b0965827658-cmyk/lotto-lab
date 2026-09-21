@@ -36,6 +36,7 @@ from marksix_official import HKJC_MARK_SIX_URL
 from taiwan_official_history import recent as taiwan_official_history_recent
 from taiwan_official_history import TAIWAN_LOTTERY_BASE, SPECS as TAIWAN_HISTORY_SPECS
 from line_notifications import DEFAULT_GAMES, LineNotificationStore
+import california_fantasy5_official as california_fantasy5
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -5094,6 +5095,29 @@ def run_line_notification_cycle(now: datetime | None = None) -> dict[str, Any]:
                 counts["failed"] += outcome["failed"]
             except Exception:
                 counts["failed"] += 1
+    # California Fantasy 5: official API only. Delivery remains blocked until
+    # Staging evidence proves the adapter, so this path is inert by default.
+    try:
+        if not delivery_is_blocked("ca-fantasy5") and LINE_NOTIFICATION_STORE.recipients("ca-fantasy5"):
+            ca_now = current.astimezone(ZoneInfo("America/Los_Angeles"))
+            ca_draw = california_fantasy5.fetch_latest()
+            if ca_draw.draw_date[:10] == ca_now.date().isoformat():
+                ca_latest = {
+                    "game": "ca-fantasy5",
+                    "period": ca_draw.draw_number,
+                    "date": ca_draw.draw_date[:10],
+                    "numbers": list(ca_draw.numbers),
+                    "bonus": [],
+                    "sourceUrl": california_fantasy5.API_URL,
+                    "source": "California Lottery official API",
+                }
+                outcome = send_line_notification(
+                    "ca-fantasy5", f"result:ca-fantasy5:{ca_draw.draw_number}", "result", ca_latest
+                )
+                counts["result"] += outcome["sent"]
+                counts["failed"] += outcome["failed"]
+    except Exception:
+        counts["failed"] += 1
     try:
         if LINE_NOTIFICATION_STORE.recipients("mark-six"):
             hk_now = current.astimezone(ZoneInfo("Asia/Hong_Kong"))
