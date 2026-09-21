@@ -9,7 +9,8 @@
 - `LINE_NOTIFICATION_RUNTIME=staging`
 - `LINE_NOTIFICATION_LOOP_ENABLED=true`
 - 沿用服務既有 `LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET` 和 `LINE_ADMIN_USER_IDS`。
-- 持久化磁碟必須掛載 `/api/health`；通知 SQLite 預設儲存在該磁碟。
+- 持久化磁碟必須掛載已確認的 Staging 路徑 `/var/data/lotto-lab`，
+  `LOTTO_PERSISTENT_DATA_DIR` 必須指向該磁碟；通知 SQLite 預設儲存在該磁碟。
 - `LINE_NOTIFICATION_TESTER_USER_IDS` 可選，設定後只能縮小管理員名單。
   未設定時使用既有管理員名單；空管理員名單一律關閉通知。
 

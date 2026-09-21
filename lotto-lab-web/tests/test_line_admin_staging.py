@@ -5,6 +5,18 @@ import pytest
 
 import server
 from line_notifications import LineNotificationStore
+from pathlib import Path
+
+
+def test_notification_disk_matches_the_confirmed_render_staging_mount(monkeypatch):
+    root = Path("/var/data/lotto-lab")
+    assert server.LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT == root
+    monkeypatch.setattr(server, "line_notification_persistent_mount_is_verified", lambda _root: True)
+    assert server.line_notification_guard_reason(True, "staging", server.LINE_NOTIFICATION_STAGING_SERVICE_ID,
+        root / "line_notifications_staging.sqlite3", root) == "已啟用"
+    wrong = Path("/api/health")
+    assert server.line_notification_guard_reason(True, "staging", server.LINE_NOTIFICATION_STAGING_SERVICE_ID,
+        wrong / "line.sqlite3", wrong) == "通知資料位置未通過驗證"
 
 
 @pytest.fixture
