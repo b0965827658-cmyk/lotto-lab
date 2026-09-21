@@ -5031,6 +5031,17 @@ def validate_line_notification_result(game: str, event_key: str, kind: str, late
             raise ValueError("六合彩官方資料未通過驗證")
         if len(bonus) != 1 or not 1 <= bonus[0] <= 49 or bonus[0] in numbers:
             raise ValueError("六合彩特別號未通過驗證")
+    elif game == "ca-fantasy5":
+        official = urlparse(california_fantasy5.API_URL)
+        if (
+            source.scheme != "https"
+            or source.netloc != official.netloc
+            or source.path != official.path
+            or source.fragment
+            or bonus
+            or not validate_main_numbers(game, numbers)
+        ):
+            raise ValueError("加州天天樂官方資料未通過驗證")
     else:
         allowed = {urlparse(TAIWAN_LAST_URL).path, urlparse(TAIWAN_LOTTERY_BASE + TAIWAN_HISTORY_SPECS[game][0]).path}
         if source.scheme != "https" or source.netloc != "api.taiwanlottery.com" or source.path not in allowed or source.fragment:
