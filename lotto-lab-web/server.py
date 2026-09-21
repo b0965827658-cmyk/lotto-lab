@@ -32,9 +32,10 @@ from lottery_registry import catalog_rows, validate_main_numbers
 from line_social import LineSocialStore
 from marksix_official import history as marksix_official_history
 from marksix_official import latest as marksix_latest
+from marksix_official import HKJC_MARK_SIX_URL
 from taiwan_official_history import recent as taiwan_official_history_recent
+from taiwan_official_history import TAIWAN_LOTTERY_BASE, SPECS as TAIWAN_HISTORY_SPECS
 from line_notifications import DEFAULT_GAMES, LineNotificationStore
-from line_notifications import taiwan_pre_draw_games
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -173,6 +174,9 @@ LINE_NOTIFICATION_RUNTIME = os.environ.get("LINE_NOTIFICATION_RUNTIME", "").stri
 LINE_NOTIFICATION_TESTER_IDS = {
     value.strip() for value in os.environ.get("LINE_NOTIFICATION_TESTER_USER_IDS", "").split(",") if value.strip()
 }
+# A tester list may narrow the configured administrators, never expand them.
+# With no extra list, only the existing administrators may opt in.
+LINE_NOTIFICATION_TESTER_IDS = LINE_ADMIN_USER_IDS & (LINE_NOTIFICATION_TESTER_IDS or LINE_ADMIN_USER_IDS)
 LINE_NOTIFICATION_STAGING_SERVICE_ID = "srv-d9pomuqd0e5s73en98eg"
 LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT = Path("/api/health")
 LINE_NOTIFICATION_SERVICE_ID = os.environ.get("RENDER_SERVICE_ID", "").strip()
@@ -4959,6 +4963,9 @@ def line_reply(reply_token: str, text: str) -> None:
 
 def line_push(user_id: str, text: str, retry_key: str) -> None:
     """Send one opt-in LINE push using a retry key; never use a reply token."""
+    require_line_notification_runtime()
+    if user_id not in LINE_ADMIN_USER_IDS or user_id not in LINE_NOTIFICATION_STORE.tester_ids:
+        raise RuntimeError("LINE 測試通知僅限已設定的管理員")
     if not LINE_CHANNEL_ACCESS_TOKEN:
         raise RuntimeError("LINE_CHANNEL_ACCESS_TOKEN 尚未設定")
     payload = json.dumps(
@@ -4980,11 +4987,9 @@ def line_push(user_id: str, text: str, retry_key: str) -> None:
 
 
 def line_notification_text(kind: str, latest: dict[str, Any] | None = None) -> str:
-    if kind == "pre" and latest:
-        return f"{latest['name']}提醒\n依一般開獎時程約一小時後；以官方公告為準。官方資料確認前不會提供未驗證號碼。"
     if kind == "result" and latest:
         numbers = "、".join(f"{int(number):02d}" for number in latest["numbers"])
-        text = f"{latest['name']} 官方最新開獎\n期別：{latest['period']}\n日期：{latest['date']}\n號碼：{numbers}"
+        text = f"【Staging 管理員測試】\n{latest['name']} 官方最新開獎\n期別：{latest['period']}\n日期：{latest['date']}\n號碼：{numbers}"
         if latest.get("bonus") and latest.get("bonusLabel"):
             bonus = "、".join(f"{int(number):02d}" for number in latest["bonus"])
             text += f"\n{latest['bonusLabel']}：{bonus}"
@@ -4992,10 +4997,56 @@ def line_notification_text(kind: str, latest: dict[str, Any] | None = None) -> s
     raise ValueError("通知內容不完整")
 
 
+def require_line_notification_runtime() -> None:
+    """Recheck isolation at the send boundary, including the mounted disk."""
+    reason = line_notification_guard_reason(
+        LINE_NOTIFICATIONS_ENABLED, LINE_NOTIFICATION_RUNTIME,
+        LINE_NOTIFICATION_SERVICE_ID, LINE_NOTIFICATION_FILE,
+        LINE_NOTIFICATION_PERSISTENT_ROOT,
+        has_access_token=bool(LINE_CHANNEL_ACCESS_TOKEN),
+        has_tester_ids=bool(LINE_ADMIN_USER_IDS & LINE_NOTIFICATION_STORE.tester_ids),
+    )
+    if reason != "已啟用":
+        raise RuntimeError(reason)
+
+
+def validate_line_notification_result(game: str, event_key: str, kind: str, latest: dict[str, Any]) -> None:
+    """Only validated official adapter results may reach the delivery ledger."""
+    if kind != "result" or game not in DEFAULT_GAMES or latest.get("game") != game:
+        raise ValueError("只允許已驗證的官方結果通知")
+    period = latest.get("period")
+    if not isinstance(period, str) or not period.strip() or event_key != f"result:{game}:{period}":
+        raise ValueError("通知期別不一致")
+    draw_date = latest.get("date", "")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", draw_date):
+        raise ValueError("通知日期不正確")
+    datetime.strptime(draw_date, "%Y-%m-%d")
+    numbers, bonus = latest.get("numbers"), latest.get("bonus", [])
+    if not isinstance(numbers, list) or not isinstance(bonus, list) or any(type(n) is not int for n in numbers + bonus):
+        raise ValueError("通知號碼格式不正確")
+    source = urlparse(latest.get("sourceUrl", ""))
+    if game == "mark-six":
+        if latest.get("sourceUrl") != HKJC_MARK_SIX_URL or not validate_main_numbers(game, numbers):
+            raise ValueError("六合彩官方資料未通過驗證")
+        if len(bonus) != 1 or not 1 <= bonus[0] <= 49 or bonus[0] in numbers:
+            raise ValueError("六合彩特別號未通過驗證")
+    else:
+        allowed = {urlparse(TAIWAN_LAST_URL).path, urlparse(TAIWAN_LOTTERY_BASE + TAIWAN_HISTORY_SPECS[game][0]).path}
+        if source.scheme != "https" or source.netloc != "api.taiwanlottery.com" or source.path not in allowed or source.fragment:
+            raise ValueError("台灣彩券官方來源未通過驗證")
+        validated_numbers, validated_bonus = validate_taiwan_line_draw(game, numbers + bonus)
+        if (numbers, bonus) != (validated_numbers, validated_bonus):
+            raise ValueError("通知主號與特別號欄位不一致")
+
+
 def send_line_notification(game: str, event_key: str, kind: str, latest: dict[str, Any]) -> dict[str, int]:
+    require_line_notification_runtime()
+    validate_line_notification_result(game, event_key, kind, latest)
     sent = failed = 0
     message = line_notification_text(kind, latest)
     for user_id in LINE_NOTIFICATION_STORE.recipients(game):
+        if user_id not in LINE_ADMIN_USER_IDS:
+            continue
         retry_key = LINE_NOTIFICATION_STORE.claim_delivery(event_key, user_id)
         if not retry_key:
             continue
@@ -5024,22 +5075,10 @@ def send_line_notification(game: str, event_key: str, kind: str, latest: dict[st
 
 def run_line_notification_cycle(now: datetime | None = None) -> dict[str, Any]:
     """Staging-only cycle called by the guarded worker or a secret-protected endpoint."""
-    if not LINE_NOTIFICATIONS_ENABLED:
-        raise RuntimeError("LINE 通知排程尚未啟用")
+    require_line_notification_runtime()
     current = now or datetime.now(timezone.utc)
     taipei = current.astimezone(ZoneInfo("Asia/Taipei"))
     counts = {"pre": 0, "result": 0, "failed": 0}
-    if LINE_NOTIFICATION_PRE_DRAW_ENABLED:
-        for game in taiwan_pre_draw_games(current):
-            if not LINE_NOTIFICATION_STORE.recipients(game):
-                continue
-            latest = {"name": TAIWAN_LINE_LATEST_GAMES[game]["name"]}
-            try:
-                outcome = send_line_notification(game, f"pre:{game}:{taipei.date().isoformat()}", "pre", latest)
-                counts["pre"] += outcome["sent"]
-                counts["failed"] += outcome["failed"]
-            except Exception:
-                counts["failed"] += 1
     # Taiwan Lottery publishes these draws after the 20:30 draw time.  Polling
     # starts then, but sending still requires a same-day official result.
     if (taipei.hour, taipei.minute) >= (20, 30):

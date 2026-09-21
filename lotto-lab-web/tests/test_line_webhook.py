@@ -152,11 +152,13 @@ def test_line_retry_conflict_is_recorded_as_sent_without_a_duplicate(tmp_path, m
         raise urllib.error.HTTPError("https://api.line.me", 409, "conflict", {}, None)
 
     monkeypatch.setattr(server, "line_push", already_accepted)
+    monkeypatch.setattr(server, "require_line_notification_runtime", lambda: None)
+    monkeypatch.setattr(server, "LINE_ADMIN_USER_IDS", {"tester"})
     outcome = server.send_line_notification(
         "tw539",
         "result:tw539:115000230",
         "result",
-        {"name": "今彩539", "period": "115000230", "date": "2026-09-20", "numbers": [1, 2, 3, 4, 5]},
+        {"game": "tw539", "sourceUrl": server.TAIWAN_LAST_URL, "name": "今彩539", "period": "115000230", "date": "2026-09-20", "numbers": [1, 2, 3, 4, 5]},
     )
 
     assert outcome == {"sent": 1, "failed": 0}
