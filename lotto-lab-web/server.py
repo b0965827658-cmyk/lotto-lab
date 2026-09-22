@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import community_http
+
 import csv
 import hashlib
 import hmac
@@ -5440,7 +5442,20 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json({"ok": False, "error": "請求太頻繁，請稍後再試"}, status=429, extra_headers={"Retry-After": str(retry_after)})
         return True
 
+    def log_message(self, format, *args):
+        if urlparse(self.path).path.startswith('/auth/line/'):
+            return super().log_message('%s', 'LINE OAuth request (query redacted)')
+        return super().log_message(format, *args)
+
+    def community_request(self, method):
+        return community_http.handle(self, method,
+            fantasy5_official_trial_enabled(),
+            line_notification_persistent_mount_is_verified(LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT),
+            LINE_ADMIN_USER_IDS)
+
     def do_GET(self):
+        if (self.path.startswith('/api/community/') or self.path.startswith('/auth/line/')) and self.community_request('GET'):
+            return
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/") and self.reject_if_rate_limited(parsed.path):
             return
@@ -5619,6 +5634,8 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        if (self.path.startswith('/api/community/') or self.path.startswith('/auth/line/')) and self.community_request('POST'):
+            return
         parsed = urlparse(self.path)
         # LINE does not send browser Origin headers; signature verification is the
         # authority check for this single public endpoint.

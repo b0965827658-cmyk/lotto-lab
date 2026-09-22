@@ -41,3 +41,24 @@ LINE Login callback与Render私密環境變數完成、安全測試和實際本�
 確認，不為了測試擅自切成Published。Production仍不動，未授權任何LINE推播。
 
 參考：https://developers.line.biz/en/docs/line-login/integrate-line-login/
+
+
+## 2026-09-22 網頁與登入整合
+已加入 /community.html、/api/community/* 和 /auth/line/*。服務鎖與實際掛載
+檢查都必須通過，才可讀寫獨立 community.sqlite3/community_auth.sqlite3。
+公開 feed 不含 LINE ID；暱稱須會員明確確認。管理員使用既有 LINE_ADMIN_USER_IDS。
+OAuth 使用 openid 最小 scope、state、瀏覽器綁定、nonce、PKCE、LINE 官方 verify；
+一次性回呼，session token 僅以 hash 儲存，Secure/HttpOnly/SameSite=Lax。
+寫入需固定 Origin 與 CSRF，登出刪除 session。應用程式日誌遮蔽 OAuth 查詢參數。
+服務工作執行緒不快取 auth/API。沒有加入任何 LINE 訊息呼叫。
+
+待完成設定（不公開 secret）：
+- 既有 LINE Login Channel 2011420222 的 Callback URL：
+  https://lotto-lab-candidate-a-staging.onrender.com/auth/line/callback
+- 指定 Render Staging 私密環境變數 LINE_LOGIN_CHANNEL_SECRET：既有 Login Channel secret。
+- LINE_LOGIN_ENABLED=1 才開啟登入。未設定時公開頁可瀏覽、所有投稿拒絕。
+- 保持 Developing，先由具 Channel 角色的本人實測授權；不自動改 Published。
+
+本版提供日期 feed、30筆分頁、每串最近30則留言、最近20筆修改顯示（資料庫完整保留）、
+檢舉紀錄及管理員隱藏。官方命中結算、完整會員歷史頁、封禁帳號尚未完成。
+沒有將測試樣本或既有私有 LINE 討論匯入公開資料庫。
