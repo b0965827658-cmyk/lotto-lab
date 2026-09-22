@@ -66,6 +66,10 @@ def test_http_gate_csrf_and_spoofed_identity(tmp_path,monkeypatch):
     http.handle(h,'POST',True,True,set());assert h.result[0]==200
     http.handle(h,'POST',True,True,set());assert h.result[1]['changed'] is False
     assert store.feed('2026-09-22','real-member')[0]['mine']
+    h.path='/api/community/board';h.body={'body':'自由分享','requestKey':'http-board-key-0001','userId':'attacker'}
+    http.handle(h,'POST',True,True,set());assert h.result[0]==200
+    http.handle(h,'POST',True,True,set());assert h.result[1]['changed'] is False
+    assert store.board_feed(member='real-member')[0]['mine']
     h.path='/api/community/hide';h.body={'kind':'pick','id':1,'reason':'測試'}
     http.handle(h,'POST',True,True,set());assert h.result[0]==403
 

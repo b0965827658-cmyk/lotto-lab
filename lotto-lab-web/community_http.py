@@ -63,6 +63,10 @@ def handle(handler,method,enabled,mounted,admins):
             if path=='/api/community/reports':
                 if not admin:reply({'error':'僅管理員可操作'},403);return True
                 reply({'reports':store.reports()});return True
+            if path=='/api/community/board':
+                parent=param('parent')
+                rows=store.board_feed(member=member,before=int(param('before','0')),category=param('category'),parent_id=int(parent) if parent else None)
+                reply(dict(posts=rows,nextBefore=rows[-1]['id'] if len(rows)==30 else None));return True
             if path=='/api/community/feed':
                 day=param('date',default_date());before=int(param('before','0'))
                 if before<0:raise ValueError('頁碼錯誤')
@@ -91,9 +95,11 @@ def handle(handler,method,enabled,mounted,admins):
                 if body.get('consent') is not True:raise ValueError('請確認公開暱稱與投稿規則')
                 reply({'alias':store.register(member,body.get('alias'))});return True
             if not store.alias(member):raise ValueError('請先設定公開暱稱')
-            for key in ('reason','body'):
+            for key in ('reason','body','title'):
                 text=body.get(key,'')
                 if isinstance(text,str) and re.search(r'https?://|www\.',text,re.I):raise ValueError('測試期間請勿張貼外部連結')
+            if path=='/api/community/board':
+                reply(store.board_write(member,body.get('body'),body.get('requestKey'),title=body.get('title',''),category=body.get('category','chat'),parent_id=body.get('parentId')));return True
             if path=='/api/community/share':reply(store.share(member,body.get('drawDate',''),body.get('numbers'),body.get('reason')));return True
             if path=='/api/community/comment':
                 if type(body.get('pickId')) is not int:raise ValueError('投稿編號錯誤')
@@ -103,9 +109,9 @@ def handle(handler,method,enabled,mounted,admins):
                 if not admin:reply({'error':'僅管理員可操作'},403);return True
                 store.hide(member,body.get('kind'),body.get('id'),body.get('reason'));reply({'ok':True});return True
         reply({'error':'找不到此功能'},404)
-    except (ValueError,TypeError):
+    except (ValueError,TypeError) as exc:
         if path=='/auth/line/callback':redirect('/community.html?login=failed',[set_cookie(FLOW,'',0)])
-        else:reply({'error':'資料不符規則，請檢查日期、暱稱、號碼與文字；也可能已截止或操作過於頻繁。'},400)
+        else:reply({'error':str(exc) if path=='/api/community/board' and isinstance(exc,ValueError) else '資料不符規則，請檢查日期、暱稱、號碼與文字；也可能已截止或操作過於頻繁。'},400)
     except Exception:
         # OAuth upstream bodies, tokens, authorization codes and user IDs are never logged.
         if path=='/auth/line/callback':redirect('/community.html?login=failed',[set_cookie(FLOW,'',0)])
