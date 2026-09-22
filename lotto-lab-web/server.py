@@ -433,6 +433,30 @@ def delivery_is_blocked(game: str) -> bool:
     return game in DELIVERY_BLOCKED_GAMES
 
 
+def fantasy5_official_trial_enabled() -> bool:
+    """Only the explicitly named Staging service may try the official query."""
+    return (LINE_NOTIFICATION_RUNTIME == "staging"
+            and LINE_NOTIFICATION_SERVICE_ID == LINE_NOTIFICATION_STAGING_SERVICE_ID)
+
+
+def fantasy5_official_trial_payload() -> dict[str, Any]:
+    if not fantasy5_official_trial_enabled():
+        raise ValueError("Official Fantasy 5 trial is Staging-only")
+    result = california_fantasy5.probe()
+    payload = {"ok": result["ok"], "game": "ca-fantasy5", "trial": True,
+               "notificationsEnabled": False, "attempts": result.get("attempts", [])}
+    if not result["ok"]:
+        payload.update(error="官方來源暫無可驗證的開獎資料，請稍後再試。",
+                       dataStatus={"validated": False, "state": "verification_pending"})
+        return payload
+    payload.update(latest={"game": "ca-fantasy5", "name": "加州天天樂 Fantasy 5",
+        "period": result["drawNumber"], "date": result["drawDate"],
+        "numbers": result["winningNumbers"], "bonus": [], "sourceUrl": result["sourceUrl"],
+        "source": result["source"], "fetchedAt": result["fetchedAt"], "latencyMs": result["latencyMs"]},
+        dataStatus={"validated": True, "state": "official_latest_trial"})
+    return payload
+
+
 def delivery_pending_payload(game: str) -> dict[str, Any]:
     """Safe API response for a game without a verified official source."""
     return {
@@ -5465,6 +5489,10 @@ class Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
+                if game == "ca-fantasy5" and fantasy5_official_trial_enabled():
+                    trial = fantasy5_official_trial_payload()
+                    self.send_json(trial, status=200 if trial["ok"] else 503)
+                    return
                 if delivery_is_blocked(game):
                     self.send_json(delivery_pending_payload(game), status=409)
                     return

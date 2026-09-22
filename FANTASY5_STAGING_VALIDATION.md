@@ -40,3 +40,12 @@ Fixtures exercise 200 maintenance HTML, incorrect media types, malformed JSON,
 schema/history failures, structured fallback, official endpoint discovery,
 external redirects, repeated/concurrent writes and blocked LINE sends.
 No mocked source success is reported as a live official-source success.
+
+## Staging query trial
+The user requested an unblock trial. Only `/api/latest?game=ca-fantasy5`
+bypasses the broad delivery block on the exact Staging service/runtime. It calls
+only the strict official adapter. Upstream unavailability returns HTTP 503 with
+validated=false and per-source diagnostics; valid results retain provenance.
+The broad block stays in place for legacy history, analysis and all LINE delivery.
+The trial performs no database writes or notification sends. Other service IDs
+and non-Staging runtimes cannot enable the query trial.
