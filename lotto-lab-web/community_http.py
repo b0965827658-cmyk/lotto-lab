@@ -32,7 +32,7 @@ def default_date():
     while day.weekday()==6:day+=timedelta(days=1)
     return day.isoformat()
 
-def handle(handler,method,enabled,mounted,admins):
+def handle(handler,method,enabled,mounted,admins,sync_results=None):
     parsed=urlparse(handler.path);path=parsed.path
     if not (path.startswith('/api/community/') or path.startswith('/auth/line/')):return False
     def reply(data,status=200,headers=None):handler.send_json(data,status=status,extra_headers=headers)
@@ -58,6 +58,19 @@ def handle(handler,method,enabled,mounted,admins):
         return values[0]
     try:
         if method=='GET':
+            if path in ('/api/community/history','/api/community/leaderboard'):
+                if path.endswith('/history') and not member:reply({'error':'請先登入 LINE'},401);return True
+                synced=False
+                if sync_results:
+                    try:sync_results(store);synced=True
+                    except Exception:pass
+                if path.endswith('/history'):
+                    rows=store.member_history(member,int(param('before','0')))
+                    reply(dict(posts=rows,nextBefore=rows[-1]['id'] if len(rows)==30 else None,syncOk=synced));return True
+                reply(dict(rows=store.leaderboard(),syncOk=synced));return True
+            if path=='/api/community/bans':
+                if not admin:reply({'error':'僅管理員可操作'},403);return True
+                reply({'rows':store.ban_list()});return True
             if path=='/api/community/session':
                 reply(dict(authenticated=bool(session),loginReady=ready,alias=store.alias(member),admin=admin,csrf=session['csrf'] if session else None,defaultDate=default_date()));return True
             if path=='/api/community/reports':
@@ -91,6 +104,11 @@ def handle(handler,method,enabled,mounted,admins):
             if not isinstance(body,dict):raise ValueError('資料格式錯誤')
             if path=='/api/community/logout':
                 login.logout(cookie(handler.headers,COOKIE));reply({'ok':True},headers={'Set-Cookie':set_cookie(COOKIE,'',0)});return True
+            if store.is_banned(member):reply({'error':'此帳號已暫停發言，仍可瀏覽及登出'},403);return True
+            if path=='/api/community/ban':
+                if not admin:reply({'error':'僅管理員可操作'},403);return True
+                store.ban_alias(member,body.get('alias'),body.get('active'),body.get('reason'),admins)
+                reply({'ok':True});return True
             if path=='/api/community/profile':
                 if body.get('consent') is not True:raise ValueError('請確認公開暱稱與投稿規則')
                 reply({'alias':store.register(member,body.get('alias'))});return True

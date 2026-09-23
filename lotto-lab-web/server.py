@@ -5170,8 +5170,24 @@ def run_line_notification_cycle(now: datetime | None = None) -> dict[str, Any]:
     return {"ok": True, **counts}
 
 
+def line_notification_poll_seconds(now=None):
+    current=(now or datetime.now(timezone.utc)).astimezone(ZoneInfo('Asia/Taipei'))
+    # Faster detection after official publication, never fabricated live numbers.
+    return 30 if (20,30)<=(current.hour,current.minute)<=(22,0) else LINE_NOTIFICATION_LOOP_INTERVAL_SECONDS
+
+
+def community_sync_results(store):
+    def load():
+        latest=taiwan_line_latest('tw539')
+        store.record_official(latest)
+        rows=cached('community-official-history',lambda:taiwan_official_history_recent('tw539',limit=100),ttl_seconds=3600)
+        for row in rows:store.record_official(dict(row,game='tw539'))
+        return True
+    return cached('community-results-sync',load,ttl_seconds=30)
+
+
 def line_notification_loop() -> None:
-    """Run the opt-in Staging cycle once per minute when explicitly armed."""
+    """Run the guarded Staging cycle with faster polling during publication hours."""
     time.sleep(5)
     while True:
         try:
@@ -5188,7 +5204,7 @@ def line_notification_loop() -> None:
                 )
         except Exception as exc:
             print(f"LINE notification cycle error: {type(exc).__name__}")
-        time.sleep(LINE_NOTIFICATION_LOOP_INTERVAL_SECONDS)
+        time.sleep(line_notification_poll_seconds())
 
 
 def line_admin_reply(text: str) -> str:
@@ -5451,7 +5467,7 @@ class Handler(SimpleHTTPRequestHandler):
         return community_http.handle(self, method,
             fantasy5_official_trial_enabled(),
             line_notification_persistent_mount_is_verified(LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT),
-            LINE_ADMIN_USER_IDS)
+            LINE_ADMIN_USER_IDS,community_sync_results)
 
     def do_GET(self):
         if (self.path.startswith('/api/community/') or self.path.startswith('/auth/line/')) and self.community_request('GET'):

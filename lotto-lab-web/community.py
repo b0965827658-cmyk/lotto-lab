@@ -41,6 +41,15 @@ class CommunityStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(self.path, timeout=10, factory=ClosingConnection)
         db.executescript('''
+            CREATE TABLE IF NOT EXISTS official_results (
+                draw_date TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE,
+                numbers TEXT NOT NULL, source TEXT NOT NULL, fetched_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS bans (
+                member TEXT PRIMARY KEY, active INTEGER NOT NULL,
+                reason TEXT NOT NULL, actor TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS ban_audit (
+                id INTEGER PRIMARY KEY, member TEXT NOT NULL, active INTEGER NOT NULL,
+                reason TEXT NOT NULL, actor TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS board_messages (
                 id INTEGER PRIMARY KEY, member TEXT NOT NULL, parent_id INTEGER,
                 title TEXT NOT NULL, category TEXT NOT NULL, body TEXT NOT NULL,
@@ -69,6 +78,78 @@ class CommunityStore:
                 body TEXT NOT NULL, created_at TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0);
         ''')
         return db
+
+    def is_banned(self, member):
+        if not member or not self.path.exists():return False
+        with self.connect() as db:
+            row=db.execute('SELECT active FROM bans WHERE member=?',(member,)).fetchone()
+        return bool(row and row[0])
+
+    def ban_alias(self, actor, alias, active, reason, protected=()):
+        if type(active) is not bool or not isinstance(reason,str) or not 1<=len(reason.strip())<=300:
+            raise ValueError('請提供封禁或解除理由')
+        with self.connect() as db:
+            row=db.execute('SELECT member FROM members WHERE alias=?',(alias,)).fetchone()
+            if not row or row[0] in protected or row[0]==actor:raise ValueError('無法操作此帳號')
+            args=(row[0],int(active),reason.strip(),actor,self.clock(None).isoformat())
+            db.execute('INSERT INTO bans VALUES(?,?,?,?,?) ON CONFLICT(member) DO UPDATE SET active=excluded.active,reason=excluded.reason,actor=excluded.actor,updated_at=excluded.updated_at',args)
+            db.execute('INSERT INTO ban_audit(member,active,reason,actor,updated_at) VALUES(?,?,?,?,?)',args)
+
+    def ban_list(self):
+        with self.connect() as db:
+            rows=db.execute('SELECT m.alias,b.active,b.reason,b.updated_at FROM bans b JOIN members m ON m.member=b.member ORDER BY b.updated_at DESC LIMIT 100').fetchall()
+        return [dict(alias=r[0],active=bool(r[1]),reason=r[2],updatedAt=r[3]) for r in rows]
+
+    def record_official(self, draw):
+        # Only the server's official adapter calls this; there is no write HTTP API.
+        from urllib.parse import urlparse
+        source=urlparse(draw.get('sourceUrl',''))
+        if draw.get('game')!='tw539' or source.scheme!='https' or source.netloc!='api.taiwanlottery.com' or source.username or source.fragment:
+            raise ValueError('需要今彩539官方來源')
+        if source.path not in ('/TLCAPIWeB/Lottery/LastNumber','/TLCAPIWeB/Lottery/Daily539Result'):
+            raise ValueError('未知官方接口')
+        numbers=validate_numbers(draw.get('numbers'))
+        day=draw.get('date','');close=close_time(day).replace(hour=20,minute=30)
+        if self.clock(None)<close or draw.get('bonus'):raise ValueError('尚未開獎')
+        period=draw.get('period','')
+        if not isinstance(period,str) or not re.fullmatch(r'\d{9}',period):raise ValueError('期號錯誤')
+        encoded=json.dumps(numbers)
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            old=db.execute('SELECT period,numbers FROM official_results WHERE draw_date=?',(day,)).fetchone()
+            if old:
+                if old!=(period,encoded):raise ValueError('官方結果衝突，需人工核對')
+                return False
+            db.execute('INSERT INTO official_results VALUES(?,?,?,?,?)',(day,period,encoded,draw['sourceUrl'],self.clock(None).isoformat()))
+        return True
+
+    def member_history(self, member, before=0):
+        self.identity(member)
+        if type(before) is not int or before<0:raise ValueError('頁碼錯誤')
+        with self.connect() as db:
+            rows=db.execute('''SELECT p.id,p.draw_date,p.numbers,p.reason,p.hidden,r.period,r.numbers,r.source,r.fetched_at
+                FROM picks p LEFT JOIN official_results r ON p.draw_date=r.draw_date
+                WHERE p.member=? AND (?=0 OR p.id<?) ORDER BY p.id DESC LIMIT 30''',(member,before,before)).fetchall()
+        result=[]
+        for r in rows:
+            numbers=json.loads(r[2]);winning=json.loads(r[6]) if r[6] else None
+            result.append(dict(id=r[0],date=r[1],numbers=numbers,reason=r[3],hidden=bool(r[4]),period=r[5],winningNumbers=winning,
+                matched=sorted(set(numbers)&set(winning)) if winning is not None else None,sourceUrl=r[7],verifiedAt=r[8]))
+        return result
+
+    def leaderboard(self):
+        with self.connect() as db:
+            # Include hidden submissions in the denominator to prevent erasing losses.
+            rows=db.execute('''SELECT m.alias,p.numbers,r.numbers FROM picks p JOIN members m ON p.member=m.member
+                JOIN official_results r ON p.draw_date=r.draw_date
+                LEFT JOIN bans b ON b.member=p.member WHERE COALESCE(b.active,0)=0''').fetchall()
+        totals={}
+        for alias,p,w in rows:
+            hits=len(set(json.loads(p))&set(json.loads(w)))
+            item=totals.setdefault(alias,dict(alias=alias,draws=0,totalHits=0,threePlus=0))
+            item['draws']+=1;item['totalHits']+=hits;item['threePlus']+=int(hits>=3)
+        for item in totals.values():item['averageHits']=round(item['totalHits']/item['draws'],3)
+        return sorted(totals.values(),key=lambda x:(-x['averageHits'],-x['draws'],x['alias']))[:100]
 
     @staticmethod
     def identity(member):
