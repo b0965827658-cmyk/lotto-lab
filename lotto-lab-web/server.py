@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import community_http
+
 import csv
 import hashlib
 import hmac
@@ -36,6 +38,7 @@ from marksix_official import HKJC_MARK_SIX_URL
 from taiwan_official_history import recent as taiwan_official_history_recent
 from taiwan_official_history import TAIWAN_LOTTERY_BASE, SPECS as TAIWAN_HISTORY_SPECS
 from line_notifications import DEFAULT_GAMES, LineNotificationStore
+import california_fantasy5_official as california_fantasy5
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -430,6 +433,30 @@ def clean_game(value: str) -> str:
 def delivery_is_blocked(game: str) -> bool:
     """Whether a game's data must be withheld from all user-facing delivery."""
     return game in DELIVERY_BLOCKED_GAMES
+
+
+def fantasy5_official_trial_enabled() -> bool:
+    """Only the explicitly named Staging service may try the official query."""
+    return (LINE_NOTIFICATION_RUNTIME == "staging"
+            and LINE_NOTIFICATION_SERVICE_ID == LINE_NOTIFICATION_STAGING_SERVICE_ID)
+
+
+def fantasy5_official_trial_payload() -> dict[str, Any]:
+    if not fantasy5_official_trial_enabled():
+        raise ValueError("Official Fantasy 5 trial is Staging-only")
+    result = california_fantasy5.probe()
+    payload = {"ok": result["ok"], "game": "ca-fantasy5", "trial": True,
+               "notificationsEnabled": False, "attempts": result.get("attempts", [])}
+    if not result["ok"]:
+        payload.update(error="官方來源暫無可驗證的開獎資料，請稍後再試。",
+                       dataStatus={"validated": False, "state": "verification_pending"})
+        return payload
+    payload.update(latest={"game": "ca-fantasy5", "name": "加州天天樂 Fantasy 5",
+        "period": result["drawNumber"], "date": result["drawDate"],
+        "numbers": result["winningNumbers"], "bonus": [], "sourceUrl": result["sourceUrl"],
+        "source": result["source"], "fetchedAt": result["fetchedAt"], "latencyMs": result["latencyMs"]},
+        dataStatus={"validated": True, "state": "official_latest_trial"})
+    return payload
 
 
 def delivery_pending_payload(game: str) -> dict[str, Any]:
@@ -5030,6 +5057,17 @@ def validate_line_notification_result(game: str, event_key: str, kind: str, late
             raise ValueError("六合彩官方資料未通過驗證")
         if len(bonus) != 1 or not 1 <= bonus[0] <= 49 or bonus[0] in numbers:
             raise ValueError("六合彩特別號未通過驗證")
+    elif game == "ca-fantasy5":
+        official = urlparse(california_fantasy5.API_URL)
+        if (
+            source.scheme != "https"
+            or source.netloc != official.netloc
+            or source.path != official.path
+            or source.fragment
+            or bonus
+            or not validate_main_numbers(game, numbers)
+        ):
+            raise ValueError("加州天天樂官方資料未通過驗證")
     else:
         allowed = {urlparse(TAIWAN_LAST_URL).path, urlparse(TAIWAN_LOTTERY_BASE + TAIWAN_HISTORY_SPECS[game][0]).path}
         if source.scheme != "https" or source.netloc != "api.taiwanlottery.com" or source.path not in allowed or source.fragment:
@@ -5041,6 +5079,8 @@ def validate_line_notification_result(game: str, event_key: str, kind: str, late
 
 def send_line_notification(game: str, event_key: str, kind: str, latest: dict[str, Any]) -> dict[str, int]:
     require_line_notification_runtime()
+    if delivery_is_blocked(game):
+        raise ValueError("Game delivery is blocked")
     validate_line_notification_result(game, event_key, kind, latest)
     sent = failed = 0
     message = line_notification_text(kind, latest)
@@ -5094,6 +5134,29 @@ def run_line_notification_cycle(now: datetime | None = None) -> dict[str, Any]:
                 counts["failed"] += outcome["failed"]
             except Exception:
                 counts["failed"] += 1
+    # California Fantasy 5: official API only. Delivery remains blocked until
+    # Staging evidence proves the adapter, so this path is inert by default.
+    try:
+        if not delivery_is_blocked("ca-fantasy5") and LINE_NOTIFICATION_STORE.recipients("ca-fantasy5"):
+            ca_now = current.astimezone(ZoneInfo("America/Los_Angeles"))
+            ca_draw = california_fantasy5.fetch_latest()
+            if ca_draw.draw_date[:10] == ca_now.date().isoformat():
+                ca_latest = {
+                    "game": "ca-fantasy5",
+                    "period": ca_draw.draw_number,
+                    "date": ca_draw.draw_date[:10],
+                    "numbers": list(ca_draw.numbers),
+                    "bonus": [],
+                    "sourceUrl": california_fantasy5.API_URL,
+                    "source": "California Lottery official API",
+                }
+                outcome = send_line_notification(
+                    "ca-fantasy5", f"result:ca-fantasy5:{ca_draw.draw_number}", "result", ca_latest
+                )
+                counts["result"] += outcome["sent"]
+                counts["failed"] += outcome["failed"]
+    except Exception:
+        counts["failed"] += 1
     try:
         if LINE_NOTIFICATION_STORE.recipients("mark-six"):
             hk_now = current.astimezone(ZoneInfo("Asia/Hong_Kong"))
@@ -5107,8 +5170,24 @@ def run_line_notification_cycle(now: datetime | None = None) -> dict[str, Any]:
     return {"ok": True, **counts}
 
 
+def line_notification_poll_seconds(now=None):
+    current=(now or datetime.now(timezone.utc)).astimezone(ZoneInfo('Asia/Taipei'))
+    # Faster detection after official publication, never fabricated live numbers.
+    return 30 if (20,30)<=(current.hour,current.minute)<=(22,0) else LINE_NOTIFICATION_LOOP_INTERVAL_SECONDS
+
+
+def community_sync_results(store):
+    def load():
+        latest=taiwan_line_latest('tw539')
+        store.record_official(latest)
+        rows=cached('community-official-history',lambda:taiwan_official_history_recent('tw539',limit=100),ttl_seconds=3600)
+        for row in rows:store.record_official(dict(row,game='tw539'))
+        return True
+    return cached('community-results-sync',load,ttl_seconds=30)
+
+
 def line_notification_loop() -> None:
-    """Run the opt-in Staging cycle once per minute when explicitly armed."""
+    """Run the guarded Staging cycle with faster polling during publication hours."""
     time.sleep(5)
     while True:
         try:
@@ -5125,7 +5204,7 @@ def line_notification_loop() -> None:
                 )
         except Exception as exc:
             print(f"LINE notification cycle error: {type(exc).__name__}")
-        time.sleep(LINE_NOTIFICATION_LOOP_INTERVAL_SECONDS)
+        time.sleep(line_notification_poll_seconds())
 
 
 def line_admin_reply(text: str) -> str:
@@ -5379,7 +5458,20 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json({"ok": False, "error": "請求太頻繁，請稍後再試"}, status=429, extra_headers={"Retry-After": str(retry_after)})
         return True
 
+    def log_message(self, format, *args):
+        if urlparse(self.path).path.startswith('/auth/line/'):
+            return super().log_message('%s', 'LINE OAuth request (query redacted)')
+        return super().log_message(format, *args)
+
+    def community_request(self, method):
+        return community_http.handle(self, method,
+            fantasy5_official_trial_enabled(),
+            line_notification_persistent_mount_is_verified(LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT),
+            LINE_ADMIN_USER_IDS,community_sync_results)
+
     def do_GET(self):
+        if (self.path.startswith('/api/community/') or self.path.startswith('/auth/line/')) and self.community_request('GET'):
+            return
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/") and self.reject_if_rate_limited(parsed.path):
             return
@@ -5428,6 +5520,10 @@ class Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
+                if game == "ca-fantasy5" and fantasy5_official_trial_enabled():
+                    trial = fantasy5_official_trial_payload()
+                    self.send_json(trial, status=200 if trial["ok"] else 503)
+                    return
                 if delivery_is_blocked(game):
                     self.send_json(delivery_pending_payload(game), status=409)
                     return
@@ -5554,6 +5650,8 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        if (self.path.startswith('/api/community/') or self.path.startswith('/auth/line/')) and self.community_request('POST'):
+            return
         parsed = urlparse(self.path)
         # LINE does not send browser Origin headers; signature verification is the
         # authority check for this single public endpoint.
