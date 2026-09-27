@@ -39,6 +39,7 @@ from taiwan_official_history import recent as taiwan_official_history_recent
 from taiwan_official_history import TAIWAN_LOTTERY_BASE, SPECS as TAIWAN_HISTORY_SPECS
 from line_notifications import DEFAULT_GAMES, LineNotificationStore
 import california_fantasy5_official as california_fantasy5
+import fantasy5_stepzero
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -131,8 +132,8 @@ API_RATE_LIMITS = {
 }
 ALLOWED_GAMES = {"tw539", "ca-fantasy5"}
 # California Fantasy 5 has no verified official source yet.  It may remain in
-# internal research storage, but it must never be delivered as a current draw,
-# history, analysis, recommendation, or notification.
+# internal research storage, but must not enter legacy history, analysis,
+# recommendations, or notifications. Staging has an explicitly attributed lookup.
 DELIVERY_BLOCKED_GAMES = {"ca-fantasy5"}
 DELIVERY_BLOCKED_MESSAGE = "加州天天樂官方資料目前驗證中，暫不顯示號碼、歷史或推薦。"
 STRIPE_PAYMENT_LINK = os.environ.get("LOTTO_STRIPE_PAYMENT_LINK", "").strip()
@@ -5521,7 +5522,13 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 game = clean_game(params.get("game", ["tw539"])[0])
                 if game == "ca-fantasy5" and fantasy5_official_trial_enabled():
-                    trial = fantasy5_official_trial_payload()
+                    source = params.get("source", [""])[0]
+                    if source not in {"", "official", "stepzero"}:
+                        raise ValueError("Unsupported Fantasy 5 source")
+                    if source == "stepzero" or (source != "official" and fantasy5_stepzero.configured()):
+                        trial = fantasy5_stepzero.feed.lookup(PERSISTENT_DATA / "fantasy5_third_party_staging.sqlite3")
+                    else:
+                        trial = fantasy5_official_trial_payload()
                     self.send_json(trial, status=200 if trial["ok"] else 503)
                     return
                 if delivery_is_blocked(game):
