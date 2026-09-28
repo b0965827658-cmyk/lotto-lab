@@ -2,6 +2,22 @@
 
 2026-09-28：使用者要求立即執行並持續接續。既有 `staging-line` heartbeat 已改為 ACTIVE，每兩小時接續本任務；無實質變化不通知。發布限制不因排程啟用而解除。
 
+## 2026-09-28 選單調整（依使用者最新要求）
+
+此節優先於下方第一批六格設計。主選單改為五項：彩種、歷史紀錄、直播專區、公開留言板、使用說明。
+
+- 彩種合併為一格，連 `/start.html`；移除主選單的「我要對獎」。
+- 「我的紀錄」改為「歷史紀錄」，仍連本人會員紀錄 `/member.html#history`；資料內容與權限不變。
+- 直播專區連 `/live.html`，提供「台彩直播」「港彩直播」兩個可直接開啟外部平台的入口。
+- 台彩：`https://www.youtube.com/@48ilottery48/streams`。台彩 FAQ 指向三立全民 i 彩券轉播，三立節目頁／官方頻道交叉核對；瀏覽器直播頁已列出 2026-09-28 當日開獎回放。使用頻道直播頁，不固定連舊影片。
+- 港彩：`https://www.mytvsuper.com/tc/live/82/TVB-Plus/`。從 myTV SUPER 官方 TVB Plus 節目表的「觀看直播」連結取得；官方直播頁標示 GEO_BLOCK／香港澳門地區限制。網站已明示限制，未聲稱台灣可播放或目前正在播六合彩。
+- 香港馬會官方公告確認六合彩攪珠由 TVB Plus 82 台轉播。來源：https://member.hkjc.com/member/chinese/about-membership/news-and-announcements/index.aspx/ 。沒有繞過地區限制、安裝 APP 或登入直播平台。
+- 原三立 live.setn.com 直播頁的瀏覽操作遭網站安全政策阻擋，已停止；改用獨立且可正常檢視的全民 i 彩券官方 YouTube 頻道，沒有透過代理或其他介面存取受阻頁面。
+- 2500×1686 PNG、五區 URI 設定、預覽點擊區與歡迎文案同步更新。
+- 本機桌面與390px手機尺寸瀏覽器已驗收新版選單及直播頁；沒有水平溢出。「歷史紀錄」可點到 `/member.html#history`，登入href保留該目的位置。
+- 本次為靜態導覽調整：檢查五區完整覆蓋且無重疊、目的頁與錨點存在、PNG 尺寸與文案同步；不新增模仿靜態文案的測試，不更改驗證或通知程式。
+- 部署前基線：本機／遠端／Live a86a93a，dep-dat3sim0tbcc739pclfg。新部署結果以根目錄 `LINE_OFFICIAL_ACCOUNT_STAGING_CHECK.md` 最新段落為準；該文件是本機交接記錄，不為文件更新重新部署。
+
 ## 第一批已實作
 
 - `/line-menu.html`：六格可點擊的選單預覽、歡迎訊息草稿與素材下載；明示尚未設定到 LINE 官方帳號。
@@ -23,7 +39,7 @@
 - 390px 手機尺寸的選單圖片、中文字級及使用說明完成視覺檢查，無水平溢出。
 - 上述登入瀏覽器測試使用隔離本機 OAuth 模擬，不向 LINE 傳送、不使用真實帳號或密鑰、不向 Staging 發測試貼文。
 
-部署與最新線上驗收以本機 `.git/line-entry-staging-live.md` 為準；沒有該文件或沒有 Live 證據時，不能視為部署成功。先核對遠端及 Render 的實際 commit，不重複部署。
+部署與最新線上驗收以根目錄 `LINE_OFFICIAL_ACCOUNT_STAGING_CHECK.md` 為準；沒有該文件或沒有 Live 證據時，不能視為部署成功。先核對遠端及 Render 的實際 commit，不重複部署。
 
 ## 後續待完成
 
