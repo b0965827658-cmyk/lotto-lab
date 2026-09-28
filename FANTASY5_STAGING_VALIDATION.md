@@ -191,3 +191,26 @@ branch codex/fantasy5-fast-official-feed and current deployment. Add only
 STEPZERO_API_KEY to its private environment, then deploy the new commit once and
 verify /start.html plus the live API. Do not modify Production or any other env
 settings. No live LINE messages were sent. No deployment was triggered here.
+
+
+## Staging deployment packaging correction — 2026-09-28 03:24 UTC
+
+Render login is restored. The exact Staging service and branch were verified,
+Auto-Deploy is Off, and STEPZERO_API_KEY was saved privately using Save only.
+No other environment variables were changed. Commit 9d3eced was pushed and
+deployment dep-dastq5d9fdbs73f2k00g failed with ModuleNotFoundError because the
+root Dockerfile did not copy fantasy5_stepzero.py into the runtime image.
+
+The root Dockerfile now includes the adapter. A separate package assembled from
+its actual COPY instructions started server.py and returned HTTP 200 /api/health
+at 03:23:34 UTC, with all notification settings disabled and an isolated data
+directory. Docker itself is unavailable locally; this is a packaged-server smoke
+check, not a local Docker build. The original 115 relevant tests passed before
+deployment; only the packaging manifest is changed by this correction.
+
+A fresh authenticated Stepzero request at 03:18:29 UTC still returned September
+26, 01/06/07/11/26, provider ID 25125087, updated_at=null. Pacific time was already
+September 27 after 19:00, so the adapter correctly withheld this stale result.
+Do not claim that the latest September 27 result or real-time updates were proven.
+The corrected deployment must still be verified Live; no LINE sends, recipient
+changes, ledger resets, or Production changes were performed.
