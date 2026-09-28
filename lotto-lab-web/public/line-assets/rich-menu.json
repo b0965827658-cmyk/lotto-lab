@@ -1,0 +1,89 @@
+{
+  "size": {
+    "width": 2500,
+    "height": 1686
+  },
+  "selected": false,
+  "name": "摘星 Staging 六格選單草稿",
+  "chatBarText": "開獎與會員功能",
+  "areas": [
+    {
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 833,
+        "height": 843
+      },
+      "action": {
+        "type": "uri",
+        "label": "今彩539",
+        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/start.html#results"
+      }
+    },
+    {
+      "bounds": {
+        "x": 833,
+        "y": 0,
+        "width": 834,
+        "height": 843
+      },
+      "action": {
+        "type": "uri",
+        "label": "加州天天樂",
+        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/start.html#fantasy5"
+      }
+    },
+    {
+      "bounds": {
+        "x": 1667,
+        "y": 0,
+        "width": 833,
+        "height": 843
+      },
+      "action": {
+        "type": "uri",
+        "label": "我要對獎",
+        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/member.html#check"
+      }
+    },
+    {
+      "bounds": {
+        "x": 0,
+        "y": 843,
+        "width": 833,
+        "height": 843
+      },
+      "action": {
+        "type": "uri",
+        "label": "我的紀錄",
+        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/member.html#history"
+      }
+    },
+    {
+      "bounds": {
+        "x": 833,
+        "y": 843,
+        "width": 834,
+        "height": 843
+      },
+      "action": {
+        "type": "uri",
+        "label": "公開留言板",
+        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/community.html"
+      }
+    },
+    {
+      "bounds": {
+        "x": 1667,
+        "y": 843,
+        "width": 833,
+        "height": 843
+      },
+      "action": {
+        "type": "uri",
+        "label": "使用說明",
+        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/help.html"
+      }
+    }
+  ]
+}

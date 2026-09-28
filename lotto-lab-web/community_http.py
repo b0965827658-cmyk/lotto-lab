@@ -8,7 +8,7 @@ from datetime import datetime,timedelta
 from pathlib import Path
 from urllib.parse import parse_qs,urlparse
 from community import CommunityStore,TAIPEI
-from community_login import LoginStore,ORIGIN,COOKIE,FLOW,cookie,set_cookie
+from community_login import LoginStore,ORIGIN,COOKIE,FLOW,DEFAULT_RETURN,cookie,set_cookie
 
 ROOT=Path('/var/data/lotto-lab')
 _limits={}
@@ -52,12 +52,18 @@ def handle(handler,method,enabled,mounted,admins,sync_results=None):
     member=session['member'] if session else ''
     admin=member in admins if member else False
     query=parse_qs(parsed.query)
+    return_to=DEFAULT_RETURN
+    def login_failed():
+        page,marker,fragment=return_to.partition('#')
+        redirect(page+'?login=failed'+(marker+fragment if marker else ''),[set_cookie(FLOW,'',0)])
     def param(name,default=''):
         values=query.get(name,[default])
         if len(values)!=1:raise ValueError('重複參數')
         return values[0]
     try:
         if method=='GET':
+            if path=='/auth/line/callback':
+                return_to=login.take_return_target(param('state'),cookie(handler.headers,FLOW))
             if path in ('/api/community/history','/api/community/leaderboard'):
                 if path.endswith('/history') and not member:reply({'error':'請先登入 LINE'},401);return True
                 synced=False
@@ -87,14 +93,14 @@ def handle(handler,method,enabled,mounted,admins,sync_results=None):
                 reply(dict(stats=store.snapshot(day),posts=rows,nextBefore=rows[-1]['id'] if len(rows)==30 else None));return True
             if path=='/auth/line/start':
                 if not ready:reply({'error':'LINE 登入尚在設定，請先瀏覽交流區'},503);return True
-                url,browser=login.begin();redirect(url,[set_cookie(FLOW,browser,600)]);return True
+                url,browser=login.begin(param('next',DEFAULT_RETURN));redirect(url,[set_cookie(FLOW,browser,86400)]);return True
             if path=='/auth/line/callback':
                 if not ready:raise ValueError('LINE 登入尚未啟用')
                 if param('error'):raise ValueError('LINE 登入未完成')
                 token=login.finish(param('state'),cookie(handler.headers,FLOW),param('code'))
                 old=cookie(handler.headers,COOKIE)
                 login.logout(old)
-                redirect('/community.html',[set_cookie(COOKIE,token,86400),set_cookie(FLOW,'',0)]);return True
+                redirect(return_to,[set_cookie(COOKIE,token,86400),set_cookie(FLOW,'',0)]);return True
         if method=='POST':
             if not session:reply({'error':'請先登入 LINE'},401);return True
             if (handler.headers.get('Origin')!=ORIGIN or not hmac.compare_digest(handler.headers.get('X-CSRF-Token',''),session['csrf'])):
@@ -128,10 +134,10 @@ def handle(handler,method,enabled,mounted,admins,sync_results=None):
                 store.hide(member,body.get('kind'),body.get('id'),body.get('reason'));reply({'ok':True});return True
         reply({'error':'找不到此功能'},404)
     except (ValueError,TypeError) as exc:
-        if path=='/auth/line/callback':redirect('/community.html?login=failed',[set_cookie(FLOW,'',0)])
+        if path=='/auth/line/callback':login_failed()
         else:reply({'error':str(exc) if path=='/api/community/board' and isinstance(exc,ValueError) else '資料不符規則，請檢查日期、暱稱、號碼與文字；也可能已截止或操作過於頻繁。'},400)
     except Exception:
         # OAuth upstream bodies, tokens, authorization codes and user IDs are never logged.
-        if path=='/auth/line/callback':redirect('/community.html?login=failed',[set_cookie(FLOW,'',0)])
+        if path=='/auth/line/callback':login_failed()
         else:reply({'error':'服務暫時無法使用，請稍後再試'},503)
     return True

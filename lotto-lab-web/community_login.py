@@ -21,6 +21,13 @@ CALLBACK=ORIGIN+'/auth/line/callback'
 CHANNEL='2011420222'
 COOKIE='__Host-lotto_session'
 FLOW='__Host-lotto_login'
+DEFAULT_RETURN='/community.html'
+RETURN_TARGETS=frozenset((DEFAULT_RETURN,'/community.html#profile','/numbers.html',
+    '/numbers.html#share','/member.html','/member.html#check','/member.html#history',
+    '/help.html','/line-menu.html'))
+
+def safe_return_target(value):
+    return value if isinstance(value,str) and value in RETURN_TARGETS else DEFAULT_RETURN
 
 def digest(value):return hashlib.sha256(value.encode()).hexdigest()
 
@@ -55,17 +62,31 @@ class LoginStore:
         self.path.parent.mkdir(parents=True,exist_ok=True)
         db=sqlite3.connect(self.path,timeout=10,factory=ClosingConnection)
         db.executescript('''CREATE TABLE IF NOT EXISTS flows(state TEXT PRIMARY KEY,browser TEXT,nonce TEXT,verifier TEXT,expires REAL);
-            CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,member TEXT,csrf TEXT,expires REAL);''')
+            CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,member TEXT,csrf TEXT,expires REAL);
+            CREATE TABLE IF NOT EXISTS login_destinations(state TEXT PRIMARY KEY,browser TEXT,target TEXT,expires REAL);''')
         db.execute('DELETE FROM flows WHERE expires<?',(time.time(),))
         db.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
+        db.execute('DELETE FROM login_destinations WHERE expires<?',(time.time(),))
         db.commit()
         return db
-    def begin(self):
+    def begin(self,target=DEFAULT_RETURN):
         state=secrets.token_hex(24);browser=secrets.token_urlsafe(32)
         nonce=secrets.token_hex(24);verifier=secrets.token_urlsafe(48)
-        with self.connect() as db:db.execute('INSERT INTO flows VALUES(?,?,?,?,?)',(digest(state),digest(browser),nonce,verifier,time.time()+600))
+        with self.connect() as db:
+            db.execute('INSERT INTO flows VALUES(?,?,?,?,?)',(digest(state),digest(browser),nonce,verifier,time.time()+600))
+            # Navigation may outlive the 10-minute authorization; it never grants a session.
+            db.execute('INSERT INTO login_destinations VALUES(?,?,?,?)',
+                (digest(state),digest(browser),safe_return_target(target),time.time()+86400))
         challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
         return 'https://access.line.me/oauth2/v2.1/authorize?'+urlencode(dict(response_type='code',client_id=CHANNEL,redirect_uri=CALLBACK,state=state,scope='openid',nonce=nonce,code_challenge=challenge,code_challenge_method='S256')),browser
+    def take_return_target(self,state,browser):
+        if not state or not browser:return DEFAULT_RETURN
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT browser,target FROM login_destinations WHERE state=?',(digest(state),)).fetchone()
+            if not row or not hmac.compare_digest(row[0],digest(browser)):return DEFAULT_RETURN
+            db.execute('DELETE FROM login_destinations WHERE state=?',(digest(state),))
+            return safe_return_target(row[1])
     def finish(self,state,browser,code,post=line_post):
         if not state or not browser or not code:raise ValueError('登入已失效，請重新登入')
         with self.connect() as db:
