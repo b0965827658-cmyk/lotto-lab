@@ -16,6 +16,7 @@ COPY server.py lottery_registry.py line_social.py line_notifications.py marksix_
     tw539_evidence_runtime.py tw539_evidence_provenance.py \
     tw539_evidence_trigger.py tw539_evidence_cron.py ./
 COPY public ./public
+COPY line_chat.py ./
 COPY data ./data
 
 ENV HOST=0.0.0.0

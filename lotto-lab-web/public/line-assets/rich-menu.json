@@ -4,7 +4,7 @@
     "height": 1686
   },
   "selected": false,
-  "name": "摘星 Staging 五項選單草稿",
+  "name": "摘星聊天室五項選單草稿",
   "chatBarText": "彩種・紀錄・直播",
   "areas": [
     {
@@ -15,9 +15,9 @@
         "height": 562
       },
       "action": {
-        "type": "uri",
+        "type": "message",
         "label": "彩種",
-        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/start.html"
+        "text": "彩種"
       }
     },
     {
@@ -28,9 +28,9 @@
         "height": 562
       },
       "action": {
-        "type": "uri",
+        "type": "message",
         "label": "歷史紀錄",
-        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/member.html#history"
+        "text": "歷史紀錄"
       }
     },
     {
@@ -41,9 +41,9 @@
         "height": 562
       },
       "action": {
-        "type": "uri",
+        "type": "message",
         "label": "直播專區",
-        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/live.html"
+        "text": "直播專區"
       }
     },
     {
@@ -54,9 +54,9 @@
         "height": 562
       },
       "action": {
-        "type": "uri",
+        "type": "message",
         "label": "公開留言板",
-        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/community.html"
+        "text": "公開留言板"
       }
     },
     {
@@ -67,9 +67,9 @@
         "height": 562
       },
       "action": {
-        "type": "uri",
+        "type": "message",
         "label": "使用說明",
-        "uri": "https://lotto-lab-candidate-a-staging.onrender.com/help.html"
+        "text": "使用說明"
       }
     }
   ]

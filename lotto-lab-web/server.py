@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import community_http
+import line_chat
 
 import csv
 import hashlib
@@ -4968,12 +4969,12 @@ def line_signature_is_valid(body: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected, supplied)
 
 
-def line_reply(reply_token: str, text: str) -> None:
+def line_reply(reply_token: str, text: str | dict[str, Any]) -> None:
     """Reply once to a LINE message. A missing token is a configuration error, not a fallback."""
     if not LINE_CHANNEL_ACCESS_TOKEN:
         raise RuntimeError("LINE_CHANNEL_ACCESS_TOKEN 尚未設定")
     payload = json.dumps(
-        {"replyToken": reply_token, "messages": [{"type": "text", "text": text[:5000]}]},
+        {"replyToken": reply_token, "messages": [text if isinstance(text, dict) else {"type": "text", "text": text[:5000]}]},
         ensure_ascii=False,
     ).encode("utf-8")
     request = urllib.request.Request(
@@ -5323,6 +5324,55 @@ def line_latest_reply(game: str) -> str:
         return f"{LINE_GAME_NAMES.get(game, '彩券')}開獎資料驗證中，請稍後再試。"
 
 
+def line_history_reply(game: str) -> str:
+    if delivery_is_blocked(game):
+        return DELIVERY_BLOCKED_MESSAGE
+    try:
+        rows = marksix_official_history(limit=5) if game == "mark-six" else taiwan_official_history_recent(game, limit=5)
+        if not rows:
+            return "官方歷史資料目前無可用紀錄，請稍後再試。"
+        lines = [f"{LINE_GAME_NAMES[game]} 官方最近 {len(rows)} 期紀錄"]
+        for row in rows:
+            numbers = "、".join(f"{int(number):02d}" for number in row["numbers"])
+            if row.get("bonus"):
+                numbers += " + " + "、".join(f"{int(number):02d}" for number in row["bonus"])
+            lines.append(f"{row['date']}｜{numbers}")
+        return "\n".join(lines)
+    except Exception:
+        return "官方歷史資料驗證中，請稍後再試。"
+
+
+def line_chat_enabled() -> bool:
+    # Deploying a review build must not change responses to real friends.
+    return (os.environ.get("LINE_CHAT_COMMANDS_ENABLED") == "1" and fantasy5_official_trial_enabled()
+            and line_notification_persistent_mount_is_verified(LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT))
+
+
+def line_chat_preview(text, member, store):
+    result = line_chat.reply(text, member=member, direct=bool(member),
+                             latest=line_latest_reply, history=line_history_reply, store=store)
+    return {"preview": True, "lineEnabled": line_chat_enabled(), "message": result or line_chat.message("這是唯讀預覽。輸入「使用說明」查看聊天室指令。")}
+
+
+def line_event_reply(event):
+    if line_chat_enabled() and event.get("type") == "message":
+        content = event.get("message")
+        if isinstance(content, dict) and content.get("type") == "text":
+            source = event.get("source") if isinstance(event.get("source"), dict) else {}
+            direct = source.get("type") == "user" and not source.get("groupId") and not source.get("roomId")
+            member = source.get("userId", "") if direct else ""
+            if not isinstance(member, str):
+                member = ""
+            # Both existing LINE channels belong to Provider 2005504794; its
+            # webhook userId matches the verified OIDC sub stored as member.
+            store = community_http.CommunityStore(community_http.ROOT / "community.sqlite3")
+            result = line_chat.reply(content.get("text", ""), member=member, direct=direct,
+                                     latest=line_latest_reply, history=line_history_reply, store=store)
+            if result is not None:
+                return result
+    return line_message_reply(event)
+
+
 def line_message_reply(event: dict[str, Any]) -> str | None:
     """Return an allowlisted, non-predictive reply for a LINE text-message event."""
     if event.get("type") != "message" or event.get("message", {}).get("type") != "text":
@@ -5377,24 +5427,7 @@ def line_message_reply(event: dict[str, Any]) -> str | None:
         game = LINE_GAME_COMMAND_ALIASES.get(" ".join(parts[1:]))
         if not game:
             return "格式：歷史 彩種，例如：歷史 威力彩"
-        if delivery_is_blocked(game):
-            return DELIVERY_BLOCKED_MESSAGE
-        try:
-            if game == "mark-six":
-                rows = marksix_official_history(limit=5)
-                game_name = "六合彩"
-            else:
-                rows = taiwan_official_history_recent(game, limit=5)
-                game_name = TAIWAN_LINE_LATEST_GAMES[game]["name"]
-            lines = [f"{game_name} 官方最近 {len(rows)} 期紀錄"]
-            for row in rows:
-                numbers = "、".join(f"{int(number):02d}" for number in row["numbers"])
-                if row["bonus"]:
-                    numbers += " + " + "、".join(f"{int(number):02d}" for number in row["bonus"])
-                lines.append(f"{row['date']}｜{numbers}")
-            return "\n".join(lines)
-        except Exception:
-            return "官方歷史資料驗證中，請稍後再試。"
+        return line_history_reply(game)
     if text in {"系統", "系統狀態", "status"}:
         return "摘星引擎目前已連線。\n開獎資料會先完成驗證，再提供可用資訊。"
     if text in {"幫助", "help", "開始", "start"}:
@@ -5468,7 +5501,7 @@ class Handler(SimpleHTTPRequestHandler):
         return community_http.handle(self, method,
             fantasy5_official_trial_enabled(),
             line_notification_persistent_mount_is_verified(LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT),
-            LINE_ADMIN_USER_IDS,community_sync_results)
+            LINE_ADMIN_USER_IDS,community_sync_results,chat_preview=line_chat_preview)
 
     def do_GET(self):
         if (self.path.startswith('/api/community/') or self.path.startswith('/auth/line/')) and self.community_request('GET'):
@@ -5679,6 +5712,8 @@ class Handler(SimpleHTTPRequestHandler):
                     if not isinstance(event, dict):
                         continue
                     event_id = str(event.get("webhookEventId", "")).strip()
+                    if line_chat_enabled() and not line_chat.claim_event(community_http.ROOT / "line_chat_events.sqlite3", event_id):
+                        continue
                     if not LINE_NOTIFICATION_STORE.record_webhook_event(event_id):
                         continue
                     source = event.get("source", {}) if isinstance(event.get("source"), dict) else {}
@@ -5688,7 +5723,7 @@ class Handler(SimpleHTTPRequestHandler):
                     elif event.get("type") == "unfollow":
                         LINE_NOTIFICATION_STORE.unfollow(event_user_id)
                     reply_token = str(event.get("replyToken", "")).strip()
-                    reply_text = line_message_reply(event)
+                    reply_text = line_event_reply(event)
                     if reply_token and reply_text and LINE_CHANNEL_ACCESS_TOKEN:
                         try:
                             line_reply(reply_token, reply_text)

@@ -1,17 +1,16 @@
 <!doctype html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>摘星｜LINE 功能選單預覽</title><link rel="stylesheet" href="/line-entry.css"></head>
-<body><header class="shell"><a class="brand" href="/start.html">摘星 <span>開獎與交流</span></a><span class="badge">STAGING 測試版</span></header>
-<main class="shell"><section class="intro"><p class="eyebrow">LINE 官方帳號 · 選單預覽</p><h1>想看的資訊，<br>從這裡開始。</h1><p class="lead">查彩種、看歷史紀錄、追開獎直播。<br>五個入口，連到你需要的功能。</p><p class="draft">這是可點擊的網站預覽，尚未設定到 LINE 官方帳號。</p></section>
-<section aria-label="五項功能選單" class="menu-preview">
-<img src="/line-assets/rich-menu.png?v=5" width="2500" height="1686" alt="摘星五項圖文選單：彩種、歷史紀錄、直播專區、公開留言板、使用說明">
-<nav class="menu-hits" aria-label="選單入口">
-<a href="/start.html" aria-label="彩種：選擇彩種並查詢開獎"><span class="sr-only">彩種：選擇彩種並查詢開獎</span></a>
-<a href="/member.html#history" aria-label="歷史紀錄：登入查看自己的紀錄"><span class="sr-only">歷史紀錄：登入查看自己的紀錄</span></a>
-<a href="/live.html" aria-label="直播專區：台彩直播與港彩直播"><span class="sr-only">直播專區：台彩直播與港彩直播</span></a>
-<a href="/community.html" aria-label="公開留言板：分享與回覆"><span class="sr-only">公開留言板：分享與回覆</span></a>
-<a href="/help.html" aria-label="使用說明：來源與會員資訊"><span class="sr-only">使用說明：來源與會員資訊</span></a>
-</nav></section>
-<div class="columns"><section class="card"><p class="eyebrow">加入後的第一句話</p><h2>歡迎訊息草稿</h2><p class="welcome">歡迎來到摘星。從「彩種」查詢開獎，從「歷史紀錄」查看自己的投稿紀錄，也可進入「直播專區」選擇台彩直播或港彩直播，或到「公開留言板」交流。查詢時請核對彩種、開獎日期與資料來源；直播依節目安排及平台地區限制提供。登入並設定公開暱稱後即可參與留言。</p><p class="muted">文案尚未設定或發送。登入不會自動加入好友或訂閱推播。</p></section>
-<section class="card"><p class="eyebrow">準備好，才發布</p><h2>選單素材</h2><p>選單圖片及點擊設定已整理為草稿，可下載檢視。這些連結都前往目前的測試網站。</p><div class="downloads"><a href="/line-assets/rich-menu.png" download>下載選單圖片 PNG ↗</a><a href="/line-assets/rich-menu.json" download>下載點擊設定 JSON ↗</a><a href="/line-assets/welcome.txt" download>下載歡迎文案 TXT ↗</a></div><p class="muted">發布前還需完成 LINE 帳號核對、一般會員登入及手機內建瀏覽器驗收。</p></section></div>
-<p class="source-note">今彩539採台灣彩券官方來源；加州天天樂採Stepzero第三方資料，尚未經California Lottery官方核實。請以彩種所在地的開獎日期核對。</p></main>
-<footer class="shell"><span>摘星 · 先核對，再交流。</span><a href="/help.html">使用說明</a><a href="/start.html">回開獎查詢</a></footer></body></html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>摘星｜聊天室指令預覽</title><link rel="stylesheet" href="/line-entry.css"><link rel="stylesheet" href="/line-chat-preview.css"><script src="/line-chat-preview.js" defer></script></head>
+<body><header class="shell"><span class="brand">摘星 <span>聊天室指令</span></span><span class="badge">STAGING 預覽</span></header>
+<main class="shell"><section class="intro"><p class="eyebrow">LINE 官方帳號 · 聊天室版</p><h1>打什麼指令，<br>就回什麼資訊。</h1><p class="lead">查彩種、讀紀錄、看留言，都在聊天室回覆。<br>直播按鈕直接開啟播放平台。</p><p class="draft" id="mode">這是聊天室功能的驗收預覽，不會傳送任何 LINE 訊息。實際選單及新版回覆尚未啟用。</p></section>
+<section class="chat-layout"><div><section aria-label="五項功能選單" class="menu-preview">
+<img src="/line-assets/rich-menu.png?v=chat1" width="2500" height="1686" alt="五項指令：彩種、歷史紀錄、直播專區、公開留言板、使用說明">
+<nav class="menu-hits" aria-label="選單指令">
+<button type="button" data-command="彩種" aria-label="彩種"><span class="sr-only">彩種</span></button>
+<button type="button" data-command="歷史紀錄" aria-label="歷史紀錄"><span class="sr-only">歷史紀錄</span></button>
+<button type="button" data-command="直播專區" aria-label="直播專區"><span class="sr-only">直播專區</span></button>
+<button type="button" data-command="公開留言板" aria-label="公開留言板"><span class="sr-only">公開留言板</span></button>
+<button type="button" data-command="使用說明" aria-label="使用說明"><span class="sr-only">使用說明</span></button>
+</nav></section><p class="muted">點選上方圖文選單會帶入指令，下方會顯示與新回覆程式相同的內容。預覽的「我的紀錄」僅使用目前網站登入的本人帳號，不接受他人 ID。</p></div>
+<section class="chat" aria-label="聊天室預覽"><div class="chat-heading">摘星 · 對話預覽 <span>不會發送到 LINE</span></div><div id="conversation" role="log" aria-live="polite"></div><div id="quick-replies" class="quick-replies" aria-label="下一步指令"></div><form id="command-form"><label class="sr-only" for="command">輸入指令</label><input id="command" maxlength="300" autocomplete="off" placeholder="輸入 539、歷史紀錄、直播…"><button id="send" type="submit">預覽</button></form></section></section>
+<div class="columns"><section class="card"><p class="eyebrow">加入後的第一句話</p><h2>歡迎訊息草稿</h2><p id="welcome">載入中…</p><p class="muted">尚未套用或發送。新版聊天室不會替一般會員開啟推播。</p></section><section class="card"><h2>聊天室選單素材</h2><p>五項按鈕均改為傳送指令；不再以本站網頁作為選單動作。直播回覆中另外提供播放平台連結。</p><div class="downloads"><a href="/line-assets/rich-menu.png" download>下載選單圖片 PNG</a><a href="/line-assets/rich-menu.json" download>下載指令設定 JSON</a><a href="/line-assets/welcome.txt" download>下載歡迎文案 TXT</a></div><p class="muted">目前可驗收查詢與閱讀；聊天室發文／回覆、第三方天天樂直接回覆尚未開放。</p></section></div></main>
+<footer class="shell"><span>摘星 · 聊天室功能驗收</span><a href="/help.html">網站使用說明</a></footer></body></html>

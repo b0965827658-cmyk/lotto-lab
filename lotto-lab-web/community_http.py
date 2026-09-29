@@ -32,7 +32,7 @@ def default_date():
     while day.weekday()==6:day+=timedelta(days=1)
     return day.isoformat()
 
-def handle(handler,method,enabled,mounted,admins,sync_results=None):
+def handle(handler,method,enabled,mounted,admins,sync_results=None,chat_preview=None):
     parsed=urlparse(handler.path);path=parsed.path
     if not (path.startswith('/api/community/') or path.startswith('/auth/line/')):return False
     def reply(data,status=200,headers=None):handler.send_json(data,status=status,extra_headers=headers)
@@ -62,6 +62,13 @@ def handle(handler,method,enabled,mounted,admins,sync_results=None):
         return values[0]
     try:
         if method=='GET':
+            if path=='/api/community/chat-preview':
+                text=param('text','使用說明')
+                if len(text)>300:raise ValueError('指令過長')
+                if not chat_preview:reply({'error':'預覽尚未啟用'},503);return True
+                # Only the verified session identifies the caller; URL/body
+                # identities and legacy commands never enter LINE transport.
+                reply(chat_preview(text,member,store));return True
             if path=='/auth/line/callback':
                 return_to=login.take_return_target(param('state'),cookie(handler.headers,FLOW))
             if path in ('/api/community/history','/api/community/leaderboard'):
