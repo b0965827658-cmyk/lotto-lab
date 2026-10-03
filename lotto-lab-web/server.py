@@ -42,6 +42,7 @@ from line_notifications import DEFAULT_GAMES, LineNotificationStore
 import california_fantasy5_official as california_fantasy5
 import fantasy5_stepzero
 import fantasy5_lotteryusa
+import draw_sync
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -155,6 +156,9 @@ AUTO_NOTIFY_GAMES = [
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "").strip()
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
 LINE_FANTASY5_THIRD_PARTY_ENABLED = os.environ.get("LINE_FANTASY5_THIRD_PARTY_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+DRAW_SYNC_ENABLED = os.environ.get("LOTTO_DRAW_SYNC_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+DRAW_SYNC_ACTIVE_SECONDS = int(os.environ.get("LOTTO_DRAW_SYNC_ACTIVE_SECONDS", "30"))
+DRAW_SYNC_IDLE_SECONDS = int(os.environ.get("LOTTO_DRAW_SYNC_IDLE_SECONDS", "900"))
 LINE_ADMIN_USER_IDS = {
     value.strip()
     for value in os.environ.get("LINE_ADMIN_USER_IDS", "").split(",")
@@ -189,6 +193,7 @@ LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT = Path("/var/data/lotto-lab")
 LINE_NOTIFICATION_SERVICE_ID = os.environ.get("RENDER_SERVICE_ID", "").strip()
 LINE_NOTIFICATION_PERSISTENT_ROOT = Path(os.environ.get("LINE_NOTIFICATION_PERSISTENT_ROOT", str(LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT)))
 LINE_NOTIFICATION_FILE = Path(os.environ.get("LINE_NOTIFICATION_FILE", PERSISTENT_DATA / "line_notifications_staging.sqlite3"))
+DRAW_SYNC_FILE = Path(os.environ.get("LOTTO_DRAW_SYNC_FILE", PERSISTENT_DATA / "draw_sync_staging.sqlite3"))
 
 
 def line_notification_persistent_mount_is_verified(persistent_root: Path) -> bool:
@@ -5218,6 +5223,23 @@ def line_notification_loop() -> None:
         time.sleep(line_notification_poll_seconds())
 
 
+def draw_sync_fetchers() -> dict[str, Any]:
+    """Validated source adapters only; none of these functions can send a message."""
+    fetchers = {game: (lambda game=game: taiwan_line_latest(game)) for game in TAIWAN_LINE_LATEST_GAMES}
+    fetchers["mark-six"] = marksix_latest
+
+    def fantasy5_latest():
+        result = fantasy5_lotteryusa.feed.lookup(
+            DRAW_SYNC_FILE.with_name("fantasy5_lotteryusa_staging.sqlite3")
+        )
+        if not result.get("ok"):
+            raise ValueError(result.get("error") or "天天樂第三方資料無法核對")
+        return result["latest"]
+
+    fetchers["ca-fantasy5"] = fantasy5_latest
+    return fetchers
+
+
 def line_admin_reply(text: str) -> str:
     """Read and adjust only the Staging notification controls for allowlisted admins."""
     parts = text.split()
@@ -5540,7 +5562,13 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path.startswith("/prediction/") and self.reject_if_rate_limited("/prediction"):
             return
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "service": "lotto-lab", "time": datetime.now().isoformat(timespec="seconds")})
+            payload = {"ok": True, "service": "lotto-lab", "time": datetime.now().isoformat(timespec="seconds")}
+            if DRAW_SYNC_ENABLED:
+                try:
+                    payload["drawSync"] = {"enabled": True, "games": draw_sync.DrawSyncStore(DRAW_SYNC_FILE).status()}
+                except Exception:
+                    payload["drawSync"] = {"enabled": True, "error": "status unavailable"}
+            self.send_json(payload)
             return
         if parsed.path.startswith("/api/analyze/status/"):
             job_id = unquote(parsed.path.rsplit("/", 1)[-1]).strip()
@@ -5926,6 +5954,18 @@ def main():
         print(f"LINE staging notification worker enabled every {LINE_NOTIFICATION_LOOP_INTERVAL_SECONDS}s")
     elif LINE_NOTIFICATION_REQUESTED:
         print(f"LINE staging notification worker remains disabled: {LINE_NOTIFICATION_BLOCK_REASON}")
+    if DRAW_SYNC_ENABLED:
+        if not fantasy5_official_trial_enabled() or not line_notification_persistent_mount_is_verified(LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT):
+            print("draw sync remains disabled: Staging service or persistent disk guard failed")
+        else:
+            draw_store = draw_sync.DrawSyncStore(DRAW_SYNC_FILE)
+            threading.Thread(
+                target=draw_sync.daemon_loop,
+                kwargs={"store": draw_store, "fetchers": draw_sync_fetchers(),
+                        "active_seconds": DRAW_SYNC_ACTIVE_SECONDS, "idle_seconds": DRAW_SYNC_IDLE_SECONDS},
+                name="draw-sync-staging", daemon=True,
+            ).start()
+            print(f"draw sync enabled: {DRAW_SYNC_ACTIVE_SECONDS}s active, {DRAW_SYNC_IDLE_SECONDS}s idle; notifications unchanged")
     print(f"摘星引擎 running at http://{host}:{port}")
     server.serve_forever()
 
