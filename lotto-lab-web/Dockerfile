@@ -14,8 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py lottery_registry.py line_social.py line_notifications.py marksix_official.py taiwan_official_history.py analysis_v2.py prediction_journal_v3.py operations_v11.py \
     tw539_evidence_runtime.py tw539_evidence_provenance.py \
-    tw539_evidence_trigger.py tw539_evidence_cron.py ./
+    tw539_evidence_trigger.py tw539_evidence_cron.py fantasy5_lotteryusa.py draw_sync.py ./
 COPY public ./public
+COPY line_chat.py ./
 COPY data ./data
 
 ENV HOST=0.0.0.0

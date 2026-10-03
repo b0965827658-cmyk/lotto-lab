@@ -1,4 +1,4 @@
-const CACHE_NAME = "lotto-lab-v83-branding";
+const CACHE_NAME = "lotto-lab-v84-community-auth";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -27,7 +27,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith("/api/")) {
+  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) {
     event.respondWith(fetch(event.request));
     return;
   }

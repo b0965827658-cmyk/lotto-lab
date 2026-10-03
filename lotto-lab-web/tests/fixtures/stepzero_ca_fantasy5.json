@@ -1,0 +1,121 @@
+{
+  "provenance": {
+    "provider": "Stepzero (third party)",
+    "fetchedAt": "2026-09-27T10:02:36.354385+00:00",
+    "latestUrl": "https://lotteryanalytics.app/api/v1/games/CA-FANTASY5/latest",
+    "historyUrl": "https://lotteryanalytics.app/api/v1/games/CA-FANTASY5/draws?limit=10",
+    "officialVerified": false
+  },
+  "latest": {
+    "game_id": "CA-FANTASY5",
+    "latest_draw": {
+      "draw_id": "25125087",
+      "draw_date": "2026-09-26T00:00:00.000Z",
+      "draw_time": "E",
+      "result": "01 06 07 11 26",
+      "add_ons": null,
+      "updated_at": null
+    },
+    "meta": {
+      "config_start_date": "1992-02-04",
+      "config_end_date": null,
+      "total_draws": 11932
+    },
+    "ai_access": "key-required",
+    "auth_required": true,
+    "privacy": "no user data"
+  },
+  "history": {
+    "game": {
+      "game_id": "CA-FANTASY5",
+      "jurisdiction_code": "CA",
+      "jurisdiction_name": "California",
+      "game_code": "FANTASY5",
+      "game_type": "pick_balls",
+      "name": "Fantasy 5",
+      "slug": "ca-fantasy-5",
+      "metadata_schema_version": 1
+    },
+    "filters": {
+      "from": null,
+      "to": null,
+      "limit": 10
+    },
+    "count": 10,
+    "data": [
+      {
+        "draw_id": "25125087",
+        "draw_date": "2026-09-26T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "01 06 07 11 26",
+        "add_ons": null
+      },
+      {
+        "draw_id": "25122222",
+        "draw_date": "2026-09-25T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "06 15 22 33 36",
+        "add_ons": null
+      },
+      {
+        "draw_id": "25119360",
+        "draw_date": "2026-09-24T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "12 15 17 29 31",
+        "add_ons": null
+      },
+      {
+        "draw_id": "25116457",
+        "draw_date": "2026-09-23T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "05 11 12 19 38",
+        "add_ons": null
+      },
+      {
+        "draw_id": "25113588",
+        "draw_date": "2026-09-22T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "04 05 25 27 36",
+        "add_ons": null
+      },
+      {
+        "draw_id": "25110679",
+        "draw_date": "2026-09-21T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "03 05 13 20 36",
+        "add_ons": null
+      },
+      {
+        "draw_id": "25107875",
+        "draw_date": "2026-09-20T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "01 08 10 19 21",
+        "add_ons": null
+      },
+      {
+        "draw_id": "25104984",
+        "draw_date": "2026-09-19T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "01 13 19 27 37",
+        "add_ons": null
+      },
+      {
+        "draw_id": "25102109",
+        "draw_date": "2026-09-18T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "19 29 33 37 39",
+        "add_ons": null
+      },
+      {
+        "draw_id": "25099281",
+        "draw_date": "2026-09-17T00:00:00.000Z",
+        "draw_time": "E",
+        "result": "03 09 11 16 19",
+        "add_ons": null
+      }
+    ],
+    "ai_access": "key-required",
+    "auth_required": true,
+    "privacy": "no user data"
+  }
+}
