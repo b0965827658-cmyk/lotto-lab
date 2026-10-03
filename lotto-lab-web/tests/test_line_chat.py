@@ -54,11 +54,43 @@ def test_command_navigation_stays_in_chat_except_broadcast_links(store):
     assert 'mytvsuper.com' in broadcast['text']
 
 
-@pytest.mark.parametrize('command', ['天天樂', '最新 加州天天樂', '歷史 天天樂', '歷史紀錄 fantasy5'])
-def test_fantasy5_never_reads_numbers_or_unlocks_other_paths(store, monkeypatch, command):
+@pytest.mark.parametrize('command', ['歷史 天天樂', '歷史紀錄 fantasy5'])
+def test_fantasy5_history_never_reads_numbers_or_unlocks_other_paths(store, monkeypatch, command):
     monkeypatch.setattr(server, 'line_latest_reply', lambda game: pytest.fail('blocked source fetched'))
     monkeypatch.setattr(server, 'line_history_reply', lambda game: pytest.fail('blocked history fetched'))
     assert response(store, command)['text'] == line_chat.PENDING
+    assert server.delivery_is_blocked('ca-fantasy5')
+
+
+@pytest.mark.parametrize('command', ['天天樂', '最新 加州天天樂'])
+def test_fantasy5_latest_defaults_to_blocked(tmp_path, monkeypatch, command):
+    store = CommunityStore(tmp_path / 'community.sqlite3')
+    monkeypatch.setattr(server, 'fantasy5_line_third_party_enabled', lambda: False)
+    monkeypatch.setattr(server.fantasy5_lotteryusa.feed, 'lookup', lambda path: pytest.fail('third-party source fetched'))
+    result = line_chat.reply(command, store=store, latest=server.line_latest_reply,
+                             history=lambda game: pytest.fail('history fetched'))
+    assert result['text'] == server.DELIVERY_BLOCKED_MESSAGE
+
+
+def test_fantasy5_latest_can_be_explicitly_attributed_without_unlocking_history_or_push(tmp_path, monkeypatch):
+    store = CommunityStore(tmp_path / 'community.sqlite3')
+    monkeypatch.setattr(server, 'fantasy5_line_third_party_enabled', lambda: True)
+    monkeypatch.setattr(server.fantasy5_lotteryusa.feed, 'lookup', lambda path: {
+        'ok': True,
+        'latest': {
+            'date': '2026-10-02',
+            'numbers': [1, 6, 7, 11, 26],
+            'sourceUrl': 'https://www.lotteryusa.com/california/fantasy-5/year',
+        },
+    })
+    latest = line_chat.reply('天天樂', store=store, latest=server.line_latest_reply,
+                             history=lambda game: pytest.fail('history must remain blocked'))
+    assert '01、06、07、11、26' in latest['text']
+    assert '第三方，未經官方核實' in latest['text']
+    assert '歷史、模型、推薦與推播仍未啟用' in latest['text']
+    history = line_chat.reply('歷史 天天樂', store=store, latest=server.line_latest_reply,
+                              history=lambda game: pytest.fail('history must remain blocked'))
+    assert history['text'] == line_chat.PENDING
     assert server.delivery_is_blocked('ca-fantasy5')
 
 

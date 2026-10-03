@@ -41,6 +41,7 @@ from taiwan_official_history import TAIWAN_LOTTERY_BASE, SPECS as TAIWAN_HISTORY
 from line_notifications import DEFAULT_GAMES, LineNotificationStore
 import california_fantasy5_official as california_fantasy5
 import fantasy5_stepzero
+import fantasy5_lotteryusa
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -153,6 +154,7 @@ AUTO_NOTIFY_GAMES = [
 ]
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "").strip()
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+LINE_FANTASY5_THIRD_PARTY_ENABLED = os.environ.get("LINE_FANTASY5_THIRD_PARTY_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
 LINE_ADMIN_USER_IDS = {
     value.strip()
     for value in os.environ.get("LINE_ADMIN_USER_IDS", "").split(",")
@@ -441,6 +443,13 @@ def fantasy5_official_trial_enabled() -> bool:
     """Only the explicitly named Staging service may try the official query."""
     return (LINE_NOTIFICATION_RUNTIME == "staging"
             and LINE_NOTIFICATION_SERVICE_ID == LINE_NOTIFICATION_STAGING_SERVICE_ID)
+
+
+def fantasy5_line_third_party_enabled() -> bool:
+    """Allow an attributed latest-only reply on the pinned persistent Staging service."""
+    return (LINE_FANTASY5_THIRD_PARTY_ENABLED
+            and fantasy5_official_trial_enabled()
+            and line_notification_persistent_mount_is_verified(LINE_NOTIFICATION_STAGING_PERSISTENT_ROOT))
 
 
 def fantasy5_official_trial_payload() -> dict[str, Any]:
@@ -5302,6 +5311,25 @@ LINE_GAME_NAMES = {
 
 def line_latest_reply(game: str) -> str:
     """Return a latest-result reply only after the official adapter validates it."""
+    if game == "ca-fantasy5":
+        if not fantasy5_line_third_party_enabled():
+            return DELIVERY_BLOCKED_MESSAGE
+        try:
+            result = fantasy5_lotteryusa.feed.lookup(PERSISTENT_DATA / "fantasy5_lotteryusa_staging.sqlite3")
+            if not result.get("ok"):
+                return "加州天天樂第三方資料暫時無法核對，請稍後再試。"
+            latest = result["latest"]
+            numbers = "、".join(f"{int(number):02d}" for number in latest["numbers"])
+            return (
+                "加州天天樂 Fantasy 5 最近一期\n"
+                f"日期：{latest['date']}\n"
+                f"號碼：{numbers}\n"
+                "資料來源：LotteryUSA（第三方，未經官方核實）\n"
+                f"來源頁：{latest['sourceUrl']}\n"
+                "僅提供最近一期；歷史、模型、推薦與推播仍未啟用。"
+            )
+        except Exception:
+            return "加州天天樂第三方資料暫時無法核對，請稍後再試。"
     if delivery_is_blocked(game):
         return DELIVERY_BLOCKED_MESSAGE
     try:

@@ -16,7 +16,7 @@ LIVE = {
     '台彩直播': 'https://www.youtube.com/@48ilottery48/streams',
     '港彩直播': 'https://www.mytvsuper.com/tc/live/82/TVB-Plus/',
 }
-PENDING = '加州天天樂聊天室查詢尚未開放。網站已有 Stepzero 第三方查詢，尚未經官方核實；聊天室歷史、模型與推播仍未啟用。'
+PENDING = '加州天天樂的聊天室歷史、模型與推播尚未開放。最近一期僅可在指定 Staging 顯示 LotteryUSA 第三方資料，且未經官方核實。'
 
 
 def claim_event(path, event_id):
@@ -64,9 +64,10 @@ def reply(text, *, member='', direct=False, latest, history, store):
                        '我的紀錄：本人投稿與已核對命中結果\n'
                        '直播：台彩／港彩播放入口\n公開留言板：閱讀網站公開留言\n'
                        '目前聊天室留言板提供閱讀；此處輸入一般文字不會公開發文。\n'
+                       '天天樂最近一期若有顯示，會明確標示第三方且未經官方核實。\n'
                        '查詢不會替你開啟通知；資料以回覆的日期與來源為準。')
     if text in {'彩種', '彩券', '遊戲'}:
-        return message('選擇彩種即可在聊天室查詢。\n台彩／港彩採官方資料；天天樂聊天室查詢尚未開放。', GAMES)
+        return message('選擇彩種即可在聊天室查詢。\n台彩／港彩採官方資料；天天樂最近一期若有顯示，採 LotteryUSA 第三方資料並標示未經官方核實。', GAMES)
     if text in {'歷史紀錄', '紀錄', '歷史'}:
         return message('要查看哪一種紀錄？\n「我的紀錄」是本人投稿；「歷史 539」等指令查官方開獎。',
                        ('我的紀錄', '歷史 539', '歷史 威力彩', '歷史 大樂透', '歷史六合彩', '選單'))
@@ -131,7 +132,12 @@ def reply(text, *, member='', direct=False, latest, history, store):
         game = 'tw539'
     if game:
         if game == 'ca-fantasy5':
-            return message(PENDING, ('彩種', '選單'))
+            if is_history:
+                return message(PENDING, ('彩種', '選單'))
+            try:
+                return message(latest(game), ('彩種', '選單'))
+            except Exception:
+                return message('加州天天樂第三方資料暫時無法核對，請稍後再試。', ('彩種', '選單'))
         try:
             result = history(game) if is_history else latest(game)
             return message(result, (('開獎歷史', '歷史 ' + next(k for k in GAMES if ALIASES[k] == game)), '彩種', '選單'))
