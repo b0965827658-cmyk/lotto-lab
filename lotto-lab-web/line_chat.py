@@ -15,6 +15,7 @@ ALIASES.update({'今彩539': 'tw539', 'tw539': 'tw539', '加州天天樂': 'ca-f
 LIVE = {
     '台彩直播': 'https://www.youtube.com/@48ilottery48/streams',
     '港彩直播': 'https://www.mytvsuper.com/tc/live/82/TVB-Plus/',
+    '天天樂直播': 'https://www.calottery.com/zh-tw/draw-games/fantasy-5',
 }
 PENDING = '加州天天樂的聊天室歷史、模型與推播尚未開放。最近一期僅可在指定 Staging 顯示 LotteryUSA 第三方資料，且未經官方核實。'
 
@@ -73,11 +74,16 @@ def reply(text, *, member='', direct=False, latest, history, store):
                        ('我的紀錄', '歷史 539', '歷史 威力彩', '歷史 大樂透', '歷史六合彩', '選單'))
     if text == '歷史六合彩':
         text = '歷史 六合彩'
-    if text in {'直播', '直播專區', '台彩直播', '港彩直播'}:
+    if text in {'直播', '直播專區', '台彩直播', '港彩直播', '天天樂直播'}:
         choices = tuple(LIVE.items()) if text not in LIVE else ((text, LIVE[text]),)
         lines = ['直播專區｜依節目安排播出，入口不代表目前正在開獎。']
         for label, url in choices:
-            lines.append(label + ('（僅香港／澳門地區；其他地區可能無法播放）' if label == '港彩直播' else '（全民 i 彩券官方頻道）'))
+            note = {
+                '台彩直播': '（全民 i 彩券官方頻道）',
+                '港彩直播': '（僅香港／澳門地區；其他地區可能無法播放）',
+                '天天樂直播': '（加州官方即時開獎頁；目前無穩定逐期直播）',
+            }[label]
+            lines.append(label + note)
             lines.append(url)
         return message('\n'.join(lines), ('選單',), choices)
     if text.startswith(('我的紀錄', '本人紀錄')):
