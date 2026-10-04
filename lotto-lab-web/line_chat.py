@@ -15,7 +15,7 @@ ALIASES.update({'今彩539': 'tw539', 'tw539': 'tw539', '加州天天樂': 'ca-f
 LIVE = {
     '台彩直播': 'https://www.youtube.com/@48ilottery48/streams',
     '港彩直播': 'https://www.mytvsuper.com/tc/live/82/TVB-Plus/',
-    '天天樂直播': 'https://www.calottery.com/zh-tw/draw-games/fantasy-5',
+    '天天樂直播': 'https://lotto-lab-candidate-a-staging.onrender.com/fantasy5-live.html',
 }
 PENDING = '加州天天樂的聊天室歷史、模型與推播尚未開放。最近一期僅可在指定 Staging 顯示 LotteryUSA 第三方資料，且未經官方核實。'
 

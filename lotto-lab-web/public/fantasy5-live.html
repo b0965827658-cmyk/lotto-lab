@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <title>摘星｜加州天天樂</title>
+  <link rel="stylesheet" href="/line-entry.css">
+  <style>
+    .status-card{background:#fff;border:1px solid #dce5f2;border-radius:20px;padding:24px;box-shadow:0 12px 34px rgba(8,34,78,.09)}
+    .numbers{display:flex;flex-wrap:wrap;gap:12px;margin:22px 0;padding:0;list-style:none}
+    .numbers li{display:grid;place-items:center;width:54px;height:54px;border-radius:50%;background:#12478d;color:#fff;font-size:1.3rem;font-weight:800;border:3px solid #f5c451}
+    .state{font-weight:700;color:#123b70}.state.error{color:#9b341f}.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:20px}
+    .actions a,.actions button{border:0;border-radius:999px;padding:12px 18px;font:inherit;font-weight:700;text-decoration:none;cursor:pointer}
+    .primary{background:#12478d;color:#fff}.secondary{background:#edf3fb;color:#123b70}.meta{color:#60758f;line-height:1.7}
+  </style>
+</head>
+<body>
+  <header class="shell"><a class="brand" href="/line-menu.html">摘星 <span>開獎與交流</span></a><span class="badge">官方資料</span></header>
+  <main class="shell">
+    <section class="intro"><p class="eyebrow">California Fantasy 5</p><h1>加州天天樂</h1><p class="lead">在 LINE 內查看官方最新開獎；可靠直播來源上線後會直接顯示在這裡。</p></section>
+    <section class="status-card" aria-live="polite">
+      <p id="status" class="state">正在查詢 California Lottery…</p>
+      <div id="result" hidden>
+        <p id="draw-meta" class="meta"></p>
+        <ol id="numbers" class="numbers" aria-label="最新開獎號碼"></ol>
+        <p id="updated" class="meta"></p>
+      </div>
+      <div class="actions">
+        <button id="retry" class="primary" type="button">重新整理</button>
+        <a class="secondary" href="https://www.calottery.com/zh-tw/draw-games/fantasy-5" target="_blank" rel="noopener noreferrer">官方開獎頁 ↗</a>
+      </div>
+    </section>
+  </main>
+  <footer class="shell"><span>摘星 · 加州天天樂</span><a href="/live.html">直播專區</a><a href="/line-menu.html">功能選單</a></footer>
+  <script>
+    const statusEl=document.querySelector('#status'),resultEl=document.querySelector('#result'),numbersEl=document.querySelector('#numbers');
+    function valuesOf(draw){return draw?.numbers||draw?.winningNumbers||draw?.winning_numbers||[]}
+    async function load(){
+      statusEl.className='state';statusEl.textContent='正在查詢 California Lottery…';resultEl.hidden=true;
+      try{
+        const response=await fetch('/api/latest?game=ca-fantasy5&source=official',{cache:'no-store'});
+        const payload=await response.json();
+        if(!response.ok||!payload.ok) throw new Error(payload.error||'官方資料暫時無法取得');
+        const draw=payload.latest||payload.draw||payload;
+        const numbers=valuesOf(draw);
+        if(!Array.isArray(numbers)||numbers.length!==5) throw new Error('官方號碼尚待核實');
+        numbersEl.replaceChildren(...numbers.map(value=>{const li=document.createElement('li');li.textContent=String(value).padStart(2,'0');return li}));
+        document.querySelector('#draw-meta').textContent=`${draw.date||draw.drawDate||'最新一期'}${draw.drawNumber||draw.draw_number?` · 第 ${draw.drawNumber||draw.draw_number} 期`:''}`;
+        document.querySelector('#updated').textContent=`資料更新：${payload.updatedAt||draw.fetchedAt||'剛剛'}｜來源：California Lottery`;
+        statusEl.textContent='官方最新開獎';resultEl.hidden=false;
+      }catch(error){statusEl.className='state error';statusEl.textContent=`${error.message}。可先使用下方官方開獎頁。`}
+    }
+    document.querySelector('#retry').addEventListener('click',load);load();
+  </script>
+</body>
+</html>
