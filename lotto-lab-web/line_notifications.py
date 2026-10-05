@@ -12,11 +12,15 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 
-DEFAULT_GAMES = ("tw539", "mark-six", "power-lottery", "lotto-649", "daily-3", "daily-4")
+DEFAULT_GAMES = ("tw539", "ca-fantasy5", "mark-six", "power-lottery", "lotto-649", "daily-3", "daily-4")
 GAME_ALIASES = {
     "539": "tw539",
     "今彩539": "tw539",
     "tw539": "tw539",
+    "加州天天樂": "ca-fantasy5",
+    "天天樂": "ca-fantasy5",
+    "fantasy5": "ca-fantasy5",
+    "fantasy 5": "ca-fantasy5",
     "六合彩": "mark-six",
     "威力彩": "power-lottery",
     "大樂透": "lotto-649",
@@ -25,6 +29,7 @@ GAME_ALIASES = {
 }
 GAME_LABELS = {
     "tw539": "今彩539",
+    "ca-fantasy5": "加州天天樂",
     "mark-six": "六合彩",
     "power-lottery": "威力彩",
     "lotto-649": "大樂透",
