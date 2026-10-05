@@ -91,7 +91,7 @@ def handle(handler,method,enabled,mounted,admins,sync_results=None,chat_preview=
                 reply({'reports':store.reports()});return True
             if path=='/api/community/board':
                 parent=param('parent')
-                rows=store.board_feed(member=member,before=int(param('before','0')),category=param('category'),parent_id=int(parent) if parent else None)
+                rows=store.board_feed(member=member,before=int(param('before','0')),category=param('category'),room=param('room','lobby'),parent_id=int(parent) if parent else None)
                 reply(dict(posts=rows,nextBefore=rows[-1]['id'] if len(rows)==30 else None));return True
             if path=='/api/community/feed':
                 day=param('date',default_date());before=int(param('before','0'))
@@ -130,7 +130,7 @@ def handle(handler,method,enabled,mounted,admins,sync_results=None,chat_preview=
                 text=body.get(key,'')
                 if isinstance(text,str) and re.search(r'https?://|www\.',text,re.I):raise ValueError('測試期間請勿張貼外部連結')
             if path=='/api/community/board':
-                reply(store.board_write(member,body.get('body'),body.get('requestKey'),title=body.get('title',''),category=body.get('category','chat'),parent_id=body.get('parentId')));return True
+                reply(store.board_write(member,body.get('body'),body.get('requestKey'),title=body.get('title',''),category=body.get('category','chat'),room=body.get('room','lobby'),parent_id=body.get('parentId')));return True
             if path=='/api/community/share':reply(store.share(member,body.get('drawDate',''),body.get('numbers'),body.get('reason')));return True
             if path=='/api/community/comment':
                 if type(body.get('pickId')) is not int:raise ValueError('投稿編號錯誤')

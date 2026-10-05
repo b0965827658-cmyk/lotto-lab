@@ -18,6 +18,7 @@ class ClosingConnection(sqlite3.Connection):
         finally:self.close()
 
 TAIPEI = ZoneInfo('Asia/Taipei')
+CHAT_ROOMS = ('lobby','tw539','power-lottery','lotto-649','mark-six','daily-3','daily-4','ca-fantasy5')
 
 
 def close_time(draw_date):
@@ -53,6 +54,7 @@ class CommunityStore:
             CREATE TABLE IF NOT EXISTS board_messages (
                 id INTEGER PRIMARY KEY, member TEXT NOT NULL, parent_id INTEGER,
                 title TEXT NOT NULL, category TEXT NOT NULL, body TEXT NOT NULL,
+                room TEXT NOT NULL DEFAULT 'lobby',
                 created_at TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0,
                 request_key TEXT NOT NULL, UNIQUE(member,request_key));
             CREATE INDEX IF NOT EXISTS board_parent ON board_messages(parent_id,id);
@@ -77,6 +79,10 @@ class CommunityStore:
                 id INTEGER PRIMARY KEY, pick_id INTEGER NOT NULL, member TEXT NOT NULL,
                 body TEXT NOT NULL, created_at TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0);
         ''')
+        columns={row[1] for row in db.execute('PRAGMA table_info(board_messages)')}
+        if 'room' not in columns:
+            db.execute("ALTER TABLE board_messages ADD COLUMN room TEXT NOT NULL DEFAULT 'lobby'")
+        db.execute('CREATE INDEX IF NOT EXISTS board_room_id ON board_messages(room,id)')
         return db
 
     def is_banned(self, member):
@@ -286,36 +292,41 @@ class CommunityStore:
             rows=db.execute('SELECT kind,target,reason,created_at FROM reports ORDER BY id DESC LIMIT 100').fetchall()
         return [dict(kind=r[0],id=r[1],reason=r[2],createdAt=r[3]) for r in rows]
 
-    def board_write(self, member, body, request_key, *, title='', category='chat', parent_id=None, now=None):
+    def board_write(self, member, body, request_key, *, title='', category='chat', room='lobby', parent_id=None, now=None):
         self.identity(member)
         if not self.alias(member):raise ValueError('請先設定公開暱稱')
         if not isinstance(body,str) or not 1<=len(body.strip())<=2000:raise ValueError('內容需為1–2000字')
         if not isinstance(title,str) or len(title.strip())>80:raise ValueError('標題最多80字')
         if category not in ('chat','numbers','question'):raise ValueError('分類錯誤')
+        if room not in CHAT_ROOMS:raise ValueError('聊天室錯誤')
         if not isinstance(request_key,str) or not re.fullmatch(r'[A-Za-z0-9-]{16,80}',request_key):raise ValueError('請重新載入頁面')
         if parent_id is not None and (type(parent_id) is not int or parent_id<=0):raise ValueError('主題編號錯誤')
         now=self.clock(now);body=body.strip();title=title.strip()
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            old=db.execute('SELECT id,body,title,category,parent_id FROM board_messages WHERE member=? AND request_key=?',(member,request_key)).fetchone()
+            old=db.execute('SELECT id,body,title,category,room,parent_id FROM board_messages WHERE member=? AND request_key=?',(member,request_key)).fetchone()
             if old:
-                if old[1:]!=(body,title,category,parent_id):raise ValueError('同一次送出內容已變更，請重新送出')
+                if old[1:]!=(body,title,category,room,parent_id):raise ValueError('同一次送出內容已變更，請重新送出')
                 return dict(id=old[0],changed=False)
-            if parent_id is not None and not db.execute('SELECT 1 FROM board_messages WHERE id=? AND parent_id IS NULL AND hidden=0',(parent_id,)).fetchone():raise ValueError('主題已隱藏或不存在')
+            if parent_id is not None:
+                parent=db.execute('SELECT room FROM board_messages WHERE id=? AND parent_id IS NULL AND hidden=0',(parent_id,)).fetchone()
+                if not parent:raise ValueError('主題已隱藏或不存在')
+                room=parent[0]
             previous=db.execute('SELECT created_at FROM board_messages WHERE member=? ORDER BY id DESC LIMIT 1',(member,)).fetchone()
             if previous and (now-datetime.fromisoformat(previous[0])).total_seconds()<30:raise ValueError('請等30秒再發言')
-            mid=db.execute('INSERT INTO board_messages(member,parent_id,title,category,body,created_at,request_key) VALUES(?,?,?,?,?,?,?)',(member,parent_id,title,category,body,now.isoformat(),request_key)).lastrowid
+            mid=db.execute('INSERT INTO board_messages(member,parent_id,title,category,body,room,created_at,request_key) VALUES(?,?,?,?,?,?,?,?)',(member,parent_id,title,category,body,room,now.isoformat(),request_key)).lastrowid
         return dict(id=mid,changed=True)
 
-    def board_feed(self, *, member='', before=0, category='', parent_id=None):
+    def board_feed(self, *, member='', before=0, category='', room='lobby', parent_id=None):
         if type(before) is not int or before<0 or category not in ('','chat','numbers','question'):raise ValueError('篩選參數錯誤')
         if parent_id is not None and (type(parent_id) is not int or parent_id<=0):raise ValueError('主題編號錯誤')
+        if room not in CHAT_ROOMS:raise ValueError('聊天室錯誤')
         if not self.path.exists():return []
         with self.connect() as db:
             if parent_id is not None and not db.execute('SELECT 1 FROM board_messages WHERE id=? AND parent_id IS NULL AND hidden=0',(parent_id,)).fetchone():raise ValueError('主題已隱藏或不存在')
             rows=db.execute("""SELECT b.id,m.alias,b.title,b.category,b.body,b.created_at,b.member,
                 (SELECT COUNT(*) FROM board_messages r WHERE r.parent_id=b.id AND r.hidden=0)
                 FROM board_messages b JOIN members m ON b.member=m.member
-                WHERE b.hidden=0 AND b.parent_id IS ? AND (?=0 OR b.id<?) AND (?='' OR b.category=?)
-                ORDER BY b.id DESC LIMIT 30""",(parent_id,before,before,category,category)).fetchall()
+                WHERE b.hidden=0 AND b.parent_id IS ? AND b.room=? AND (?=0 OR b.id<?) AND (?='' OR b.category=?)
+                ORDER BY b.id DESC LIMIT 30""",(parent_id,room,before,before,category,category)).fetchall()
         return [dict(id=r[0],alias=r[1],title=r[2],category=r[3],body=r[4],createdAt=r[5],mine=r[6]==member,replies=r[7]) for r in rows]

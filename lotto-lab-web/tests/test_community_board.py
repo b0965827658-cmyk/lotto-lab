@@ -36,3 +36,15 @@ def test_board_validation_and_pagination(tmp_path):
  assert s.board_feed(category='numbers')==[]
  s.report('a','board',first[0]['id'],'測試檢舉');assert s.reports()[0]['kind']=='board'
  assert s.snapshot('2026-09-22')['sampleSize']==0
+
+
+def test_each_lottery_room_is_isolated_and_replies_stay_in_room(tmp_path):
+ s=CommunityStore(tmp_path/'rooms.sqlite');s.register('a','會員甲');s.register('b','會員乙')
+ lobby=s.board_write('a','大廳訊息','request-key-lobby01',room='lobby',now=NOW)
+ game=s.board_write('a','539訊息','request-key-tw53901',room='tw539',now=NOW+timedelta(seconds=30))
+ assert [p['id'] for p in s.board_feed(room='lobby')]==[lobby['id']]
+ assert [p['id'] for p in s.board_feed(room='tw539')]==[game['id']]
+ reply=s.board_write('b','539回覆','request-key-reply01',room='lobby',parent_id=game['id'],now=NOW)
+ assert [p['id'] for p in s.board_feed(room='tw539',parent_id=game['id'])]==[reply['id']]
+ assert s.board_feed(room='lobby',parent_id=game['id'])==[]
+ with pytest.raises(ValueError):s.board_feed(room='unknown')
